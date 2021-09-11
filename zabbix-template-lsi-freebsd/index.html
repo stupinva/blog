@@ -1,0 +1,91 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="rs2wc040,zabbix,rs2bl040,freebsd,mfiutil" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-05-14 -->
+		<title>Контроль аппаратного RAID-контроллера LSI MegaRAID SAS во FreeBSD через Zabbix</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Контроль аппаратного RAID-контроллера LSI MegaRAID SAS во FreeBSD через Zabbix</h1>
+
+		<p>В этой статье речь пойдёт о RAID-контроллерах FreeBSD, которые управляются драйвером <a href="https://www.freebsd.org/cgi/man.cgi?query=mfi&amp;sektion=4">mfi(4)</a>. На указанной странице руководства написано, что это драйвер контроллера LSI MegaRAID SAS. На самом же деле я некоторое время использовал описанную ниже схему для RAID-контроллера Intel RS2WC040. Об этом контроллере я ранее уже писал в трёх других статьях:</p>
+
+		<ul>
+			<li><a href="../rs2wc040-freebsd82/">Intel RS2WC040 во FreeBSD 8.2</a></li>
+
+			<li><a href="../lsi-freebsd/">Сборка RAID-массива на контроллере LSI MegaSAS во FreeBSD</a></li>
+
+			<li><a href="../lsi-raid-trouble/">Решение проблемы с остановкой загрузки из-за RAID-контроллера Intel RS2WC040</a></li>
+		</ul>
+
+		<p>Для проверки состояния RAID-контроллера нам понадобятся настроенный Zabbix-агент и пакет sudo.</p>
+
+		<p>При помощи команды visudo разрешим пользователям из группы zabbix выполнять от имени пользователя root команды для проверки состояния RAID-массивов и батареи RAID-контроллера:</p>
+
+		<pre class="code">%zabbix     ALL=(ALL) NOPASSWD:/usr/sbin/mfiutil show volumes, \
+                               /usr/sbin/mfiutil show adapter, \
+                               /usr/sbin/mfiutil show battery</pre>
+
+		<p>Впишем в файл конфигурации Zabbix-агента /usr/local/etc/zabbix24/zabbix_agentd.conf соответствующие строки:</p>
+
+		<pre class="code">UserParameter=raid.mfiutil,sudo /usr/sbin/mfiutil show volumes | fgrep RAID | fgrep -vc OPTIMAL
+UserParameter=raid.mfiutil.battery.present,sudo /usr/sbin/mfiutil show adapter | fgrep 'Battery Backup' | grep -vc present
+UserParameter=raid.mfiutil.battery.status,sudo /usr/sbin/mfiutil show battery | fgrep Status | fgrep -vc normal</pre>
+
+		<p>Первая команда возвращает количество неисправных RAID-массивов, вторая - количество контроллеров без установленной батареи, третья - количество батарей, не находящихся в статусе normal. То есть, если любое из значений отличается от нуля, то имеются проблемы.</p>
+
+		<p>После внесения изменений в конфигурацию Zabbix-агента, не забудьте его перезапустить:</p>
+
+		<pre class="console"># /etc/init.d/zabbix-agent restart</pre>
+
+		<p>Я подготовил два шаблона для контроля состояния RAID-контроллера:</p>
+
+		<ul>
+			<li><a href="Template_App_RAID_mfiutil.xml">Template_App_RAID_mfiutil.xml</a> - шаблон с элементами данных типа "Zabbix-агент",</li>
+
+			<li><a href="Template_App_RAID_mfiutil_Active.xml">Template_App_RAID_mfiutil_Active.xml</a> - шаблон с элементами данных типа "Zabbix-агент (активный)".</li>
+		</ul>
+
+		<p>В шаблоне есть три элемента данных. Один контролирует целостность RAID-массивов, второй - наличие батарей в контроллерах, третий - состояние каждой из батарей:</p>
+
+		<img src="mfiutil_items.png" />
+
+		<p>Каждому из упомянутых элементов данных соответствует один триггер:</p>
+
+		<img src="mfiutil_triggers.png" />
+
+		<p>Почему я оговорился о том, что использовал описанную схему только "некоторое время"? Потому что через некоторое время команда mfiutil переставала работать, выводя в ответ такие вот ошибки:</p>
+
+		<pre class="console"># mfiutil show volumes
+mfiutil: Failed to get volume list: No such file or directory
+# mfiutil show battery
+mfiutil: Failed to get capacity info: No such file or directory</pre>
+
+		<p>Это при том, что драйвер загружен в ядро и файлы устройства на месте:</p>
+
+		<pre class="console"># kldstat -v | grep mfi
+  153 mfi/mfisyspd
+  152 mfi/mfid
+  151 pci/mfi
+# ls /dev/mfi*
+/dev/mfi0 /dev/mfid0 /dev/mfid0s1 /dev/mfid0s1a /dev/mfid0s1b</pre>
+
+		<p>При каждом запуске команды mfiutil в журнале /var/log/messages появляются ошибки такого вида:</p>
+
+		<pre class="code">kernel: mfi0: IOCTL 0xc0404366 not handled</pre>
+
+		<p>Возможно дело в том, что я использую не официальный драйвер, а с официальными драйверами, которые были добавлены в систему в последующих релизах, такой проблемы нет.</p>
+
+		<p>Есть сервер, где используется RAID-контроллер немного другой модели - Intel RS2BL040. Эта модель RAID-контроллера поддерживается официальным драйвером и на этом сервере многократные вызовы команды mfiutil не приводят к подобным ошибкам. Но в чём точно дело - в драйвере или в модели контроллера, я с уверенностью сказать не могу. Полагаю, что дело всё же в драйвере. В таком случае, скорее всего, описанная выше схема контроля не будет приводить к проблемам на системах, использующих официальный драйвер mfi.</p>
+
+		<p>После того, как я столкнулся с этой проблемой, вместо команды mfiutil я стал использовать команду megacli, собранную из порта sysutils/megacli. Утилита megacli работает безотказно. Правда, описывать контроль RAID-массива с её помощью я не стану - результат получился слишком неуклюжим.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Контроль аппаратного RAID-контроллера LSI MegaRAID SAS во FreeBSD через Zabbix">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

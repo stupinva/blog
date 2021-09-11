@@ -1,0 +1,291 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="python,pyodbc,freetds,odbc,pymssql,debian,perl,dbd::sybase" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-11-03 -->
+		<title>Подключение к MS SQL Server из Debian Wheezy</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Подключение к MS SQL Server из Debian Wheezy</h1>
+
+		<p>На работе однажды возникла задача написать программу на Python или Perl, которая должна работать с данными в базе MS SQL Server. Для начала, поскольку я не любитель GUI-клиентов к базам данных SQL, я решил найти подходящий консольный клиент.</p>
+
+		<h2>1. Консольный клиент sqsh</h2>
+
+		<p>Для подключения к базе данных попробовал воспользоваться консольным клиентом sqsh из одноимённого пакета. Позволяет подключаться к базам данных Sybase и MS SQL Server. Использует настройки драйвера FreeTDS, однако не использует саму библиотеку FreeTDS.</p>
+
+		<p>Установка клиента:</p>
+
+		<pre class="console"># apt-get install sqsh</pre>
+
+		<p>Вместе с клиентом установятся библиотеки FreeTDS.</p>
+
+		<p>Настройка FreeTDS проста. В файл /etc/freetds/freetds.conf нужно добавить секцию для подключения к серверу MS SQL, задав адрес сервера, порт подключения, версию протокола TDS и кодировку клиента:</p>
+
+		<pre class="code">[server.domain.tld]
+        host = server.domain.tld
+        port = 1433
+        tds version = 7.0
+        client charset = UTF-8</pre>
+
+		<p>Ключи клиента sqsh:</p>
+
+		<ul type="none">
+			<li>-S - имя или адрес сервера MS SQL,</li>
+
+			<li>-D - имя базы данных на сервере,</li>
+
+			<li>-U - имя пользователя для подключения к базе,</li>
+
+			<li>-P - пароль пользователя.</li>
+		</ul>
+
+		<p>Пример подключения:</p>
+
+		<pre class="console">$ sqsh -S server.domain.tld -D database -U user -P password</pre>
+
+		<p>Для выполнения запроса нужно сначала ввести его (можно в нескольких отдельных строках, нажимая Enter), а затем в новой  строке указать команду go.</p>
+
+		<p>Клиент не понравился тем, что при выводе таблицы на экран не учитывает ширину данных, содержащихся в столбцах результата запроса, а использует для форматирования таблицы максимальную ширину столбца.</p>
+
+		<p>Ещё один недостаток: если очередной столбец не умещается в той же строке, где уместились предыдущие, этот столбец попадает в следующую строку. В результате одна строка с результатами запроса разбивается на множество строк, в каждой из которых находится по одному-трём столбцам.</p>
+
+		<h2>2. Консольный клиент sqlline на Java</h2>
+
+		<p>Попробовал консольный клиент sqlline, написанный на Java. Для подключения к базам данных использует драйверы семейства JDBC, поэтому позволяет подключаться к любой базе данных, для которой имеется JDBC-драйвер. Для подключения к серверам Sybase и MS SQL Server используется драйвер jTDS.</p>
+
+		<p>Клиент и драйвер находятся в пакетах sqlline и libjtds-java. Установим их:</p>
+
+		<pre class="console"># apt-get install sqlline libjtds-java</pre>
+
+		<p>Подключение к серверу базы данных не столь очевидно и осуществляется такой командой:</p>
+
+		<pre class="console">$ sqlline -u jdbc:jtds:sqlserver://server.domain.tld/database -n user -p password</pre>
+
+		<p>Ключи клиента sqlline:</p>
+
+		<ul type="none">
+			<li>-u - URL базы данных, где server - IP-адрес или доменное имя сервера, а database - имя базы данных,</li>
+
+			<li>-n - имя пользователя для доступа к базе данных,</li>
+
+			<li>-p - пароль пользователя.</li>
+		</ul>
+
+		<p>Как и в случае с sqsh, для выполнения запроса к базе данных, нужно сначала ввести сам запрос, а потом команду go.</p>
+
+		<p>Можно вводить любую команду, понимаемую сервером базы данных, либо одну из встроенных в клиент команд:</p>
+
+		<ul type="none">
+			<li>!quit - выйти из клиента,</li>
+
+			<li>!tables - показать список таблиц,</li>
+
+			<li>!table &lt;таблица&gt; - показать структуру указанной таблицы,</li>
+
+			<li>!columns &lt;таблица&gt; - показать колонки указанной таблицы.</li>
+		</ul>
+
+		<p>Этот клиент оказался более удобным - форматирование таблиц осуществляется по ширине содержимого колонок. Кроме того, он включает в себя команды для просмотра структуры базы данных, которые позволяют обойтись без написания запросов к таблицам TABLES и COLUMNS в базе данных INFORMATION_SCHEMA. Из недостатков можно отметить, что команды для просмотра структуры таблиц не позволяют указать имя таблицы с пробелами в названии.</p>
+
+		<h2>3. Python и модуль pymssql</h2>
+
+		<p>Для доступа к MS SQL из Python попробовал воспользоваться модулем pymssql, который в Debian находится в пакете python-pymssql. Он тоже использует лишь файл конфигурации драйвера FreeTDS, однако подключается к серверу базы данных без использования самой библиотеки FreeTDS.</p>
+
+		<p>Установка драйвера:</p>
+
+		<pre class="console"># apt-get install python-pymssql</pre>
+
+		<p>Тестовая программа:</p>
+
+		<pre class="code">#!/usr/bin/python
+# -*- coding: UTF-8 -*-
+
+import pymssql
+
+db = pymssql.connect(host = 'server.domain.tld',
+                     database = 'database',
+                     user = 'user',
+                     password = 'password',
+                     charset = 'UTF-8')
+
+query = db.cursor()
+query.execute(u'''SELECT field1
+                  FROM table1
+                  WHERE field2 = 1
+               ''')
+s = '%s\n%d\n' % (pymssql.paramstyle, len(query.fetchall()))
+for row in query.fetchall():
+    s += u'%s\n' % row[0]
+query.close()
+
+db.close()
+
+print s</pre>
+
+		<p>Тестовая программа умеет подключаться и выполнять запрос, но при выполнении любого запроса возвращается пустой результат. При этом, если выполнить такой же запрос в консольном клиенте, результат возвращается.</p>
+
+		<p>Нашёл заявку в багтрекере Debian: <a href="http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=709210">Debian Bug report logs - #709210: python-pymssql: Valid select queries return no results</a>.</p>
+
+		<p>Заявка не закрыта уже два месяца. Разработчики самого модуля pymssql не хотят исправлять ошибку, т.к. уже вышла новая версия этой библиотеки. Новую версию собрать при помощи stdeb не пробовал.</p>
+
+		<h2>4. Python и модуль pyodbc</h2>
+
+		<p>Решил попробовать ODBC-драйвер совместно с драйвером FreeTDS и модулем pyodbc. Для этого поставил пакеты из репозитория Debian: unixodbc, tdsodbc, odbcinst1debian2, python-pyodbc.</p>
+
+		<p>Установим необходимое:</p>
+
+		<pre class="console"># apt-get install unixodbc tdsodbc odbcinst1debian2 python-pyodbc</pre>
+
+		<p>В отличие от модуля pymssql, для модуля pyodbc понадобится настроить не только FreeTDS, но и ODBC.</p>
+
+		<p>Настроил ODBC-драйвер TDS в соответствии с мануалом:</p>
+
+		<p><a href="http://www.savelono.com/linux/how-to-configure-linux-odbc-connections-for-ms-sql.html">How to Configure Linux ODBC Connections for MS SQL</a> или <a href="http://www.tryolabs.com/Blog/2012/06/25/connecting-sql-server-database-python-under-ubuntu/">Connecting to a Microsoft SQL Server database from Python under Ubuntu</a>.</p>
+
+		<p>Теперь нужно настроить ODBC-драйвер FreeTDS. Для этого в файл /etc/odbcinst.ini нужно вписать:</p>
+
+		<pre class="code">[FreeTDS]
+Description     = TDS driver (Sybase/MS SQL)
+Driver          = /usr/lib/x86_64-linux-gnu/odbc/libtdsodbc.so
+Setup           = /usr/lib/x86_64-linux-gnu/odbc/libtdsS.so
+CPTimeout       = 
+CPReuse         =</pre>
+
+		<p>Пути к динамическим библиотекам драйверов можно узнать, заглянув в список файлов в пакетах tdsodbc и odbcinst1debian2 соответственно:</p>
+
+		<pre class="console">$ dpkg -L tdsodbc
+$ dpkg -L odbcinst1debian2</pre>
+
+		<p>Сами эти пакеты можно найти, соответственно, по именам динамических библиотек (прямо как сепульки), следующими командами:</p>
+
+		<pre class="console">$ apt-file search libtdsodbc.so
+$ apt-file search libtdsS.so</pre>
+
+		<p>Далее нужно настроить DSN для доступа к интересующей нас базе данных. Добавим в файл /etc/odbc.ini описание DSN:</p>
+
+		<pre class="code">[server]
+Driver = FreeTDS
+Description = My cool MS SQL server
+Trace = No
+Server = server.domain.tld
+Port = 1433
+Database = database</pre>
+
+		<p>В качестве имени секции используется произвольный текст, который и будет именем DSN'а.</p>
+
+		<p>В параметре Driver нужно указывать то значение, которое совпадает с названием секции в файле /etc/odbcinst.ini</p>
+
+		<p>В параметре Server нужно указывать то значение, которое совпадает с названием секции в файле /etc/freetds/freetds.conf</p>
+
+		<p>Если всё настроено правильно, тогда команда isql при указании этого DSN, имени пользователя и его пароля должна выводить следующий текст:</p>
+
+		<pre class="console">$ isql server user password
++---------------------------------------+
+| Connected!                            |
+|                                       |
+| sql-statement                         |
+| help [tablename]                      |
+| quit                                  |
+|                                       |
++---------------------------------------+
+SQL&gt; quit</pre>
+
+		<p>Теперь время протестировать модуль pyodbc. Для этого я воспользовался несколько изменённой предыдущей тестовой программой:</p>
+
+		<pre class="code">#!/usr/bin/python
+# -*- coding: UTF-8 -*-
+
+import pyodbc
+
+db = pyodbc.connect('DSN=server;UID=user;PWD=password')
+
+query = db.cursor()
+query.execute(u'''SELECT field1
+                  FROM table1
+                  WHERE field2 = 1
+               ''')
+s = '%s\n%d\n' % (pyodbc.paramstyle, len(query.fetchall()))
+for row in query.fetchall():
+    s += u'%s\n' % row[0]
+query.close()
+
+db.close()
+
+print s</pre>
+
+		<p>При запуске она выдаёт следующую ошибку:</p>
+
+		<pre class="console">$ ./test2.py 
+Traceback (most recent call last):
+  File "./test2.py", line 13, in &lt;module&gt;
+    ''')
+pyodbc.ProgrammingError: ('42000', "[42000] [FreeTDS][SQL Server]Could not find stored procedure 'S'. (2812) (SQLExecDirectW)")</pre>
+
+		<p>Как видно, она ругается на отсутствие какой-то хранимой процедуры с именем S.</p>
+
+		<p>Ссылки <a href="http://code.google.com/p/pyodbc/issues/detail?id=110">pyodbc Issue 110: Could not find stored procedure</a> и <a href="http://softwaremaniacs.org/forum/python/38017/">UBUNTU+PYMSSQL+CYRILLIC</a> указывают на наличие проблем с кодировкой. Но понять, в чём эта проблема заключается и как её устранить, мне не удалось.</p>
+
+		<h2>5. Perl и модуль DBD::Sybase</h2>
+
+		<p>Для сравнения попробовал написать программу на Perl с использованием модуля DBD::Sybase из пакета libdbd-sybase-perl.</p>
+
+		<p>Установка модуля:</p>
+
+		<pre class="console"># apt-get install libdbd-sybase-perl</pre>
+
+		<p>Тестовая программа:</p>
+
+		<pre class="code">#!/usr/bin/perl
+
+use warnings;
+use strict;
+
+use utf8;
+use DBI qw(:sql_types);
+
+my $dbh = DBI-&gt;connect("DBI:Sybase:server=server.domain.tld;database=database;charset=utf8", "user", "password")
+  or die $!;
+$dbh-&gt;{syb_enable_utf8} = 1;
+
+my $sth = $dbh-&gt;prepare("SELECT field1
+                         FROM table1
+                         WHERE field2 = ?");
+$sth-&gt;execute('1');
+while (my ($field1) = $sth-&gt;fetchrow_array())
+{
+  print "$field1\n";
+}
+$sth-&gt;finish();
+
+$dbh-&gt;disconnect();</pre>
+
+		<p>Программа выдала ожидаемый результат. Понадобилось только задать кодировку подключения, задать у него флаг utf8 и передать в запрос параметр подходящего типа: строку вместо числа.</p>
+
+		<p>На самом деле, правда, флаг syb_enable_utf8 не работает. Исправлять не пробовал, потому что если данные не нужно обрабатывать на уровне символов, то это не имеет значения, поскольку на вывод в любом случае поступает строка utf8. Если же необходимо обрабатывать эти строки внутри Perl-программы, приходится вручную выставлять у строк флаг utf8 или, если не городить костыли, то исправить сам модуль.</p>
+
+		<p>Буду признателен, если кто-то сообщит о способах решения упомянутых мной проблем: соберёт работающий модуль pymssql в виде deb-пакета, решит проблему с кодировками в pyodbc или исправит работу флага mysql_enable_utf8.</p>
+
+		<p>Использованные материалы:</p>
+
+		<ol>
+			<li><a href="http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=709210">Debian Bug report logs - #709210: python-pymssql: Valid select queries return no results</a></li>
+
+			<li><a href="http://www.savelono.com/linux/how-to-configure-linux-odbc-connections-for-ms-sql.html">How to Configure Linux ODBC Connections for MS SQL</a></li>
+
+			<li><a href="http://www.tryolabs.com/Blog/2012/06/25/connecting-sql-server-database-python-under-ubuntu/">Connecting to a Microsoft SQL Server database from Python under Ubuntu</a></li>
+
+			<li><a href="http://code.google.com/p/pyodbc/issues/detail?id=110">pyodbc Issue 110: Could not find stored procedure</a></li>
+
+			<li><a href="http://softwaremaniacs.org/forum/python/38017/">UBUNTU+PYMSSQL+CYRILLIC</a></li>
+		</ol>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Подключение к MS SQL Server из Debian Wheezy">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

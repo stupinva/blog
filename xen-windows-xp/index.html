@@ -1,0 +1,161 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="xen,jessie,xl,linux,debian,windows" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2016-05-29 -->
+		<title>Установка Windows XP в Xen</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Установка Windows XP в Xen</h1>
+
+		<p>Возникла задача поставить Windows для запуска программы, которая не работает в Wine. Решил попробовать установить Windows под управлением Xen. Ранее я уже писал небольшую заметку о настройке Xen: <a href="../xen/">Памятка по настройке Xen</a>. В той статье для управления Xen использовалась утилита xm, поскольку писалась она применительно к Debian Wheezy. В этот раз будет использоваться утилита xl, поскольку дело происходит в Debian Jessie. Однако, несмотря на это различие, всё написанное в прошлой статье будет работать и сейчас. Надо всего лишь вместо xm использовать xl.</p>
+
+		<h2>1. Установка операционной системы на виртуальную машину</h2>
+
+		<p>Создадим LVM-раздел, куда будем устанавливать Windows:</p>
+
+		<pre class="console"># lvcreate -L10G -n winxp-disk</pre>
+
+		<p>Создадим файл конфигурации /etc/xen/winxp.cfg, который первоначально будет использоваться для установки системы:</p>
+
+		<pre class="code">builder = 'hvm'
+device_model_version = 'qemu-xen'
+memory = 1024
+vcpus = 1
+pae = 0
+acpi = 0
+apic = 0
+name = 'winxp'
+disk = ['phy:/dev/vg0/winxp-disk,ioemu:hda,w',
+        'phy:/home/stupin/WindowsXP_SP2.iso,ioemu:hdb:cdrom,r']
+boot = 'd'
+
+on_poweroff = 'destroy'
+on_reboot = 'destroy'
+on_crash = 'destroy'
+on_xend_start = 'ignore'
+on_xend_stop = 'ignore'
+
+fullscreen = 1
+sdl = 0
+vnc = 1
+vncconsole = 1
+vncpasswd = ''
+keymap = 'ru'
+stdvga = 0
+serial = 'pty'
+
+usb = 1
+usbdevice = 'tablet'</pre>
+
+		<p>Особо стоит отметить следующие моменты в этом файле:</p>
+
+		<ul>
+			<li>Опции acpi (интерфейс управления электропитанием) и apic (улучшенный контроллер прерываний) на время установки отключены,</li>
+
+			<li>В опции disk первым прописан LVM-раздел, в который будем устанавливать систему, а вторым прописан ISO-образ установочного диска с Windows,</li>
+
+			<li>Опция boot выставлена в значение d - загрузка "с диска D:", то есть - с компакт-диска, в роли которого выступает ISO-образ установочного диска,</li>
+
+			<li>Опция keymap позволяет в дальнейшем не следить за раскладкой на системе, где запущен VNC-клиент. Без этой опции в сеансе VNC русские буквы удастся ввести только в случае, если на системе с VNC-клиентом включена английская раскладка,</li>
+
+			<li>Включена поддержка usb, а в списке USB-устройств в опции usbdevice настроен "планшет". Эта настройка позволяет в дальнейшем без проблем манипулировать курсором мыши. Без неё при подключении через VNC будет два курсора мыши, слабо связанных между собой, так что управляться ими будет непросто.</li>
+		</ul>
+
+		<p>Теперь запустим виртуальную машину:</p>
+
+		<pre class="console"># xl create /etc/xen/winxp.cfg</pre>
+
+		<p>На всякий случай, если вдруг виртуальная машина зависнет, приведу команду для её принудительного выключения:</p>
+
+		<pre class="console"># xl destroy winxp</pre>
+
+		<p>Напоминаю, что список запущенных виртуальных машин можно посмотреть такой командой:</p>
+
+		<pre class="console"># xl list</pre>
+
+		<p>После запуска можно подключиться к виртуальной машине при помощи VNC-клиента на TCP-порт 5900 по IP-адресу 5900. Я воспользовался Remmina, о которой писал в одноимённой заметке - <a href="../remmina/">Remmina</a>:</p>
+
+		<img src="remmina.png" />
+
+		<p>Если Вы хотите подключиться по сети не из домена dom0 или у Вас имеется несколько подобных доменов domU, к которым Вы хотите подключаться по протоколу VNC, можно настроить прослушиваемый адрес и порт при помощи опции vnclisten. Например, значение 192.168.0.1:2 будет соответствовать ожиданию подключений на TCP-порт 5902 и адрес 192.168.0.1.</p>
+
+		<p>Настроить переключение раскладки по нажатию Alt+Shift мне не удалось - это сочетание в сеанс VNC не попадало, поэтому пришлось настроить непривычное для меня сочетание Ctrl+Shift.</p>
+
+		<h2>2. Изменение настроек после установки</h2>
+
+		<p>После установки Windows нужно выключить виртуальную машину, воспользовавшись пунктом меню "Выключить компьютер", доступным по нажатию кнопки "Пуск":</p>
+
+		<img src="disable_windows.png" />
+
+		<p>Теперь нужно немного изменить конфигурацию в файле /etc/xen/winxp.cfg. Включим опции acpi и apic, уберём из списка дисков ISO-образ установочного компакт-диска и поменяем значение опции boot на c - загрузка "с диска C:":</p>
+
+		<pre class="code">acpi = 1
+apic = 1
+disk = ['phy:/dev/vg0/winxp-disk,ioemu:hda,w']
+boot = 'c'</pre>
+
+		<h2>3. Проброс USB-устройств вовнутрь виртуальной машины</h2>
+
+		<p>Ещё одна вещь, которая мне понадобилась - это пробросить флешку вовнутрь виртуальной машины. Для начала я вставил её в компьютер и нашёл её в списке имеющихся в системе USB-устройств при помощи команды:</p>
+
+		<pre class="console">$ lsusb -v | less</pre>
+
+		<p>В несколько сокращённом виде, нужная мне флешка выглядела следующим образом:</p>
+
+		<pre class="console">Bus 001 Device 005: ID 0930:6534 Toshiba Corp. TravelDrive
+Device Descriptor:
+  ...
+  idVendor           0x0930 Toshiba Corp.
+  idProduct          0x6534 TravelDrive
+  bcdDevice            1.00
+  iManufacturer           1 <b>Kingston</b>
+  iProduct                2 <b>DataTraveler 2.0</b>
+  iSerial                 3 0201101728450
+  bNumConfigurations      1
+  Configuration Descriptor:
+    ...
+    Interface Descriptor:
+      bLength                 9
+      bDescriptorType         4
+      bInterfaceNumber        0
+      bAlternateSetting       0
+      bNumEndpoints           3
+      bInterfaceClass         8 <b>Mass Storage</b></pre>
+
+		<p>Чтобы флешка автоматически пробрасывалась в виртуальную машину, нужно отредактировать список USB-устройств в файле конфигурации /etc/xen/winxp.cfg:</p>
+
+		<pre class="code">usbdevice = ['tablet', 'host:0930:6534']</pre>
+
+		<p>Если в системе имеется несколько устройств с одинаковыми идентификаторами производителя и модели, то можно указать номер шины и устройства. В нашем случае это будет выглядеть вот так:</p>
+
+		<pre class="code">usbdevice = ['tablet', 'host:1.5']</pre>
+
+		<p>Однако стоит учесть, что при отключении и повторном включении устройство может получить другой номер. Использовать идентификаторы производителя и модели.</p>
+
+		<p>В случае с утилитой xm можно было бы вставлять и удалять устройства налету, вот так:</p>
+
+		<pre class="console"># xm usb-add winxp host:0930:6534
+# xm usb-del winxp host:0930:6534</pre>
+
+		<p>Однако, в утилите xl подобная функциональность пока не реализована и для введения настроек в силу понадобится завершить работу виртуальной машины и запустить её снова, с использованием исправленной конфигурации.</p>
+
+		<h2>4. Использованные материалы</h2>
+
+		<ul>
+			<li><a href="http://wiki.xenproject.org/wiki/Xen_Project_Beginners_Guide">Xen Project Beginners Guide</a></li>
+
+			<li><a href="http://wiki.prgmr.com/mediawiki/index.php/Chapter_13:_Xen_and_Windows">Chapter 13: Xen and Windows</a></li>
+
+			<li><a href="http://wiki.xenproject.org/wiki/Xen_USB_Passthrough">Xen USB Passthrough</a></li>
+		</ul>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Установка Windows XP в Xen">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

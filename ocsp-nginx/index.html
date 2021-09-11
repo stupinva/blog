@@ -1,0 +1,151 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="ocsp,nginx,Реми ван Элст,openssl,tls,перевод,ssl" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-02-12 -->
+		<title>Реми ван Элст. Вшивание OCSP в nginx, 2014</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Реми ван Элст. Вшивание OCSP в nginx, 2014</h1>
+
+		<p>Перевод статьи: <a href="https://raymii.org/s/tutorials/OCSP_Stapling_on_nginx.html">OCSP Stapling on nginx</a></p>
+
+		<p>Автор: Реми ван Элст (Remy van Elst)</p>
+
+		<p>При подключении к серверу, клиент должен проверить действительность сертификата сервера по списку отозванных сертификатов - CRL, или по протоколу интерактивного статуса сертификата - OCSP. Проблема CRL заключается в том, что списки могут вырасти до огромных размеров и скачивание может затянуться на вечность.</p>
+
+		<p>OCSP намного легче, поскольку за один раз запрашивается одна запись. Но недостаток состоит в том, что при подключении к серверу нужно выполнить OCSP-запрос к стороннему ответчику, что увеличивает задержку и может оказаться причиной сбоев. Фактически, ответчики OCSP управляются удостоверяющим центром, недоступность которого для браузера приведёт к ошибке, если ответ не будет получен своевременно. Это уменьшает безопасность, позволяя атакующему наводнить запросами ответчик OCSP, чтобы отключить проверку.</p>
+
+		<p>Решение заключается в том, чтобы разрешить серверу отправлять в процессе рукопожатия TLS запись OCSP из кэша, так чтобы не затрагивать ответчика OCSP. Этот механизм избавляет клиента от необходимости связываться с ответчиком OCSP и называется вшиванием OCSP.</p>
+
+		<p>Сервер посылает ответ OCSP из кэша только если клиент его запрашивает, сообщая в CLIENT HELLO о поддержке расширения TLS status_request.</p>
+
+		<p>Большинство серверов сохраняют в кэш OCSP-ответы на 48 часов. Через регулярные интервалы времени сервер будет подключаться к ответчику OCSP удостоверяющего центра, чтобы получить свежую запись OCSP. Расположение ответчика OCSP берётся из подписанного сертификата, из поля Authority Information Access - доступ к информации о подлинности.</p>
+
+		<p><a href="../ocsp-apache/">Это руководство также доступно для Apache.</a></p>
+
+		<h2>1. Что такое "вшивание OCSP"?</h2>
+
+		<p>Вшивание OCSP определено в <a href="http://tools.ietf.org/html/rfc6066">IETF RFC 6066</a>. "Вшивание" - это популярное слово, используемое для объяснения принципа получения OCSP-ответа от веб-сервера. Веб-сервер помещает в кэш ответ от удостоверяющего центра, выпустившего сертификат. В процессе рукопожатия SSL/TLS веб-сервер возвращает клиенту ответ, к которому прикладывает OCSP-ответ из кэша в поле CertificateStatus со статусом сертификата. Для использования вшивания OCSP клиент должен включить расширение status_request в приветствии SSL/TSL.</p>
+
+		<p>Вшивание OCSP имеет несколько дополнительных плюсов:</p>
+
+		<ul>
+			<li>Клиент получает статус сертификата веб-сервера, когда это требуется (в процессе рукопожатия SSL/TLS).</li>
+
+			<li>Не требуется устанавливать дополнительное HTTP-подключение к удостоверяющему центру, выпустившему сертификат.</li>
+
+			<li>Вшивание OCSP увеличивает безопасность, уменьшая количество векторов атаки.</li>
+		</ul>
+
+		<p>Обратитесь за дополнительной информацией об OCSP и вшивании OCSP по одной из следующих ссылок:</p>
+
+		<ul>
+			<li><a href="http://en.wikipedia.org/wiki/OCSP_stapling">OCSP stapling - Вшивание OSCP</a></li>
+
+			<li><a href="http://en.wikipedia.org/wiki/Online_Certificate_Status_Protocol">Online Certificate Status Protocol - Протокол интерактивного статуса сертификата</a></li>
+
+			<li><a href="http://security.stackexchange.com/questions/29686/how-does-ocsp-stapling-work">How does OCSP stapling work? - Как работает вшивание OCSP?</a></li>
+
+			<li><a href="https://blog.mozilla.org/security/2013/07/29/ocsp-stapling-in-firefox/">OCSP Stapling in Firefox - Вшивание OCSP в Firefox</a></li>
+
+			<li><a href="http://www.thawte.com/assets/documents/whitepaper/ocsp-stapling.pdf">Guide to OCSP Stapling - Руководство по вшиванию OCSP</a></li>
+
+			<li><a href="http://news.netcraft.com/archives/2013/04/16/certificate-revocation-and-the-performance-of-ocsp.html">Certificate revocation and the performance of OCSP - Отзыв сертификата и производительность OCSP</a></li>
+
+			<li><a href="https://wiki.mozilla.org/Security/Server_Side_TLS">Security/Server Side TLS - Безопасность TLS со стороны сервера</a></li>
+		</ul>
+
+		<h2>2. Требования</h2>
+
+		<p>Необходим nginx версии не ниже 1.3.7. Эта версия не доступна в текущем релизе Ubuntu LTS (12.04), где <a href="http://packages.ubuntu.com/precise/nginx">есть только 1.1.19</a>, а в CentOS нужен EPEL или официальные репозитории. Однако, <a href="http://wiki.nginx.org/Install">установить последнюю версию nginx</a> довольно легко.</p>
+
+		<p>Также нужно создать исключение в пакетном фильтре, чтобы разрешить веб-серверу совершать исходящие подключения к вышестоящим серверам OCSP. URI OCSP веб-сайта можно увидеть при помощи следующей команды:</p>
+
+		<pre class="console">OLDIFS=$IFS; \
+IFS=':' certificates=$(openssl s_client -connect google.com:443 -showcerts -tlsextdebug -tls1 2&gt;&amp;1 &lt;/dev/null \
+ | sed -n '/-----BEGIN/,/-----END/ {/-----BEGIN/ s/^/:/; p}'); \
+for certificate in ${certificates#:}; do \
+ echo $certificate | openssl x509 -noout -ocsp_uri; \
+done; \
+IFS=$OLDIFS</pre>
+
+		<p>Вот результаты для google.com:</p>
+
+		<pre class="console">http://clients1.google.com/ocsp
+http://gtglobal-ocsp.geotrust.com</pre>
+
+		<h2>3. Конфигурация nginx</h2>
+
+		<p>Добавьте следующую конфигурацию в блок server с настройками https (443):</p>
+
+		<pre class="code">ssl_stapling on;
+ssl_stapling_verify on;
+resolver 8.8.8.8 8.8.4.4 valid=300s;
+resolver_timeout 5s;</pre>
+
+		<p>Чтобы вшивание OCSP заработало, должен быть известен эмитент сертификата сервера. Если файл ssl_certificate не содержит промежуточных сертификатов, сертификат эмитента сертификата сервера должен быть представлен в файле ssl_trusted_certificate.</p>
+
+		<p>Мой сертификат для raymii.org выпущен удостоверяющим центром Positive CA 2. Этот сертификат выпущен корневым удостоверяющим центром Addtrust External CA Root. В файле, указанном в директиве ssl_certificate, должны присутствовать оба сертификата. Если в вашем случае это не так, создайте файл с цепочкой сертификатов и используйте его следующим образом:</p>
+
+		<pre class="code">ssl_trusted_certificate /etc/ssl/certs/domain.chain.stapling.pem;</pre>
+
+		<p>До версии 1.1.7 можно было настроить только одно имя сервера. Указание имени серверов с помощью адресов IPv6 поддерживается, начиная с версий 1.3.1 и 1.2.2. По умолчанию nginx будет искать и адреса IPv4 и IPv6. Если поиск адресов IPv6 не желателен, можно указать параметр ipv6=off. Решение имён в адреса IPv6 поддерживается начиная с версии 1.5.8.</p>
+
+		<p>По умолчанию nginx помещает ответы в кэш, используя значение TTL из ответа. Необязательный параметр valid позволяет заменить его на 5 минут. До версии 1.1.9 настройка времени кэширования была невозможной и nginx всегда помещал ответы в кэш на 5 минут.</p>
+
+		<p>Перезапустите nginx, чтобы загрузить новую конфигурацию:</p>
+
+		<pre class="console">service nginx restart</pre>
+
+		<p>Теперь всё должно заработать. Давайте проверим.</p>
+
+		<h2>4. Тестирование</h2>
+
+		<p>Откройте терминал и воспользуйтесь следующей командой OpenSSL для подключения к вашему веб-сайту:</p>
+
+		<pre class="console">openssl s_client -connect example.org:443 -tls1 -tlsextdebug -status</pre>
+
+		<p>В ответе обратим внимание на следующее:</p>
+
+		<pre class="console">OCSP response:                                                   # Ответ OCSP:
+======================================
+OCSP Response Data:                                              #     Данные ответа OCSP
+    OCSP Response Status: successful (0x0)                       #     Статус ответа OCSP: успешно (0x0)
+    Response Type: Basic OCSP Response                           #     Тип ответа: Базовый ответ OCSP
+    Version: 1 (0x0)                                             #     Версия: 1 (0x0)
+    Responder Id: 99E4405F6B145E3E05D9DDD36354FC62B8F700AC       #     Идентификатор ответчика
+    Produced At: Feb 3 04:25:39 2014 GMT                         #     Сформирован: 3 февраля 2014 года в 04:25:39 по Гринвичу
+    Responses:                                                   #     Ответы:
+    Certificate ID:                                              #     Идентификатор сертификата:
+      Hash Algorithm: sha1                                       #       Алгоритм хэширования: sha1
+      Issuer Name Hash: 0226EE2F5FA2810834DACC3380E680ACE827F604 #       Хэш имени эмитента
+      Issuer Key Hash: 99E4405F6B145E3E05D9DDD36354FC62B8F700AC  #       Хэш ключа эмитента
+      Serial Number: 1003                                        #       Серийный номер
+    Cert Status: good                                            #     Статус сертификата: хороший
+    This Update: Feb 3 04:25:39 2014 GMT                         #     Это обновление: 3 февраля 2014 года в 04:25:39 по Гринвичу
+    Next Update: Feb 7 04:25:39 2014 GMT                         #     Следующее обновление: 7 февраля 2014 года в 04:25:39 по Гринвичу</pre>
+
+		<p>Этот ответ означает, что всё работает. Если получен ответ, подобный следующему, то это значит что вшивание OCSP не работает:</p>
+
+		<pre class="console">OCSP response: no response sent # OCSP-ответ: ответ не получен</pre>
+
+		<p>Вы также можете воспользоваться проверкой <a href="https://ssllabs.com/">SSL Labs</a>, чтобы проверить, что вшивание OCSP работает.</p>
+
+		<h2>5. Источники</h2>
+
+		<ul>
+			<li><a href="http://nginx.org/en/docs/http/ngx_http_core_module.html#resolver">Документация nginx по ответчику</a></li>
+
+			<li><a href="http://nginx.org/en/docs/http/ngx_http_ssl_module.html#ssl_stapling">Документация nginx по ssl_stapling</a></li>
+		</ul>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Реми ван Элст. Вшивание OCSP в nginx, 2014">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

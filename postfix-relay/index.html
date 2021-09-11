@@ -1,0 +1,119 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="wheezy,postfix,linux,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2014-06-08 -->
+		<title>Postfix как локальный SMTP-ретранслятор</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Postfix как локальный SMTP-ретранслятор</h1>
+
+		<p>Postfix можно использовать в качестве локального почтового ретранслятора. При получении почты от локального пользователя будет осуществляться подстановка адреса отправителя в соответствии с таблицей, подстановка адреса получателя в соответствии с таблицей, а дальше Postfix будет пытаться доставить письмо, пользуясь при необходимости таблицей паролей отправителей на удалённых почтовых серверах.</p>
+
+		<p>Возможно это не самая подходящая программа для использования в подобных целях, тем не менее она довольно распространена и обладает достаточной гибкостью для того, чтобы её можно было использовать даже таким нестандартным способом. В сочетании с локальными fetchmail и dovecot можно вообще организовать полнофункциональную локальную почтовую систему, не имеющую постоянного доступа в интернет и всё же работающую ожидаемым образом через внешние серверы в интернете.</p>
+
+		<p>Для начала установим необходимые пакеты:</p>
+
+		<pre class="console"># apt-get install postfix libsasl2-modules bsd-mailx</pre>
+
+		<p>Для отправки почты с подменой отправителя и аутентификацией на сервере провайдера можно настроить Postfix. Настроим в файле /etc/postfix/main.cf следующую конфигурацию:</p>
+
+		<pre class="code"># Имя сервера и его почтового домена
+myhostname = server.domain.tld
+mydomain = domain.tld
+
+# Откуда и для кого принимать почту к доставке
+inet_protocols = ipv4
+inet_interfaces = 127.0.0.1
+mydestination = $myhostname, localhost.$mydomain, localhost
+mynetworks = 127.0.0.0/8
+
+# К адресам локальных отправителей добавлять этот домен
+masquerade_domains = domain.tld
+
+# Карта соответствия локальных получателей адресам на почтовом сервере ISP  
+alias_maps = hash:/etc/aliases
+alias_database = hash:/etc/aliases
+
+# Карта соответствия локальных отправителей ящикам на почтовом сервере ISP  
+sender_canonical_maps = hash:/etc/postfix/sender_maps
+
+# Включаем использование аутентификации на сервере провайдера
+smtp_sasl_auth_enable = yes
+smtp_sasl_password_maps = hash:/etc/postfix/passwords
+
+# Включаем выбор учётных данных на сервере провайдера в зависимости от отправителя
+smtp_sender_dependent_authentication = yes
+sender_dependent_relayhost_maps = hash:/etc/postfix/sender_relays
+
+# Если в таблице отправителей нет соответствия, использовать этот почтовый сервер ISP
+relayhost = [mailserver.domain.tld]:587
+
+# Устанавливаем не более одного исходящего подключения на каждый домен
+default_destination_concurrency_limit = 1
+
+# Разрешаем использовать механизмы аутентификации PLAIN и LOGIN
+smtp_sasl_security_options = noanonymous
+smtp_sasl_tls_security_options = noanonymous
+smtp_sasl_mechanism_filter = plain, login</pre>
+
+		<p>После настройки самого Postfix, его можно перезапустить, чтобы настройки вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/postfix restart</pre>
+
+		<p>Теперь создадим необходимые карты. Укажем в файле /etc/aliases, на какие ящики на сервере провайдера перенаправлять почту для локальных пользователей:</p>
+
+		<pre class="code">postmaster root
+root recipient@domain.tld</pre>
+
+		<p>Почта для пользователя root будет перенаправляться в ящик recipient@domain.tld.</p>
+
+		<p>Укажем в файле /etc/postfix/sender_maps, какой ящик на сервере провайдера использовать для отправки почты от локального отправителя:</p>
+
+		<pre class="code">root sender@domain.tld</pre>
+
+		<p>Когда пользователь root попытается отправить письмо, то на сервер провайдера оно уйдёт от отправителя sender@domain.tld.</p>
+
+		<p>Укажем в файле /etc/postfix/sender_relays, какой сервер следует использовать для отправки писем от определённого отправителя:</p>
+
+		<pre class="code">sender@domain.tld [mailserver.domain.tld]:587</pre>
+
+		<p>Когда пользователь root попытается отправить почту, письмо, в соответствии с настройками в файле /etc/postfix/sender_maps, будет отправлено с адреса sender@domain.tld. Письмо от этого отправителя нужно отправить через порт 587 сервера mailserver.domain.tld.</p>
+
+		<p>Укажем в файле /etc/postfix/passwords учётные данные каждого из ящиков на сервере провайдера:</p>
+
+		<pre class="code">sender@domain.tld sender:password</pre>
+
+		<p>Когда пользователь root попытается отправить почту, письмо, в соответствии с настройками в файле /etc/postfix/sender_maps, будет отправлено с адреса sender@domain.tld. Письмо от этого отправителя, в соответствии с настройками в файле /etc/postfix/sender_relays, нужно отправить через порт 587 сервера mailserver.domain.tld. В соответствии с настройками в этом файле для аутентификации на сервере провайдера нужно будет использовать имя пользователя sender и пароль password.</p>
+
+		<p>Для файла /etc/postfix/passwords стоит задать разрешения, ограничивающие возможность подсмотреть пароли локальными пользователями системы:</p>
+
+		<pre class="console"># chown root:root /etc/postfix/passwords
+# chmod ug=rw,o= /etc/postfix/passwords</pre>
+
+		<p>При каждом обновлении файлов карт нужно не забывать обновлять их двоичные копии одной из следующих команд:</p>
+
+		<pre class="console"># postalias /etc/aliases
+# postmap /etc/postfix/sender_maps
+# postmap /etc/postfix/sender_relays
+# postmap /etc/postfix/passwords</pre>
+
+		<p>Двоичные копиии имеют то же имя, но с расширением .db. Права доступа к оригинальному файлу полностью переносятся и на его двоичную копию.</p>
+
+		<p>Осталось проверить правильность работы системы. Попробуем отправить тестовое письмо от имени пользователя root пользователю root:</p>
+
+		<pre class="console"># mail -s test root
+test
+.</pre>
+
+		<p>На ящик recipient@domain.tld должно прийти письмо от ящика sender@domain.tld.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Postfix как локальный SMTP-ретранслятор">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

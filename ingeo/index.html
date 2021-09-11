@@ -1,0 +1,61 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="4.4,wine,ингео,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-10-27 -->
+		<title>Настройка клиента ИнГео в Debian Wheezy</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка клиента ИнГео в Debian Wheezy</h1>
+
+		<p>Клиента ИнГео можно запустить под Wine, однако следует иметь ввиду, что нормально в Wine работают только версии ИнГео начиная с 4.4. Поэтому стоит сразу скачать подходящую версию на официальном сайте, на странице по ссылке: <a href="http://www.integro.ru/dl/ingeo/ingeo44/">http://www.integro.ru/dl/ingeo/ingeo44/</a></p>
+
+		<p>После установки wine нужно запустить его настройку по команде winecfg и перейти на вкладку "Библиотеки":</p>
+
+		<img src="winecfg_mdac_dlls.png" />
+
+		<p>Необходимо добавить замещения для библиотек, изображённых на скриншоте, указав, что должны использоваться сторонние библиотеки:</p>
+
+		<ul>
+			<li>activeds</li>
+
+			<li>dbmsrpcn</li>
+
+			<li>odbc32</li>
+
+			<li>odbccp32</li>
+
+			<li>odbcint</li>
+
+			<li>sqlsrv32</li>
+
+			<li>sqlsrv32.rll</li>
+
+			<li>sqlunirl</li>
+		</ul>
+
+		<p>Теперь можно установить MDAC (берётся на сайте MS, прямая ссылка: <a href="http://download.microsoft.com/download/2/e/d/2ed44410-0644-4021-8001-a2496f2889eb/MDAC_TYP.EXE">http://download.microsoft.com/download/2/e/d/2ed44410-0644-4021-8001-a2496f2889eb/MDAC_TYP.EXE</a>)</p>
+
+		<p>Если MDAC не захочет устанавливаться, то в wine нужно выставить версию "Windows 95", установить MDAC и снова вернуть версию "Windows XP":</p>
+
+		<img src="winecfg_winver.png" />
+
+		<p>Осталось выполнить настройку самого клиента ИнГео (мой сервер ИнГео использует СУБД MS SQL Server, поэтому дополнительной настройки ODBC-драйвера не требуется):</p>
+
+		<img src="ingeo_settings1.png" />
+
+		<img src="ingeo_settings2.png" />
+
+		<p>В итоге получаем работающую систему:</p>
+
+		<img src="ingeo.png" />
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка клиента ИнГео в Debian Wheezy">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

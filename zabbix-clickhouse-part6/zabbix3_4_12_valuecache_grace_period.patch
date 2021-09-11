@@ -1,0 +1,80 @@
+Index: zabbix-3.4.12-1+buster/src/zabbix_server/server.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/zabbix_server/server.c
++++ zabbix-3.4.12-1+buster/src/zabbix_server/server.c
+@@ -176,6 +176,8 @@ int	CONFIG_HOUSEKEEPING_FREQUENCY	= 1;
+ int	CONFIG_MAX_HOUSEKEEPER_DELETE	= 5000;		/* applies for every separate field value */
+ int	CONFIG_HISTSYNCER_FORKS		= 4;
+ int	CONFIG_HISTSYNCER_FREQUENCY	= 1;
++int	CONFIG_HISTSYNCER_GRACE_PERIOD	= 0;
++
+ int	CONFIG_CONFSYNCER_FORKS		= 1;
+ int	CONFIG_CONFSYNCER_FREQUENCY	= 60;
+ 
+@@ -556,6 +558,8 @@ static void	zbx_load_config(ZBX_TASK_EX
+ 			MANDATORY,	MIN,			MAX */
+ 		{"StartDBSyncers",		&CONFIG_HISTSYNCER_FORKS,		TYPE_INT,
+ 			PARM_OPT,	1,			100},
++		{"DBSyncersGracePeriod",	&CONFIG_HISTSYNCER_GRACE_PERIOD,	TYPE_INT,
++			PARM_OPT,	0,			SEC_PER_DAY},
+ 		{"StartDiscoverers",		&CONFIG_DISCOVERER_FORKS,		TYPE_INT,
+ 			PARM_OPT,	0,			250},
+ 		{"StartHTTPPollers",		&CONFIG_HTTPPOLLER_FORKS,		TYPE_INT,
+Index: zabbix-3.4.12-1+buster/src/zabbix_proxy/proxy.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/zabbix_proxy/proxy.c
++++ zabbix-3.4.12-1+buster/src/zabbix_proxy/proxy.c
+@@ -173,6 +173,7 @@ int	CONFIG_PROXYDATA_FREQUENCY	= 1;
+ 
+ int	CONFIG_HISTSYNCER_FORKS		= 4;
+ int	CONFIG_HISTSYNCER_FREQUENCY	= 1;
++int	CONFIG_HISTSYNCER_GRACE_PERIOD	= 0;
+ int	CONFIG_CONFSYNCER_FORKS		= 1;
+ 
+ int	CONFIG_VMWARE_FORKS		= 0;
+Index: zabbix-3.4.12-1+buster/src/libs/zbxhistory/history.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxhistory/history.c
++++ zabbix-3.4.12-1+buster/src/libs/zbxhistory/history.c
+@@ -34,6 +34,9 @@ extern char	*CONFIG_HISTORY_STR_STORAGE;
+ extern char	*CONFIG_HISTORY_TEXT_STORAGE;
+ extern char	*CONFIG_HISTORY_LOG_STORAGE;
+ 
++extern int	CONFIG_SERVER_STARTUP_TIME;
++extern int	CONFIG_HISTSYNCER_GRACE_PERIOD;
++
+ zbx_history_iface_t	history_ifaces[ITEM_VALUE_TYPE_MAX];
+ 
+ /************************************************************************************
+@@ -162,6 +165,12 @@ int	zbx_history_get_values(zbx_uint64_t
+ 	int			ret, pos;
+ 	zbx_history_iface_t	*writer = &history_ifaces[value_type];
+ 
++	if (time(NULL) - CONFIG_SERVER_STARTUP_TIME < CONFIG_HISTSYNCER_GRACE_PERIOD)
++	{
++		zabbix_log(LOG_LEVEL_DEBUG, "waiting for cache load, exiting");
++		return FAIL;
++	}
++
+ 	zabbix_log(LOG_LEVEL_DEBUG, "In %s() itemid:" ZBX_FS_UI64 " value_type:%d start:%d count:%d end:%d",
+ 			__function_name, itemid, value_type, start, count, end);
+ 
+Index: zabbix-3.4.12-1+buster/conf/zabbix_server.conf
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/conf/zabbix_server.conf
++++ zabbix-3.4.12-1+buster/conf/zabbix_server.conf
+@@ -413,6 +413,14 @@ DBUser=zabbix
+ # Default:
+ # StartDBSyncers=4
+ 
++### Option: DBSyncersGracePeriod
++#       Time after server startup, during which reading from history storage will be prohibited.
++#
++# Mandatory: no
++# Range: 0-86400
++# Default:
++# DBSyncersGracePeriod=0
++
+ ### Option: HistoryCacheSize
+ #	Size of history cache, in bytes.
+ #	Shared memory size for storing history data.

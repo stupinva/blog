@@ -1,0 +1,309 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="debian-installer,preseed,перевод,debian,linux" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-10-01 -->
+		<title>Джеймс Тран. Автоматизация установки Ubuntu/Debian с LVM, 2012</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Джеймс Тран. Автоматизация установки Ubuntu/Debian с LVM, 2012</h1>
+
+		<p>Перевод статьи: <a href="https://cookingclouds.com/2012/07/17/ubuntudebian-preseeding-with-lvm/">Ubuntu/Debian preseedint with LVM</a></p>
+
+		<p>Автор: Джеймс Тран (James Tran)</p>
+
+		<p>Когда увидите заставку Ubuntu или Debian, нажмите клавишу табуляции, а затем добавьте:</p>
+
+		<pre class="console">auto url=http://mywebserver/mypreseed.cfg</pre>
+
+		<p>Вы можете воспользоваться этим примером для быстрого развёртывания сервера для размещения файла автоматизации установки: <a href="https://cookingclouds.com/2012/06/24/python-simple-http-server/">Python Simple HTTP Server</a></p>
+
+		<p>У вас по-прежнему будет запрашиваться информация для локализации, поскольку она запрашивается ДО загрузки файла автоматизации установки для Debian/Ubuntu (согласен, это глупо). Эти настройки не подтягиваются.</p>
+
+		<pre class="code"># Настройки клавиатуры и локализации
+####################################################################
+
+d-i debian-installer/locale string en_US
+d-i console-keymaps-at/keymap select sg-latin1
+
+# Сеть
+####################################################################
+
+d-i netcfg/disable_dhcp boolean false
+d-i netcfg/get_hostname string localhost
+d-i netcfg/get_domain string localdomain
+d-i netcfg/choose_interface select eth0</pre>
+
+		<p>Вы можете обойти это ограничение, пересобрав загрузочный компакт-диск или выполнив установку по PXE, при которой загружается вся информация, указанная выше.</p>
+
+		<p>Пример:</p>
+
+		<pre class="code">auto url=http://mywebserver/mypreseed.cfg \
+locale=en_US console-keymaps-at/keymap=sg-latin1 \
+interface=eth0 hostname=localhost domain=localdomain --</pre>
+
+		<p><b>ТЕПЕРЬ СОЗДАДИМ НАСТОЯЩИЙ ФАЙЛ КОНФИГУРАЦИИ ДЛЯ АВТОМАТИЗАЦИИ УСТАНОВКИ</b></p>
+
+		<p>Настроим локализацию:</p>
+
+		<pre class="code">d-i debian-installer/locale string en_US
+d-i console-setup/ask_detect boolean false
+d-i time/zone string UTC
+d-i debian-installer/splash boolean false
+d-i debian-installer/language string en
+d-i debain-installer/country string US
+d-i console-keymaps-at/keymap select sg-latin1</pre>
+
+		<p>Настроим сеть:</p>
+
+		<pre class="code">d-i netcfg/get_nameservers string 192.168.1.5
+d-i netcfg/get_ipaddress string 192.168.1.10
+d-i netcfg/get_netmask string 255.255.255.0
+d-i netcfg/get_gateway string 192.168.1.1
+d-i netcfg/confirm_static boolean true
+d-i netcfg/get_hostname string tempnode
+d-i netcfg/get_domain string localdomain</pre>
+
+		<p>Настроим используемый репозиторий и каталоги репозитория, в которых будет производиться поиск устанавливаемых файлов:</p>
+
+		<pre class="code">d-i mirror/country string manual
+d-i mirror/http/hostname string http.us.debian.org
+d-i mirror/http/directory string /debian
+d-i mirror/http/proxy string</pre>
+
+		<p>Произведём разбивку диска и настроим на нём LVM:</p>
+
+		<pre class="code">d-i partman-auto/disk string /dev/sda
+d-i partman-auto/method string lvm
+d-i partman-lvm/device_remove_lvm boolean true
+d-i partman-lvm/device_remove_lvm_span boolean true
+d-i partman-auto/purge_lvm_from_device boolean true
+d-i partman-auto-lvm/new_vg_name string system</pre>
+
+		<p>Настроим разделы диска и логические тома LVM.</p>
+
+		<p>Сделаем следующее:</p>
+
+		<ul>
+			<li>/boot : - загрузочная файловая система ext3 размером 300 мегабайт,</li>
+
+			<li>/ : - файловая система ext3 от 10 гигабайт и более вплоть до конца диска,</li>
+
+			<li>swap : использовать 200% размера оперативной памяти системы или 8 гигабайт.</li>
+		</ul>
+
+		<p><b>ОБРАТИТЕ ВНИМАНИЕ НА ФОРМАТИРОВАНИЕ В ЭТОМ РАЗДЕЛЕ - ОНО ОЧЕНЬ ВАЖНО</b></p>
+
+		<pre class="code">#d-i partman-auto/init_automatically_partition \
+# select Guided - use entire disk and set up LVM
+d-i partman-auto/expert_recipe string \
+    boot-root :: \
+        40 300 300 ext3 \
+            $primary{ } \
+            $bootable{ } \
+            method{ format } format{ } \
+            use_filesystem{ } filesystem{ ext3 } \
+            mountpoint{ /boot } \
+        . \
+        2000 10000 1000000000 ext3 \
+            $lvmok{ } \
+            method{ format } format{ } \
+            use_filesystem{ } filesystem{ ext3 } \
+            mountpoint{ / } \
+        . \
+        8000 8000 200% linux-swap \
+            $lvmok{ } \
+            method{ swap } format{ } \
+.</pre>
+
+		<p>Вот другой пример LVM:</p>
+
+		<pre class="code">d-i partman-auto/expert_recipe string \
+    boot-root :: \
+        40 300 300 ext4 \
+            $primary{ } \
+            $bootable{ } \
+            method{ format } format{ } \
+            use_filesystem{ } filesystem{ ext4 } \
+            mountpoint{ /boot } \
+        . \
+        2000 10000 1000000000 ext4 \
+            $lvmok{ } \
+            method{ format } format{ } \
+            use_filesystem{ } filesystem{ ext4 } \
+            mountpoint{ / } \
+        . \
+        2000 1000 10000 ext4 \
+            $lvmok{ } \
+            method{ format } format{ } \
+            use_filesystem{ } filesystem{ ext4 } \
+            mountpoint{ /var } \
+        . \
+        2000 1000 60000 ext4 \
+            $lvmok{ } \
+            method{ format } format{ } \
+            use_filesystem{ } filesystem{ ext4 } \
+            mountpoint{ /var/lib/mysql } \
+        . \
+        2000 1000 30000 ext4 \
+            $lvmok{ } \
+            method{ format } format{ } \
+            use_filesystem{ } filesystem{ ext4 } \
+            mountpoint{ /www } \
+        . \
+        8000 8000 200% linux-swap \
+            $lvmok{ } \
+            method{ swap } format{ } \
+.</pre>
+
+		<p>Ответьте да на все запросы о разделах и LVM:</p>
+
+		<pre class="code">d-i partman-lvm/confirm boolean true
+d-i partman/confirm_write_new_label boolean true
+d-i partman/choose_partition select Finish partitioning and write changes to disk
+d-i partman/confirm boolean true</pre>
+
+		<p>Настроим часовой пояс:</p>
+
+		<pre class="code">d-i clock-setup/utc boolean true
+d-i clock-setup/ntp boolean true
+d-i clock-setup/ntp-server string ntp.ubuntu.com
+d-i time/zone string US/Los_Angeles</pre>
+
+		<p>Настроим пользователя root и первого пользователя:</p>
+
+		<pre class="code">d-i base-installer/kernel/image string linux-server
+d-i passwd/root-login boolean true
+d-i passwd/root-password-crypted password $1$VuPOoDRD$seX.C54E8TUdMkaAmKvjx0
+d-i passwd/user-fullname string Ubuntu User
+d-i passwd/username string ubuntu
+d-i passwd/user-password-crypted password $1$NvFY8IuR$BGqOozSN91ljvQB.pVLDw.
+d-i user-setup/encrypt-home boolean false
+d-i user-setup/allow-password-weak boolean true
+d-i passwd/user-default-groups string adm cdrom dialout lpadmin plugdev sambashare</pre>
+
+		<p>Разное:</p>
+
+		<pre class="code">d-i apt-setup/services-select multiselect security
+d-i debian-installer/allow_unauthenticated string true
+d-i pkgsel/upgrade select safe-upgrade
+d-i pkgsel/language-packs multiselect
+d-i pkgsel/update-policy select none
+d-i pkgsel/updatedb boolean true
+popularity-contest popularity-contest/participate boolean false
+tasksel tasksel/first multiselect standard, openssh-server
+d-i grub-installer/skip boolean false
+d-i lilo-installer/skip boolean false
+d-i grub-installer/only_debian boolean true
+d-i grub-installer/with_other_os boolean false
+d-i finish-install/keep-consoles boolean false
+d-i finish-install/reboot_in_progress note
+d-i cdrom-detect/eject boolean true
+d-i debian-installer/exit/halt boolean false
+d-i debian-installer/exit/poweroff boolean false</pre>
+
+		<p>Выбор устанавливаемых пакетов:</p>
+
+		<pre class="code">d-i pkgsel/include string vim openssh-server</pre>
+
+		<p>ВОТ КАК ЭТО ВЫГЛЯДИТ ОДНИМ ФАЙЛОМ:</p>
+
+		<pre class="code">d-i debian-installer/locale string en_US
+d-i console-setup/ask_detect boolean false
+d-i time/zone string UTC
+d-i debian-installer/splash boolean false
+d-i debian-installer/language string en
+d-i debain-installer/country string US
+d-i netcfg/get_nameservers string 192.168.1.5
+d-i netcfg/get_ipaddress string 192.168.1.10
+d-i netcfg/get_netmask string 255.255.255.0
+d-i netcfg/get_gateway string 192.168.1.1
+d-i netcfg/confirm_static boolean true
+d-i netcfg/get_hostname string tempnode
+d-i mirror/country string manual
+d-i mirror/http/hostname string http.us.debian.org
+d-i mirror/http/directory string /debian
+d-i mirror/http/proxy string
+d-i partman-auto/disk string /dev/sda
+d-i partman-auto/method string lvm
+d-i partman-lvm/device_remove_lvm boolean true
+d-i partman-lvm/device_remove_lvm_span boolean true
+d-i partman-auto/purge_lvm_from_device boolean true
+d-i partman-auto-lvm/new_vg_name string system
+#d-i partman-auto/init_automatically_partition \
+# select Guided - use entire disk and set up LVM
+d-i partman-auto/expert_recipe string \
+    boot-root :: \
+        40 300 300 ext3 \
+            $primary{ } \
+            $bootable{ } \
+            method{ format } format{ } \
+            use_filesystem{ } filesystem{ ext3 } \
+            mountpoint{ /boot } \
+        . \
+        2000 10000 1000000000 ext3 \
+            $lvmok{ } \
+            method{ format } format{ } \
+            use_filesystem{ } filesystem{ ext3 } \
+            mountpoint{ / } \
+        . \
+        8000 8000 200% linux-swap \
+            $lvmok{ } \
+            method{ swap } format{ } \
+        .
+d-i partman-lvm/confirm boolean true
+d-i partman/confirm_write_new_label boolean true
+d-i partman/choose_partition select Finish partitioning and write changes to disk
+d-i partman/confirm boolean true
+d-i clock-setup/utc boolean true
+d-i clock-setup/ntp boolean true
+d-i clock-setup/ntp-server string ntp.ubuntu.com
+d-i time/zone string US/Los_Angeles
+d-i base-installer/kernel/image string linux-server
+d-i base-installer/kernel/image string linux-server
+d-i passwd/root-login boolean true
+d-i passwd/root-password-crypted password $1$VuPOoDRD$seX.C54E8TUdMkaAmKvjx0
+d-i passwd/user-fullname string Ubuntu User
+d-i user-setup/allow-password-weak boolean true
+d-i user-setup/encrypt-home boolean false
+d-i passwd/user-default-groups string adm cdrom dialout lpadmin plugdev sambashare
+d-i apt-setup/services-select multiselect security
+d-i debian-installer/allow_unauthenticated string true
+d-i pkgsel/upgrade select safe-upgrade
+d-i pkgsel/language-packs multiselect
+d-i pkgsel/update-policy select none
+d-i pkgsel/updatedb boolean true
+popularity-contest popularity-contest/participate boolean false
+tasksel tasksel/first multiselect standard, openssh-server
+d-i grub-installer/skip boolean false
+d-i lilo-installer/skip boolean false
+d-i grub-installer/only_debian boolean true
+d-i grub-installer/with_other_os boolean false
+d-i finish-install/keep-consoles boolean false
+d-i finish-install/reboot_in_progress note
+d-i cdrom-detect/eject boolean true
+d-i debian-installer/exit/halt boolean false
+d-i debian-installer/exit/poweroff boolean false
+d-i pkgsel/include string vim openssh-server</pre>
+
+		<p>Информация для этой статьи была взята отсюда (спасибо):</p>
+
+		<p><a href="http://cptyesterday.wordpress.com/2012/06/17/notes-on-using-expert_recipe-in-debianubuntu-preseed-files/">http://cptyesterday.wordpress.com/2012/06/17/notes-on-using-expert_recipe-in-debianubuntu-preseed-files/</a></p>
+
+		<p>Пример файла автоматизации установки можно найти здесь:</p>
+
+		<p><a href="https://github.com/cookingclouds/Preseed">https://github.com/cookingclouds/Preseed</a></p>
+
+		<h2>Примечания переводчика</h2>
+
+		<p>Перед тем, как я написал заметку <a href="../debian-flash-ssh/">Установка Debian с флешки по SSH</a>, я готовил флешку, воспользовавшись несколькими материалами из интернета. Я сохранил ссылки на использованные материалы, чтобы потом перевести их на русский язык. Эта статья оказалась не очень качественной - в ней практически отсутствуют объяснения, а есть только примеры preseed-файла. Следующие две статьи, ссылки на которые я сохранил и переводы которых выложу в блог, должны быть получше - там больше объяснений. Более того - на них ссылается автор этой статьи.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Джеймс Тран. Автоматизация установки Ubuntu/Debian с LVM, 2012">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,417 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="перевод,lighttpd,spawn-fcgi,fastcgi" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2011-10-26 -->
+		<title>silverjam и др. Настройка FastCGI и PHP с индивидуальными правами пользователей, 2010</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>silverjam и др. Настройка FastCGI и PHP с индивидуальными правами пользователей, 2010</h1>
+
+		<p>Перевод статьи: <a href="http://redmine.lighttpd.net/wiki/1/HowToSetupFastCgiIndividualPermissions">Setup FastCGI and PHP with individual user permissions</a></p>
+
+		<p>Автор: silverjam и другие.</p>
+
+		<p>Перво-наперво отметим, что этот рецепт является только примером, поэтому не предъявляйте претензий, если предпочитаете делать такие вещи другим способом, или рассердили клиентов или что-то в этом роде...</p>
+
+		<p>Execwrap или php-fpm можно использовать в тех же целях, но этот рецепт не касается этих методов.</p>
+
+		<p>Замечание: Этот рецепт работает только на операционных системах типа Unix. Я не знаю, как сделать подобное на Windows.</p>
+
+		<h2>1. Введение</h2>
+
+		<p>Запуск хостинга веб-сайтов для обслуживания индивидуальных пользователей/клиентов потребует дополнительного доведения до ума настроек вашего веб-сервера.</p>
+
+		<p>Для начала, нужно назначить каждому пользователю собственную учётную запись на веб-сервере. Пользователь загрузит файлы своих скриптов PHP в его собственный виртуальный корневой каталог документов.</p>
+
+		<p>Нужно, чтобы все файлы скриптов PHP выполнялись с правами того же пользователя, который управляет этим виртуальным узлом. Если это так, то можно быть уверенным, что ни один из пользователей не сможет увидеть чужие скрипты PHP.</p>
+
+		<p>Рассмотрим следующий скрипт PHP, выполняемый на веб-сервере без индивидуальных разрешений пользователя (не пытайтесь сделать это, поскольку вы можете кончить тем, что полиция постучится в вашу дверь!):</p>
+
+		<pre class="code">&lt;?php
+  $filename = "/path_to_other_users_vhost_root/index.php";
+  $handle = fopen($filename, "rb");
+  $contents = fread($handle, filesize($filename));
+  fclose($handle);
+  echo $contents;
+?&gt;</pre>
+
+		<p>Этот сценарий прочитает и покажет исходный код скрипта PHP какого-то другого пользователя. Исходный код может содержать пароли, используемые для подключения к пользовательским базам данных MySQL, или другую интересную информацию. Можно даже сделать скрипт PHP, который сможет перезаписать файлы в каталогах пользователя другого виртуального узла!</p>
+
+		<p>Мы хотим этого избежать!</p>
+
+		<p>Как насчёт встроенного в PHP безопасного режима safe_mode?</p>
+
+		<p>Я не хочу сказать что-то плохое о PHP, но я не рекомендую использовать PHP с возможностями встроенного безопасного режима safe_mode. (Обратитесь к <a href="http://www.php.net/manual/en/features.safe-mode.php">документации по safe_mode на php.net</a> за более подробным описанием.)</p>
+
+		<p>Однако, некоторые настройки php.ini могут предотвратить или замедлить большинство видов атак без необходимости изменять исходный код. Для предотвращения удалённого доступа из php воспользуйтесь <a href="http://www.php.net/manual/en/ref.filesystem.php#ini.allow-url-fopen">allow_url_fopen</a>, а для предотвращения вставки удалённых файлов в php вы можете воспользоваться <a href="http://www.php.net/manual/en/ref.filesystem.php#ini.allow-url-include">allow_url_include</a>. Настройка <a href="http://www.php.net/manual/en/features.safe-mode.php#ini.open-basedir">open_basedir</a> - это хороший способ усложнить работу взломщика, но этот способ не заменит разрешений пользователей. Для замедления некоторых видов угона сеансов можно отключить опцию <a href="http://www.php.net/manual/en/ref.session.php#ini.session.use-trans-sid">session.use_trans_sid</a>.</p>
+
+		<p>Но всё же будет лучше, если положиться на возможности ограничения доступа пользователей, встроенные в операционную систему.</p>
+
+		<h2>2. Установка</h2>
+
+		<p>Подразумевается, что на сервере уже установлены Lighttpd и PHP с поддержкой FastCGI. (<a href="http://trac.lighttpd.net/trac/wiki/TutorialLighttpdAndPHP">Как установить PHP с поддержкой FastCGI</a>.)</p>
+
+		<p>Чтобы выполнить установку, нужно войти под пользователем root.</p>
+
+		<h3>2.1. Добавим пользователей в операционную систему</h3>
+
+		<p>(Это необходимо только в том случае, если пользователи ещё не добавлены.)</p>
+
+		<p>Нужно добавить учётную запись пользователя в операционную систему для каждого пользователя, права которого требуется отделить, чтобы предотвратить возможность доступа к чужому исходному коду.</p>
+
+		<p>Предположим, что таких пользователей три (fred, george и ron).</p>
+
+		<p>Выполним следующие команды:</p>
+
+		<pre class="console"># useradd fred
+# useradd george
+# useradd ron</pre>
+
+		<h3>2.2. Добавим группы пользователей в операционную систему</h3>
+
+		<p>Нужно добавить по одной группе для каждого из добавленных выше пользователей. Для простоты назовём группы так же, как и пользователей:</p>
+
+		<p>Выполним следующие команды:</p>
+
+		<pre class="console"># groupadd fred
+# groupadd george
+# groupadd ron</pre>
+
+		<p>Теперь нужно добавить каждого пользователя в его группу. В каждой группе пользователей будет два члена: сам пользователь и пользователь демона lighttpd.</p>
+
+		<p>Группы пользователей можно настроить, отредактировав файл /etc/group в любом текстовом редакторе.</p>
+
+		<p>Файл должен выглядеть примерно так (номера групп могут отличаться):</p>
+
+		<pre class="code">... [пропущенные строки]
+fred:x:441:fred,lighttpd
+george:x:442:george,lighttpd
+ron:x:443:ron,lighttpd</pre>
+
+		<p>Можно также воспользоваться командой sed:</p>
+
+		<pre class="console"># sed -i "s/^\(fred.*\)$/\1,fred,lighttpd/g" /etc/group
+# sed -i "s/^\(george.*\)$/\1,george,lighttpd/g" /etc/group
+# sed -i "s/^\(ron.*\)$/\1,ron,lighttpd/g" /etc/group</pre>
+
+		<p>Эти команды добавят самого пользователя и пользователя lighttpd в группы.</p>
+
+		<h3>2.3. Настроим структуру файловой системы</h3>
+
+		<p>Предположим, что мы хотим сохранить все связанные с веб-сервером файлы виртуальных узлов в подкаталогах "/var/www". (Конечно, вы можете выбрать другое место, просто удостоверьтесь, что созданные пользователи имеют права на чтение и выполнение их каталогов. (Например,  "chmod 755 /var/www &amp;&amp; chown root:root /var/www").</p>
+
+		<h4>2.3.1 Создадим корневой каталог</h4>
+
+		<p>Теперь, создадим два каталога: один для нескольких сценариев запуска, к которому будет иметь доступ только пользователь root, и другой для всех виртуальных узлов:</p>
+
+		<p>Выполним следующие команды:</p>
+
+		<pre class="console"># cd /var/www
+# mkdir fastcgi
+# mkdir vhosts
+# chown lighttpd:lighttpd *
+# chmod 755 *
+# ls -l /var/www
+drwxr-xr-x 2 lighttpd lighttpd 4096 Feb 15 12:17 fastcgi
+drwxr-xr-x 9 lighttpd lighttpd 4096 Feb 15 11:21 vhosts</pre>
+
+		<h4>2.3.2 Создадим каталог для каждого из виртуальных узлов</h4>
+
+		<p>Теперь создадим каталог для каждого из виртуальных узлов в каталоге "/var/www/vhosts" и зададим соответствующие права для их пользователей:</p>
+
+		<p>Выполним следующие команды:</p>
+
+		<pre class="console"># cd /var/www/vhosts
+# mkdir fred-weasley.com
+# mkdir george-weasley.com
+# mkdir ron-weasley.com
+# chown fred:fred fred-weasley.com
+# chown george:george george-weasley.com
+# chown ron:ron ron-weasley.com
+# chmod 750 *
+# ls -l /var/www/vhosts
+drwxr-x--- 7 fred fred 4096 Feb 15 20:18 fred-weasley.com
+drwxr-x--- 6 george george 4096 Feb 15 11:02 george-weasley.com
+drwxr-x--- 6 ron ron 4096 Feb 15 11:23 ron-weasley.com</pre>
+
+		<p>Теперь у нас есть три каталога, в которых три пользователя не могут увидеть файлы друг друга, однако демон lighttpd может видеть их все.</p>
+
+		<h4>2.3.3 Создадим структуру каталогов для каждого виртуального узла</h4>
+
+		<p>Теперь нужно создать структуру каталогов для каждого виртуального узла:</p>
+
+		<p>Выполним следующие команды:</p>
+
+		<pre class="console"># cd /var/www/vhosts/fred-weasley.com
+# mkdir html
+# mkdir includes (не обязательно)
+# mkdir logs
+# chown fred:fred *
+# chown lighttpd:fred logs
+# chmod 750 *
+# ls -l /var/www/vhosts/fred-weasley.com
+drwxr-x--- 14 fred fred 4096 Feb 17 11:55 html
+drwxr-x--- 2 fred fred 4096 Feb 15 12:05 includes
+drwxr-x--- 2 lighttpd fred 4096 Feb 15 11:11 logs</pre>
+
+		<p>Нужно повторить эти команды для каждого из пользователей виртуального узла, заменяя имя пользователя "fred" на имя соответствующего пользователя.</p>
+
+		<h4>2.3.4 Создадим каталог FastCGI для каждого пользователя</h4>
+
+		<p>Теперь мы готовы приступить к самому интересному!</p>
+
+		<p>Теперь, перейдём в каталог "/var/www/fastcgi", где мы хотим создать каталог каждого из пользователей. (Когда мы закончим, эти каталоги будут содержать сокеты процессов сервера FastCGI):</p>
+
+		<p>Выполним следующие команды:</p>
+
+		<pre class="console"># cd /var/www/fastcgi
+# mkdir fred
+# mkdir george
+# mkdir ron
+# chown fred:fred fred
+# chown george:george george
+# chown ron:ron ron
+# chmod 750 *
+# ls -l /var/www/fastcgi
+drwxr-x--- 7 fred fred 4096 Feb 15 20:18 fred
+drwxr-x--- 6 george george 4096 Feb 15 11:02 george
+drwxr-x--- 6 ron ron 4096 Feb 15 11:23 ron</pre>
+
+		<p>(Отметим, что пользователь lighttpd может читать все каталоги, в то время как три пользователя имеют доступ только к собственным каталогам.)</p>
+
+		<h3>2.4. Создадим скрипт запуска FastCGI для каждого пользователя</h3>
+
+		<p>Создадим каталог, который будет содержать все скрипты запуска FastCGI, выполнив следующие команды:</p>
+
+		<pre class="console"># cd /var/www/fastcgi
+# mkdir startup
+# chmod 750 startup
+# ls -l /var/www/fastcgi
+drwxr-x--- 7 fred fred 4096 Feb 15 20:18 fred
+drwxr-x--- 6 george george 4096 Feb 15 11:02 george
+drwxr-x--- 6 ron ron 4096 Feb 15 11:23 ron
+drwxr-x--- 6 root root 4096 Feb 15 11:23 startup</pre>
+
+		<p>Теперь, перейдём в каталог "/var/www/fastcgi/startup", создадим скрипт запуска для пользователя fred (давайте назовём его fred-startup.sh), воспользовавшись любым текстовым редактором:</p>
+
+		<p>Скрипт оболочки:</p>
+
+		<pre class="code">#!/bin/sh
+
+## АБСОЛЮТНЫЙ путь к двоичному файлу spawn-fcgi
+SPAWNFCGI="/usr/bin/spawn-fcgi" 
+
+## АБСОЛЮТНЫЙ путь к двоичному файлу PHP
+FCGIPROGRAM="/usr/bin/php-cgi" 
+
+## Прослушивание порта TCP на localhost
+FCGISOCKET="/var/www/fastcgi/fred/fred.socket" 
+
+## Раскомментируйте строку PHPRC, если имеется дополнительный файл php.ini для этого пользователя
+## Положите этот файл php.ini в /var/www/fastcgi/fred/php.ini
+## С помощью этого файла php.ini можно увеличить безопасность системы
+## Просто настройте параметр open_basedir на веб-каталоги пользователей
+## Например: (добавьте эту строку в ваш настроенный файл php.ini)
+## open_basedir = /var/www/vhosts/fred/html
+#PHPRC="/var/www/fastcgi/fred/" 
+
+## Количество детей PHP порождаемых дополнительно к основным. Минимум 2.
+## Действительное количество детей = PHP_FCGI_CHILDREN + 1
+PHP_FCGI_CHILDREN=5
+
+## Количество запросов выполненных сервером к одному процессу php, прежде чем этот процесс будет перезапущен
+PHP_FCGI_MAX_REQUESTS=1000
+
+## IP-адреса, с которых PHP должен принимать соединения серверов
+FCGI_WEB_SERVER_ADDRS="127.0.0.1" 
+
+# Доступные переменные окружения, разделённые пробелами
+ALLOWED_ENV="PATH USER" 
+
+## Если этот скрипт запускается от имени пользователя root, то fastcgi переключится на следующего пользователя:
+USERID=fred
+GROUPID=fred
+
+################## После этой строки настроек нет
+if test x$PHP_FCGI_CHILDREN = x; then
+  PHP_FCGI_CHILDREN=5
+fi
+export PHP_FCGI_MAX_REQUESTS
+export FCGI_WEB_SERVER_ADDRS
+export PHPRC
+ALLOWED_ENV="$ALLOWED_ENV PHP_FCGI_MAX_REQUESTS FCGI_WEB_SERVER_ADDRS PHPRC"
+
+# Скопируем доступные переменные окружения
+E=
+for i in $ALLOWED_ENV; do
+  E="$E $i=$(eval echo "\$$i")" 
+done
+
+# Очистим переменные окружения и настроим новые
+env - $E $SPAWNFCGI -s $FCGISOCKET -f $FCGIPROGRAM -u $USERID -g $GROUPID -C $PHP_FCGI_CHILDREN
+chmod 770 $FCGISOCKET</pre>
+
+		<p>Будьте аккуратны с путями, USERID и GROUPID.</p>
+
+		<p>Отметим, что в этом примере процессы php запускаются от имени пользователя, созданного ранее ("fred"). Это означает, что код php будет иметь права доступа к файлам html и php. Это может быть удобно, но может быть менее безопасно.</p>
+
+		<p>В качестве альтернативы можно задать USERID значение "nobody" (или любого другого пользователя без каких-либо особых разрешений), чтобы запретить процессу php запись.</p>
+
+		<p>Нужно повторить процесс и создать скрипт запуска для каждого пользователя из каталога "/var/www/fastcgi/startup". (Просто скопируйте фалй и замените FCGISOCKET, USERID и GROUPID на правильные значения).</p>
+
+		<p>Не забудьте установить разрешения на выполнение всех скриптов запуска:</p>
+
+		<p>Выполним следующие команды:</p>
+
+		<pre class="console"># cd /var/www/fastcgi/startup
+# chmod 750 *</pre>
+
+		<h3>2.5. Проверим настройку PHP</h3>
+
+		<p>Если вы не знаете точно, где находится файл php.ini, просто выполните следующие команды:</p>
+
+		<pre class="console">$ php-cgi -i | grep php.ini</pre>
+
+		<p>Удостоверьтесь, что в файле php.ini имеется следующая строка:</p>
+
+		<pre class="code">cgi.fix_pathinfo=1</pre>
+
+		<p>Если вы раскомментировали строку PHPRC в скрипте из раздела 4, проверьте владельца и права доступа к файлу php.ini. Чтобы он использовался, нужно выполнить команды:</p>
+
+		<pre class="console"># chmod 644 php.ini
+# chown root:root php.ini</pre>
+
+		<h3>2.6. Запустим все скрипты запуска FastCGI</h3>
+
+		<p>Теперь запустим все процессы-серверы FastCGI, выполнив следующие команды:</p>
+
+		<pre class="console"># /var/www/fastcgi/startup/fred-startup.sh
+spawn-fcgi.c.170: child spawned successfully: PID: xxxxx
+# /var/www/fastcgi/startup/george-startup.sh
+spawn-fcgi.c.170: child spawned successfully: PID: xxxxx
+# /var/www/fastcgi/startup/ron-startup.sh
+spawn-fcgi.c.170: child spawned successfully: PID: xxxxx</pre>
+
+		<p>Если будут какие-то сообщения об ошибках, проверьте скрипты запуска и права доступа к каталогу "/var/www/fastcgi", включая все подкаталоги.</p>
+
+		<h3>2.7. Настроим виртуальные узлы на сервере lighttpd</h3>
+
+		<p>Отредактируем файл "/etc/lighttpd.conf" в любом текстовом редакторе:</p>
+
+		<pre class="code">...[некоторое количество строк конфигурации]...
+$HTTP["host"] =~ "(^|\.)fred-weasley.com$" {
+  server.document-root = "/var/www/vhosts/fred-weasley.com/html" 
+  accesslog.filename = "/var/www/vhosts/fred-weasley.com/logs/access_log" 
+  fastcgi.server = (
+    ".php" =&gt; (
+      (
+        "socket" =&gt; "/var/www/fastcgi/fred/fred.socket",
+        "broken-scriptfilename" =&gt; "enable" 
+      )
+    )
+  )
+}
+
+$HTTP["host"] =~ "(^|\.)george-weasley.com$" {
+  server.document-root = "/var/www/vhosts/george-weasley.com/html" 
+  accesslog.filename = "/var/www/vhosts/george-weasley.com/logs/access_log" 
+  fastcgi.server = (
+    ".php" =&gt; (
+      (
+        "socket" =&gt; "/var/www/fastcgi/george/george.socket",
+        "broken-scriptfilename" =&gt; "enable" 
+      )
+    )
+  )
+}
+
+$HTTP["host"] =~ "(^|\.)ron-weasley.com$" {
+  server.document-root = "/var/www/vhosts/ron-weasley.com/html" 
+  accesslog.filename = "/var/www/vhosts/ron-weasley.com/logs/access_log" 
+  fastcgi.server = (
+    ".php" =&gt; (
+      (
+        "socket" =&gt; "/var/www/fastcgi/ron/ron.socket",
+        "broken-scriptfilename" =&gt; "enable" 
+      )
+    )
+  )
+}</pre>
+
+		<p>Обратите внимание на пути к сокетам FastCGI каждого виртуального узла.</p>
+
+		<p>Условные блоки НЕ оказывают действия на server.errorlog, все сообщения об ошибках попадают в последний указанный файл журнала. Поэтому используется один глобальный журнал.</p>
+
+		<h3>2.8. Перезапустим процесс демона lighttpd</h3>
+
+		<p>Просто выполним следующую команду:</p>
+
+		<pre class="console"># /etc/init.d/lighttpd restart</pre>
+
+		<p>Если будут какие-то сообщения об ошибках, проверьте файл конфигурации "/etc/lighttpd.conf".</p>
+
+		<h3>2.9. Здравствуй мир!</h3>
+
+		<p>Теперь, войдём под пользователем fred и создадим скрипт PHP в его виртуальном узле (например, "/var/www/vhosts/fred-weasley.com/html/index.php"):</p>
+
+		<pre class="code">&lt;?php
+  echo "&lt;h1&gt;Здравствуй мир!&lt;/h1&gt;";
+  echo "&lt;p&gt;Идентификатор текущего пользователя: ". posix_getuid();
+  echo "&lt;p&gt;Идентификатор текущей группы: ". posix_getgid();
+?&gt;</pre>
+
+		<p>Убедитесь, что вы задали разрешения на доступ к файлу:</p>
+
+		<p>Выполните следующие команды:</p>
+
+		<pre class="console"># chown fred:fred /var/www/vhosts/fred-weasley.com/html/index.php
+# chmod 640 /var/www/vhosts/fred-weasley.com/html/index.php
+# ls -l /var/www/vhosts/fred-weasley.com/html
+-rw-r----- 1 fred fred 116 Jul 25 2004 index.php</pre>
+
+		<p>Теперь, запустим веб-браузер и проверим вывод скрипта PHP. (Здесь: http://www.fred-weasley.com/index.php)</p>
+
+		<p>Если всё хорошо, вы увидите страницу, на которой будут отображены идентификаторы пользователя и группы fred. (Вы можете увидеть эти идентификаторы в файлах "/etc/passwd" и "/etc/group").</p>
+
+		<h3>2.10. Автоматический вызов скриптов запуска FastCGI</h3>
+
+		<p>При желании можно также создать запись в планировщике задач crontab для автоматического вызова скриптов запуска FastCGI при загрузке сервера.</p>
+
+		<p>Воспользуемся следующей командой для редактирования заданий планировщика crontab:</p>
+
+		<pre class="console"># crontab -e</pre>
+
+		<p>Теперь добавим следующую строку:</p>
+
+		<pre class="console">@reboot for i in /var/www/fastcgi/startup/*.sh; do $i; done</pre>
+
+		<p>А затем введём ":x" для сохранения и выхода.</p>
+
+		<p>Эта запись в планировщике задач crontab выполнит все файлы с расширением .sh, найденные в каталоге /var/www/fastcgi/startup, после загрузки сервера.</p>
+
+		<p>Поздравляю! Теперь у вас есть быстрый сервер, настроенный с отдельными правами для пользователей.</p>
+
+		<h2>3. Ограничения</h2>
+
+		<p>Таким образом мы создали отдельные группы процессов fastcgi для каждого пользователя. Это означает, что у этих процессов нет общей памяти. Поэтому, если этот способ используется на компьютере с большим количеством пользователей, потребуется значительное количество доступной оперативной памяти. Также, если используется какой-нибудь кэш транслированного кода PHP, например, xcache, apc или eaccelerator, этот способ приведёт к созданию собственного кэша у каждого из пользователей (что полезно для повышения безопасности, но приводит к увеличению использования памяти). Можно уменьшить использование памяти с помощью файлов php.ini, в которых настроить ускоритель с разными объёмами кэша, а также изменить значение переменной PHP_FCGI_CHILDREN в каждом из пользовательских скриптов startup.sh.</p>
+
+		<p>В FreeBSD (6.2) каждый пользователь может состоять максимум в 14 группах. Этот верхний предел экземпляров fastcgi для виртуальных узлов, поскольку пользователю lighttpd (www) необходим доступ к этим сокетам. Я настроил мой веб-сервер 1-2 года назад этим способом и столкнулся с проблемой несколько недель назад, когда добавил пользователя www в пятнадцатую группу. Не было никаких сообщений об ошибках, иди-свищи ответа у google. Но всё-таки, есть ли решение? ;) Да, в FreeBSD 8.0 этот предел был поднят до 1024.</p>
+
+		<h2>4. Разрешения</h2>
+
+		<p>У mod_fastcgi имеется опция check-local. Если она включена, Lighttpd использует своего пользователя для проверки существования файла в document-root. Если вы хотите, чтобы пользователь Lighttpd не имел доступа к document-root, нужно отключить эту опцию.</p>
+
+		<h2>5. Примечания переводчика:</h2>
+	       
+		<p>Для порядка я иногда перевожу материалы, которыми собираюсь воспользоваться. Начав делать этот перевод, я сразу же пожалел о том, что ввязался в это гиблое дело - статья разжёвывает элементарные вещи вроде заведения пользователей, групп, членство в группах и права доступа. Ну и запуск сценариев инициализации из cron'а я, конечно, не одобряю. Кроме того, автор использовал FreeBSD 6.2, в которой существовало ограничение на максимальное количество групп для одного пользователя. В качестве решения автор предлагает перейти на FreeBSD 8.0, однако я думаю, что есть по меньшей мере ещё два решения: 1. воспользоваться TCP-сокетами, вместо сокетов домена Unix, 2. воспользоваться каким-нибудь дистрибутивом Linux.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=silverjam и др. Настройка FastCGI и PHP с индивидуальными правами пользователей, 2010">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,47 @@
+diff -Naur python/netsnmp/client.py python.new/netsnmp/client.py
+--- python/netsnmp/client.py		2009-04-23 22:21:53.000000000 +0600
++++ python.new/netsnmp/client.py	2014-12-21 17:49:14.000000000 +0500
+@@ -2,6 +2,7 @@
+ import string
+ import re
+ import types
++from sys import stderr
+ 
+ # control verbosity of error output
+ verbose = 1
+diff -Naur python/netsnmp/client_intf.c python.new/netsnmp/client_intf.c
+--- python/netsnmp/client_intf.c	2010-02-10 15:04:31.000000000 +0500
++++ python.new/netsnmp/client_intf.c	2014-12-21 18:10:26.677816256 +0500
+@@ -979,14 +979,20 @@
+ 
+       case TYPE_IPADDR:
+         vars->type = ASN_IPADDRESS;
+-        vars->val.integer = (long *)malloc(sizeof(long));
++        in_addr_t addr = 0;
+         if (val)
+-            *(vars->val.integer) = inet_addr(val);
++            addr = inet_addr(val);
++
++        if (addr && (addr != -1)) {
++            vars->val.string = malloc(sizeof(in_addr_t));
++            vars->val_len = sizeof(in_addr_t);
++            memcpy(vars->val.string, &addr, sizeof(in_addr_t));
++        }
+         else {
+             ret = FAILURE;
+-            *(vars->val.integer) = 0;
++            vars->val.string = (u_char*)strdup("");
++            vars->val_len = 0;
+         }
+-        vars->val_len = sizeof(long);
+         break;
+ 
+       case TYPE_OBJID:
+@@ -2426,6 +2432,7 @@
+ 	  goto done;
+ 	}
+ 	memcpy(tmp_val_str, val, tmplen);
++        tmp_val_str[tmplen] = '\0';
+ 	if (type==TYPE_INTEGER && use_enums && tp && tp->enums) {
+ 	  for(ep = tp->enums; ep; ep = ep->next) {
+ 	    if (val && !strcmp(ep->label, val)) {

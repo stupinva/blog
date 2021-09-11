@@ -1,0 +1,129 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="wheezy,debian-installer,preseed,debian,linux" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-04-16 -->
+		<title>Установка Debian с флешки по SSH</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Установка Debian с флешки по SSH</h1>
+
+		<p>Когда возникает задача настроить сервер для другого города, часто задача решается одним из способов:</p>
+
+		<ol>
+			<li>Сервер отправляется в филиал полностью преднастроенным, так что местным системным администраторам остаётся только установить его в стойку и подключить к сети,</li>
+
+			<li>Один из системных администраторов из головного офиса компании отправляется в командировку в филиал, где и настраивает сервер вместе с местными системными администраторами,</li>
+
+			<li>Местные системные администраторы сами устанавливают на имеющееся оборудование операционную систему и настраивают на сервере сеть, после чего настройку сервера продолжают системные администраторы из головного офиса.</li>
+		</ol>
+
+		<p>Последний способ позволяет обойтись без расходов на транспорт - не нужно платить за перевозку преднастроенного сервера, не нужно оплачивать командировочные расходы. Однако и у этого способа имеются свои недостатки - иногда на этапе установки операционной системы бывает нужно выполнить сложную разметку дисков или подгрузить дополнительные драйверы. В подобных случаях лучшим решением может быть использование устройства IP-KVM, если оно есть в филиале. Если же такого устройства в филиале нет, то сгодиться могут разнообразные суррогаты. Один из таких суррогатов и будет рассмотрен в этой статье. Мы подготовим образ флэш-карты с инсталлятором операционной системы Debian, консоль которого после загрузки будет доступна по SSH.</p>
+
+		<p>Чтобы подготовить загрузочный образ, необходима уже установленная система Debian. Установим пакет debian-installer, необходимые для его сборки зависимости и пакет fakeroot:</p>
+
+		<pre class="console"># apt-get install dpkg-dev
+# apt-get source debian-installer
+# apt-get build-dep debian-installer
+# apt-get install fakeroot</pre>
+
+		<p>В текущем каталоге будет создан каталог с исходными текстами пакета debian-installer. Перейдём в этот каталог:</p>
+
+		<pre class="console"># cd debian-installer-20130613+deb7u3/</pre>
+
+		<p>Откроем в редакторе файл build/pkg-lists/base и добавим в него одну строчку:</p>
+
+		<pre class="code">#include "network-console"</pre>
+
+		<p>Эта строчка добавит в инсталлятор дополнительные пакеты, которые сделают возможным доступ к загруженному инсталлятору по SSH.</p>
+
+		<p>Создадим файл preseed.cfg и пропишем в него ответы на первые вопросы инсталлятора:</p>
+
+		<pre class="code"># Выбираем локаль и раскладку клавиатуры
+d-i localechooser/shortlist select RU
+d-i keyboard-configuration/xkb-keymap select ru
+# Задаём настройки сетевой карты
+d-i netcfg/enable boolean true
+d-i netcfg/choose_interface select eth0
+d-i netcfg/disable_autoconfig boolean true
+d-i netcfg/get_ipaddress string 192.168.1.16
+d-i netcfg/get_netmask string 255.255.255.0
+d-i netcfg/get_gateway string 192.168.1.1
+d-i netcfg/get_nameservers string 192.168.1.2 192.168.1.3
+d-i netcfg/confirm_static boolean true
+# Задаём имя сервера и домен
+d-i netcfg/get_hostname string server
+d-i netcfg/get_domain string core.ufanet.ru
+# Включаем доступ к инсталлятору по SSH с логином installer и паролем installer-password
+d-i anna/choose_modules string network-console
+d-i preseed/early_command string anna-install network-console
+d-i network-console/password password installer-password
+d-i network-console/password-again password installer-password
+# Подключаем сетевой репозиторий для скачивания недостающих пакетов
+d-i mirror/country string manual
+d-i mirror/http/hostname string mirror.ufanet.ru
+d-i mirror/http/directory string /debian
+d-i mirror/http/proxy string
+d-i mirror/suite string wheezy
+d-i mirror/udeb/suite string wheezy</pre>
+
+		<p>В этом файле можно сразу указать сетевые настройки будущего сервера, согласовав их с системными администраторами филилала. А можно договориться использовать одни и те же сетевые настройки только на период настройки новых серверов, после чего на готовом сервере менять настройки на постоянные.</p>
+
+		<p>Теперь отредактируем build/config/local и добавим в него полное имя файла preseed.cfg и кодовое имя релиза инсталлятора:</p>
+
+		<pre class="code">PRESEED=/root/preseed.cfg
+USE_UDEBS_FROM=wheezy</pre>
+
+		<p>Осталось только собрать образ загрузочного диска с инсталлятором. Для этого нужно перейти в каталог build и выполнить команду сборки образа:</p>
+
+		<pre class="console"># cd build
+# fakeroot make rebuild_monolithic</pre>
+
+		<p>Эта команда соберёт образ "small bootable CD image for network install" - "маленький загрузочный образ компакт-диска для сетевой установки". Такой образ содержит полный комплект пакетов самого инсталлятора, но устанавливаемые пакеты будет скачивать по сети.</p>
+
+		<p>Собранный образ можно найти в файле dest/netboot/mini.iso Остаётся только отправить этот образ системным администраторам филиала, например, по электронной почте. Дальше системные администраторы филиала должны будут записать этот образ на свободную флэшку и загрузить с неё будущий сервер. Дальнейший процесс разметки дисков, настройки учётных записей, настройки системных часов, часового пояса можно производить через SSH из головного офиса, зайдя по SSH с логином installer и указав пароль из файла preseed.cfg (в примере выше это пароль installer-password).</p>
+
+		<p>Полный список вариантов образов можно узнать, выполнив команду fakeroot make без указания конкретной цели сборки. Среди других вариантов для наших целей полезными могут оказаться:</p>
+
+		<ul>
+			<li>rebuild_netboot - "tiny CD image that boots the netboot installer" - "крошечный образ компакт-диска, который загрузит установщик с сетевой загрузкой". Образ получится самым маленьким, т.к. недостающие пакеты инсталлятора будут загружаться по сети. Собранный образ можно найти в файле dest/monolithic/mini.iso,</li>
+
+			<li>rebuild_hd-media - "1 gb image (compressed) for USB memory stick" - "сжатый образ размером в 1 гигабайт для флэш-карт". Этот образ содержит в себе полный комплект пакетов инсталлятора и самые популярные устанавливаемые пакеты операционной системы. Собранный образ можно найти в файле dest/hd-media/boot.img.gz</li>
+		</ul>
+
+		<p>При создании файла preseed.cfg можно ориентироваться на официальный пример файла <a href="https://www.debian.org/releases/wheezy/example-preseed.txt">wheezy/example-preseed.txt</a> или брать значения опций из уже установленной где-либо системы. Для этого нужно установить в этой системе пакет debconf-utils:</p>
+
+		<pre class="console"># apt-get install debconf-utils</pre>
+
+		<p>Вывести на экран значения настроек можно при помощи такой команды:</p>
+
+		<pre class="console"># debconf-get-selections --install</pre>
+
+		<p>Вместо указания настроек mirror в файле preseed.cfg можно создать файл со списком репозиториев - build/sources.list.udeb.local. Например, вот такой:</p>
+
+		<pre class="code">deb http://mirror.ufanet.ru/debian wheezy main contrib non-free
+deb http://mirror.ufanet.ru/debian wheezy-updates main contrib non-free
+deb http://mirror.ufanet.ru/debian wheezy-proposed-updates main contrib non-free
+deb http://mirror.ufanet.ru/debian-security wheezy/updates main contrib non-free</pre>
+
+		<p>Использованные материалы:</p>
+
+		<ul>
+			<li><a href="https://wiki.debian.org/DebianInstaller/Remote">Installing Debian remotely using the network console</a> - основа этой статьи,</li>
+
+			<li><a href="https://www.debian.org/releases/wheezy/example-preseed.txt">preconfiguration file (for wheezy)</a> - пример файла preseed.cfg для Wheezy,</li>
+
+			<li><a href="http://mydrafts.ru/avtomaticheskaya-ustanovka-debian-7-wheezy-po-seti/">Автоматическая установка Debian 7 Wheezy по сети</a> - пример автоматической настройки Debian с созданием учётных записей, разбивкой дисков, настройкой часового пояса и т.п.</li>
+
+			<li><a href="https://debian-administration.org/article/394/Automating_new_Debian_installations_with_preseeding">Automating new Debian installations with preseeding</a> - ещё один пример, где кроме автоматической настройки операционной системы устанавливается и настраивается ещё и squid</li>
+		</ul>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Установка Debian с флешки по SSH">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

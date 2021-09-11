@@ -1,0 +1,92 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="zabbix,mdadm,linux,raid" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-04-30 -->
+		<title>Контроль программного RAID-массива Linux через Zabbix</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Контроль программного RAID-массива Linux через Zabbix</h1>
+
+		<p>Статья про контроль с помощью Zabbix программных RAID-массивов Linux, созданных средствами mdadm. На этот раз кроме установленного и настроенного в системе Zabbix-агента не понадобится более никаких дополнительных пакетов.</p>
+
+		<p>Первое решение, приходящее на ум - использовать программу mdadm. Но есть решение получше - использовать для этого файл /proc/mdstat. Для этого можно вписать в файл конфигурации Zabbix-агента /etc/zabbix/zabbix_agentd.conf всего одну строчку:</p>
+
+		<pre class="code">UserParameter=raid,egrep -c '_U|U_' /proc/mdstat</pre>
+
+		<p>В этом файле состояние RAID-массивов отображается в виде символов между двумя квадратными скобками. Символ U соответствует исправному диску, символ подчёркивания соответствует неисправному диску. Команда egrep считает количество строчек, в которых символ U соседствует с символом подчёркивания. Предполагается, что в массиве есть как минимум два диска и один из них всегда исправен.</p>
+
+		<p>Но однажды мне понадобилось поставить на контроль систему, в которой были настроены массивы RAID-50 и сделано это было так: сначала из дисков собиралось несколько массивов RAID-5, а уже из этих RAID-массивов собирался массив RAID-0. Выглядит это вот так:</p>
+
+		<pre class="console">$ cat /proc/mdstat
+Personalities : [linear] [multipath] [raid0] [raid1] [raid6] [raid5] [raid4]
+[raid10]
+md0 : active raid0 md3[2] md2[1] md1[0] md4[3]
+93765249024 blocks super 1.2 512k chunks
+
+md4 : active raid5 sdw1[0] sdab1[5] sdz1[3] sdx1[1] sdaa1[4] sdac1[7] sdy1[2]
+23441312640 blocks super 1.2 level 5, 64k chunk, algorithm 2 [7/7] [UUUUUUU]
+bitmap: 1/15 pages [4KB], 131072KB chunk
+
+md2 : active raid5 sdk1[2] sdi1[0] sdl1[3] sdn1[5] sdj1[1] sdm1[4] sdo1[7]
+23441312640 blocks super 1.2 level 5, 64k chunk, algorithm 2 [7/7] [UUUUUUU]
+bitmap: 1/15 pages [4KB], 131072KB chunk
+
+md3 : active raid5 sdq1[1] sds1[3] sdp1[0] sdt1[4] sdu1[5] sdv1[7] sdr1[2]
+23441312640 blocks super 1.2 level 5, 64k chunk, algorithm 2 [7/7] [UUUUUUU]
+bitmap: 2/15 pages [8KB], 131072KB chunk
+
+md1 : active raid5 sdc1[1] sdb1[0] sde1[3] sdd1[2] sdf1[4] sdg1[5] sdh1[7]
+23441312640 blocks super 1.2 level 5, 64k chunk, algorithm 2 [7/7] [UUUUUUU]
+bitmap: 1/15 pages [4KB], 131072KB chunk
+
+unused devices: &lt;none&gt;</pre>
+
+		<p>В случае объединения дисков в режиме LINEAR можно наблюдать такую же картину, что и в случае RAID-0:</p>
+
+		<pre class="console">$ cat /proc/mdstat
+Personalities : [linear]
+md0 : active linear sdb[0] sde[3] sdd[2] sdc[1]
+15628074304 blocks super 1.2 0k rounding
+
+unused devices: &lt;none&gt;</pre>
+
+		<p>По идее, хорошо бы контролировать деградацию массивов RAID-0 и LINEAR, но описанный выше способ контроля для них не применим. </p>
+
+		<p>Поиски способов контроля вывели на файловую систему /sys. На русском языке лучшим материалом на интересующую нас тему является статья Виктора Вислобокова: <a href="http://linuxshare.ru/docs/admin/ud_sraid.html">Недокументированные фишки программного RAID в Linux</a>.</p>
+
+		<p>В итоге сформировался новый вариант строчки для файла конфигурации Zabbix-агента /etc/zabbix/zabbix_agentd.conf:</p>
+
+		<pre class="code">UserParameter=raid,fgrep -L in_sync /sys/block/md*/md/dev-*/state | wc -l</pre>
+
+		<p>Этот вариант, правда, тоже может таить в себе неожиданности. У меня есть подозрения, что если в системе заготовлен запасной диск, который включён в один из RAID-массивов в таковом качестве, то в его файле состояния будет строчка spare. Если это действительно так, то это состояние нормальное и не должно приводить к срабатыванию триггера. Однако, системы с запасным диском мне не попадались и проверить свои подозрения мне было негде, поэтому я решил оставить всё как есть - все состояния отличные от in_sync будут считаться аварийными. Если мне попадётся в будущем такая система, то можно будет переделать контроль соответствующим образом, чтобы состояние spare не считалось аварийным.</p>
+
+		<p>После внесения изменений в конфигурацию Zabbix-агента, не забудьте его перезапустить:</p>
+
+		<pre class="console"># /etc/init.d/zabbix-agent restart</pre>
+
+		<p>Я подготовил два шаблона для контроля параметров исправности RAID-массивов:</p>
+		
+		<ul>
+			<li><a href="Template_App_RAID_mdadm.xml">Template_App_RAID_mdadm.xml</a> - шаблон с элементами данных типа "Zabbix-агент",</li>
+
+			<li><a href="Template_App_RAID_mdadm_Active.xml">Template_App_RAID_mdadm_Active.xml</a> - шаблон с элементами данных типа "Zabbix-агент (активный)".</li>
+		</ul>
+
+		<p>В шаблоне есть всего один элемент данных, контролирующий количество неисправных элементов RAID-массивов:</p>
+
+		<img src="mdadm_item.png" />
+
+		<p>И всего один триггер, который срабатывает при наличии хотя бы одного неисправного элемента хотя бы одного RAID-массива:</p>
+
+		<img src="mdadm_trigger.png" />
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Контроль программного RAID-массива Linux через Zabbix">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

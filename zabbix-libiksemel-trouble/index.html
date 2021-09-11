@@ -1,0 +1,171 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="stretch,zabbix,libiksemel,jabber,debian,linux,3.4" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2019-06-02 -->
+		<title>Пересборка libiksemel для решения проблемы JABBER tls handshake failed в Zabbix</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Пересборка libiksemel для решения проблемы JABBER tls handshake failed в Zabbix</h1>
+
+		<p>После обновления операционной системы Debian с Wheezy до Stretch перестала работать отправка сообщений через Jabber. При обновлении пакет libiksemel3 обновился с версии 1.2-4 до версии 1.4-3. В журнале сервера Zabbix /var/log/zabbix/zabbix_server.log обнаружились строчки вида:</p>
+
+		<pre class="code">1769:20190422:083154.224 JABBER: [monitoring@jabber.server.ru/xxx] tls handshake failed</pre>
+
+		<p>В интернете можно найти массу примеров того, как люди справляются с подобными проблемами:</p>
+
+		<ul>
+			<li><a href="https://jonamonleon.wordpress.com/2017/04/25/zabbix-tls-handshake-fail-workaround-enable-jabber-xmpp-notifications-via-script-cent-os/">Zabbix: “TLS handshake fail” workaround: Enable Jabber (XMPP) notifications via script (Cent OS)</a></li>
+
+			<li><a href="https://dyrik.ru/linux/zabbix-opoveshheniya-na-jabber.html">Zabbix оповещения на jabber</a></li>
+
+			<li><a href="https://www.tune-it.ru/web/korg/home/-/blogs/%D1%82%D0%B5%D1%80%D0%BD%D0%B8%D1%81%D1%82%D1%8B%D0%B8-%D0%BF%D1%83%D1%82%D1%8C-%D0%B4%D0%B5%D0%B1%D0%B0%D0%B3%D0%B0-jabber-%D0%B2-net-mgmt-zabbix24">Тернистый путь дебага Jabber в net-mgmt/zabbix24</a></li>
+		</ul>
+
+		<p>Как видно, большинство статей ограничивается обходными решениями. Лишь в третьей статье сделана попытка справиться с источником проблем. Проблема эта, правда, была другая и её решение тоже не было корректным: вместо увеличения таймаута автор статьи по-сути просто отключил проверку таймаута.</p>
+
+		<p>Поскольку раньше отправка сообщений в Jabber у меня работала без нареканий, то я сразу заподозрил, что в библиотеке libiksemel, при помощи которой Zabbix отправляет сообщения в Jabber, повысились требования к безопасности используемых протоколов и шифров. Для начала я решил узнать, какие протоколы и шифры поддерживает Jabber-сервер.</p>
+
+		<p>Jabber-сервер по умолчанию принимает подключения от клиентов на TCP-порт 5222. Через этот порт принимаются как подключения без шифрования, так и с шифрованием. При подключении клиент узнаёт о возможностях сервера и может согласовать с ним шифрование данных, если сервер такую возможность позволяет. К сожалению, я не знаю, как проверить список поддерживаемых протоколов и шифров, подключившись на этот порт.</p>
+
+		<p>Однако, для совместимости со старыми клиентами Jabber-сервер обычно принимает подключения также и на порт 5223, на котором сразу после подключения нужно согласовать шифрование, а затем через зашифрованное соединение уже обмениваться данными по протоколу XMPP.</p>
+
+		<p>libiksemel для установки защищённых подключений использует библиотеку GNU TLS. Попробуем воспользоваться утилитой командной строки gnutls-cli-debug, использующей эту библиотеку, для проверки возможностей Jabber-сервера. Для этого установим пакет gnutls-bin:</p>
+
+		<pre class="console"># apt-get install gnutls-bin</pre>
+
+		<p>Вызываем утилиту для получения списка возможностей Jabber-сервера:</p>
+
+		<pre class="console">$ gnutls-cli-debug -p 5223 jabber.server.ru</pre>
+
+		<p>Утилита выводит следующую информацию:</p>
+
+		<pre class="console">Warning: getservbyport(5223) failed. Using port number as service.
+GnuTLS debug client 3.5.8
+Checking jabber.server.ru:5223
+                             for SSL 3.0 (RFC6101) support... yes
+                        whether we need to disable TLS 1.2... no
+                        whether we need to disable TLS 1.1... no
+                        whether we need to disable TLS 1.0... no
+                        whether %NO_EXTENSIONS is required... no
+                               whether %COMPAT is required... no
+                             for TLS 1.0 (RFC2246) support... yes
+                             for TLS 1.1 (RFC4346) support... no
+                                  fallback from TLS 1.1 to... TLS 1.0
+                             for TLS 1.2 (RFC5246) support... no
+                                  fallback from TLS 1.6 to... failed (server requires fallback dance)
+              for inappropriate fallback (RFC7507) support... yes
+                               for certificate chain order... sorted
+                  for safe renegotiation (RFC5746) support... yes
+                     for Safe renegotiation support (SCSV)... yes
+                    for encrypt-then-MAC (RFC7366) support... no
+                   for ext master secret (RFC7627) support... no
+                           for heartbeat (RFC6520) support... no
+                       for version rollback bug in RSA PMS... no
+                  for version rollback bug in Client Hello... no
+            whether the server ignores the RSA PMS version... no
+whether small records (512 bytes) are tolerated on handshake... yes
+    whether cipher suites not in SSL 3.0 spec are accepted... yes
+whether a bogus TLS record version in the client hello is accepted... yes
+         whether the server understands TLS closure alerts... no
+            whether the server supports session resumption... no
+                      for anonymous authentication support... no
+                      for ephemeral Diffie-Hellman support... no
+                   for ephemeral EC Diffie-Hellman support... no
+                             for curve SECP256r1 (RFC4492)... no
+                             for curve SECP384r1 (RFC4492)... no
+                             for curve SECP521r1 (RFC4492)... no
+           for curve X25519 (draft-ietf-tls-rfc4492bis-07)... no
+                  for AES-128-GCM cipher (RFC5288) support... no
+                  for AES-128-CCM cipher (RFC6655) support... no
+                for AES-128-CCM-8 cipher (RFC6655) support... no
+                  for AES-128-CBC cipher (RFC3268) support... yes
+             for CAMELLIA-128-GCM cipher (RFC6367) support... no
+             for CAMELLIA-128-CBC cipher (RFC5932) support... yes
+                     for 3DES-CBC cipher (RFC2246) support... yes
+                  for ARCFOUR 128 cipher (RFC2246) support... yes
+            for CHACHA20-POLY1305 cipher (RFC7905) support... no
+                                       for MD5 MAC support... yes
+                                      for SHA1 MAC support... yes
+                                    for SHA256 MAC support... no
+                              for ZLIB compression support... no
+                     for max record size (RFC6066) support... no
+                for OCSP status response (RFC6066) support... no
+              for OpenPGP authentication (RFC6091) support... no</pre>
+
+		<p>Как видно, сервер поддерживает только протоколы SSL 3.0 и TLS 1.0, а протоколы TLS 1.1 и TLS 1.2 не поддерживаются. Не понял я только, откуда в выводе утилиты взялся TLS 1.6.</p>
+
+		<p>Теперь распакуем пакет с исходными текстами, чтобы проверить, какие настройки используются:</p>
+
+		<pre class="console"># apt-get source libiksemel3</pre>
+
+		<p>В файле src/stream.c имеется строчка:</p>
+
+		<pre class="code">const char *priority_string = "SECURE256:+SECURE192:-VERS-TLS-ALL:+VERS-TLS1.2";</pre>
+
+		<p>Видно, что Jabber-сервер поддерживает только протоколы SSL3 и TLS1.0, а libiksemel требует, чтобы сервер поддерживал как минимум TLS1.2. Безопасность - это, конечно, хорошо, но, как мне кажется, не стоит бежать впереди паровоза и выставлять настройки более жёсткие, чем это принято в библиотеке GNU TLS по умолчанию.</p>
+
+		<p>Прежде чем менять строку приоритетов и пересобирать пакет, можно протестировать новую строку приоритетов при помощи такой команды:</p>
+
+		<pre class="console">$ gnutls-cli --priority 'NORMAL:-VERS-SSL3.0' -p 5223 jabber.server.ru</pre>
+
+		<p>Если подключение устанавливается успешно с указанной строкой приоритетов, можно продолжать.</p>
+
+		<p>Я поменял строку приоритетов следующим образом:</p>
+
+		<pre style="background-color: lightgrey">const char *priority_string = "NORMAL:-VERS-SSL3.0";</pre>
+
+		<p>Вы можете оставить там только слово NORMAL, т.к. я добавил запрет использовать протокол SSL3.0 для того, чтобы принудить клиента использовать протокол TLS1.0, поддерживаемый используемым мной сервером Jabber. Подробнее о формате строки приоритетов можно почитать, например, здесь: <a href="http://www.hep.by/gnu/gnutls/Priority-Strings.html">7.9 Priority strings</a></p>
+
+		<p>Подтверждаем изменения, формируя из них заплату:</p>
+
+		<pre class="console"># dpkg-source --commit</pre>
+
+		<p>В качестве имени заплаты я указал строчку downgrade_gnutls_priority_string_for_jabber.server.ru</p>
+
+		<p>У меня получился такая заплатка:</p>
+
+		<pre class="code">Description: Downgrade GNU TLS priority string for jabber.server.ru
+ Downgrade GNU TLS priority string for jabber.server.ru
+Author: Vladimir Stupin &lt;vladimir@stupin.su&gt;
+Last-Update: 2019-04-22
+
+--- libiksemel-1.4.orig/src/stream.c
++++ libiksemel-1.4/src/stream.c
+@@ -63,7 +63,7 @@ tls_pull (iksparser *prs, char *buffer,
+ static int
+ handshake (struct stream_data *data)
+ {
+-       const char *priority_string = "SECURE256:+SECURE192:-VERS-TLS-ALL:+VERS-TLS1.2";
++       const char *priority_string = "NORMAL:-VERS-SSL3.0";
+        int ret;
+
+        if (gnutls_global_init () != 0)</pre>
+
+		<p>Запускаем команду для обновления журнала изменений пакета:</p>
+
+		<pre class="console"># dch -i</pre>
+
+		<p>Добавляем такую запись:</p>
+
+		<pre class="code">libiksemel (1.4-3+b1u1) UNRELEASED; urgency=medium
+
+  * Downgrade GNU TLS priority string for jabber.server.ru
+
+ -- Vladimir Stupin &lt;vladimir@stupin.ru&gt;  Mon, 22 Apr 2019 10:29:11 +0300</pre>
+
+		<p>Осталось собрать пакеты с исходными текстами и двоичные пакеты:</p>
+
+		<pre class="console"># dpkg-buildpackage -us -uc -rfakeroot</pre>
+
+		<p>Можно установить libiksemel из собранных пакетов, перезапустить сервер Zabbix и проверить отправку сообщений в Jabber. У меня всё заработало.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Пересборка libiksemel для решения проблемы JABBER tls handshake failed в Zabbix">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

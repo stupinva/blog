@@ -1,0 +1,74 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="перевод,ssl,Реми ван Элст,openssl" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2016-11-13 -->
+		<title>Реми ван Элст. Подписание и проверка текстов/файлов публичными ключами с помощью OpenSSL из командной строки, 2015</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Реми ван Элст. Подписание и проверка текстов/файлов публичными ключами с помощью OpenSSL из командной строки, 2015</h1>
+
+		<p>Перевод статьи: <a href="https://raymii.org/s/tutorials/Sign_and_verify_text_files_to_public_keys_via_the_OpenSSL_Command_Line.html">Sign and verify text/files to public keys via the OpenSSL Command Line</a></p>
+
+		<p>Автор: Реми ван Элст (Remy van Elst)</p>
+
+		<p>В этом небольшом руководстве рассматривается, как использовать OpenSSL из командной строки для подписания файла и как проверить подпись этого файла. Это делается для того, чтобы доказать владение ключом или чтобы доказать, что файл не был изменён с тех пор, как был подписан. Руководство пригодно и для небольших текстовых файлов, и для больших фотографий, и для документов, и файлов PDF.</p>
+
+		<h2>1. Создание пары ключей</h2>
+
+		<p>Сначала создадим новую пару ключей. Можно использовать существующую пару. Измените тему в следующей команде и выполните её, чтобы создать самозаверенную пару ключей:</p>
+
+		<pre class="console">openssl req -nodes -x509 -sha256 -newkey rsa:4096 -keyout "$(whoami)s Sign Key.key" -out "$(whoami)s Sign Key.crt" \
+-days 365 -subj "/C=NL/ST=Zuid Holland/L=Rotterdam/O=Sparkling Network/OU=IT Dept/CN=$(whoami)s Sign Key"</pre>
+
+		<p>Также создадим небольшой текстовый файл для тестирования процесса подписания:</p>
+
+		<pre class="console">echo "Здравствуй, мир!" &gt; sign.txt</pre>
+
+		<h2>2. Подписание файла</h2>
+
+		<p>Воспользуемся следующей командой, чтобы подписать файл. На самом деле мы одной командой <b>openssl</b> посчитаем хэш файла по алгоритму sha256 и подпишем его:</p>
+
+		<pre class="console">openssl dgst -sha256 -sign "$(whoami)s Sign Key.key" -out sign.txt.sha256 sign.txt</pre>
+
+		<p>В результате получим файл <b>sign.txt</b> с его содержимым и файл <b>sign.txt.sha256</b> с подписанным хэшем этого файла.</p>
+
+		<p>Можно разместить этот файл и публичный ключ (<b>$(whoami)s Sign Key.crt</b>) в интернете или в другом месте. Храните приватный ключ (<b>$(whoami)s Sign Key.key</b>) в безопасности и секретности.</p>
+
+		<h2>3. Проверка подписи</h2>
+
+		<p>Для проверки подписи нужен публичный ключ, относящийся к сертификату. Его можно получить из сертификата с помощью следующей команды:</p>
+
+		<pre class="console">openssl x509 -in "$(whoami)s Sign Key.crt"</pre>
+
+		<p>Можно избежать этого этапа, объединив два этапа в одной команде. Следующая команда проверяет файл с помощью подписи хэша:</p>
+
+		<pre class="console">openssl dgst -sha256 -verify &lt;(openssl x509 -in "$(whoami)s Sign Key.crt" -pubkey -noout) -signature sign.txt.sha256 sign.txt</pre>
+
+		<p>Если содержимое не было изменено с момента подписания, вывод команды будет таким:</p>
+
+		<pre class="console">Verified OK</pre>
+
+		<p>Если проверка завершилась неудачно, это означает, что хэш файла не соответствует подписанному хэшу. Весьма вероятно, что файл был изменён или подделан. Результат неудачной проверки выглядит следующим образом:</p>
+
+		<pre class="console">Verification Failure</pre>
+
+		<h2>4. Подпись</h2>
+
+		<p>Чтобы получить текстовую версию подписи (файл содержит двоичные данные), можно воспользоваться командой <b>base64</b>. Текстовую версию вместе с файлом проще разместить в интернете:</p>
+
+		<pre class="console">base64 sign.txt.sha256 &gt; sign.txt.sha256.txt</pre>
+
+		<p>Для обратного преобразования в формат, пригодный для использования в <b>openssl</b>, воспользуйтесь командой <b>base64 -d</b>:</p>
+
+		<pre class="console">base64 -d sign.txt.sha256.txt &gt; sign.txt.sha256</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Реми ван Элст. Подписание и проверка текстов/файлов публичными ключами с помощью OpenSSL из командной строки, 2015">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

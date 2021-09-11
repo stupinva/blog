@@ -1,0 +1,133 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="jigdo,debian,linux" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2008-10-17 -->
+		<title>Скачивание образов дисков Debian с использованием jigdo-lite</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Скачивание образов дисков Debian с использованием jigdo-lite</h1>
+
+		<p>Кратко о сути jigdo. jigdo состоит из двух взаимно дополняющих друг друга утилит - jigdo-file и jigdo-lite.</p>
+
+		<p>Первая утилита, jigdo-file сканирует образ диска и находит там файлы. Для каждого файла утилита рассчитывает хэш md5 - контрольную сумму. В результате сканирования образа утилита создаёт два файла - шаблон диска (*.template), содержащий всю информацию из образа за исключением файлов, и сжатый список файлов с контрольными суммами (*.jigdo).</p>
+
+		<p>Вторая утилита, jigdo-lite на основании файлов *.jigdo и *.template может воссоздать образ диска. Недостающие файлы она может найти в произвольном указанном ей каталоге на локальном диске или скачать с указанного ей Интернет-зеркала Debian.</p>
+
+		<p>Таким образом jigdo - это умный вариант rsync или torrent, предназначенный для скачивания iso-образов, который умеет собирать часть образа диска из имеющихся уже скачанных файлов.</p>
+
+		<p>Установим пакет jigdo:</p>
+
+		<pre class="console"># aptitude install jigdo-file</pre>
+
+		<p>Создаём текстовый файл jigdo-list.txt, содержащий в каждой строке по одной ссылке на файлы *.jigdo и *.template для скачивания, ссылки берём на странице <a href="http://cdimage.debian.org/debian-cd/4.0_r4a/i386/jigdo-dvd/">http://cdimage.debian.org/debian-cd/4.0_r4a/i386/jigdo-dvd/</a>:</p>
+
+		<pre class="code">http://cdimage.debian.org/debian-cd/4.0_r4a/i386/jigdo-dvd/debian-40r4a-i386-DVD-1.jigdo
+http://cdimage.debian.org/debian-cd/4.0_r4a/i386/jigdo-dvd/debian-40r4a-i386-DVD-1.template
+http://cdimage.debian.org/debian-cd/4.0_r4a/i386/jigdo-dvd/debian-40r4a-i386-DVD-2.jigdo
+http://cdimage.debian.org/debian-cd/4.0_r4a/i386/jigdo-dvd/debian-40r4a-i386-DVD-2.template
+http://cdimage.debian.org/debian-cd/4.0_r4a/i386/jigdo-dvd/debian-40r4a-i386-DVD-3.jigdo
+http://cdimage.debian.org/debian-cd/4.0_r4a/i386/jigdo-dvd/debian-40r4a-i386-DVD-3.template
+http://cdimage.debian.org/debian-cd/4.0_r4a/i386/jigdo-dvd/debian-update-4.0r4a-i386-DVD-1.jigdo
+http://cdimage.debian.org/debian-cd/4.0_r4a/i386/jigdo-dvd/debian-update-4.0r4a-i386-DVD-1.template</pre>
+
+		<p>Запускаем скачивание файлов из списка:</p>
+
+		<pre class="console">$ wget -i jigdo-list.txt</pre>
+
+		<p>В файле /etc/fstab прописываем монтирование имеющихся образов:</p>
+
+		<pre class="code">/home/iso/debian-40r4-i386-DVD-1.iso /mnt/debian1 udf,iso9660 user,loop=/dev/loop0 0 0
+/home/iso/debian-40r4-i386-DVD-2.iso /mnt/debian2 udf,iso9660 user,loop=/dev/loop1 0 0
+/home/iso/debian-40r3-i386-DVD-3.iso /mnt/debian3 udf,iso9660 user,loop=/dev/loop2 0 0
+/home/iso/debian-update-40r3-i386-DVD-1.iso /mnt/debian4 udf,iso9660 user,loop=/dev/loop3 0 0</pre>
+
+		<p>Смонтируем все ISO-образы:</p>
+
+		<pre class="console"># mount -a</pre>
+
+		<p>Запустим jidgo-lite для первого образа, в диалоге укажем путь до первого смонтрованного диска:</p>
+
+		<pre class="console">$ jigdo-lite jigdo/debian-40r4a-i386-DVD-1.jigdo</pre>
+
+		<p>Программа выдаст запрос, где можно поискать уже скачанные файлы, укажем ей смонтированный диск:</p>
+
+		<pre class="console">Files to scan: /mnt/debian1/</pre>
+
+		<p>После сканирования файлов в каталоге, подсчёта и сопоставления контрольных сумм, программа определит количество найденных файлов:</p>
+
+		<pre class="console">Found 4627 of the 4627 files required by the template</pre>
+
+		<p>После чего создаст образ диска и выдаст соответствующее сообщение:</p>
+
+		<pre class="console">Successfully created `debian-40r4a-i386-DVD-1.iso'</pre>
+
+		<p>Затем программа проверит контрольную сумму полученного образа, чтобы убедиться что полученный диск абсолютно идентичен находящемуся на официальном сайте debian:</p>
+
+		<pre class="console">OK: Checksums match, image is good!</pre>
+
+		<p>Отлично, первый диск готов!</p>
+
+		<p>Переходим ко второму:</p>
+
+		<pre class="console">$ jigdo-lite jigdo/debian-40r4a-i386-DVD-2.jigdo</pre>
+
+		<p>И этот диск тоже не пришлось качать, я в восторге!</p>
+
+		<p>Следующие два образа у меня более старые, поэтому кое-что всё-таки пришлось качать.</p>
+
+		<pre class="console">$ jigdo-lite jigdo/debian-40r4a-i386-DVD-3.jigdo</pre>
+
+		<p>Программа запоминает использованные источники файлов и предлагает указать один из них их цифрой, можно ввести новый источник файлов.</p>
+
+		<pre class="console">1: /mnt/debian2/
+2: /mnt/debian1/
+Files to scan: <b>/mnt/debian3/</b></pre>
+
+		<p>На этот раз программа нашла лишь часть файлов:</p>
+
+		<pre class="console">Found 5121 of the 8309 files required by the template
+
+Copied input files to temporary file `debian-40r4a-i386-DVD-3.iso.tmp' - repeat command and supply more files to continue</pre>
+
+		<p>Пока программа не нашла все подходящие файлы, она будет выводить предложение указать дополнительные источники снова и снова, если у Вас больше нет источников, можно нажать Enter:</p>
+
+		<pre class="console">Files to scan:</pre>
+
+		<p>После этого программа предложит указать зеркало в сети, с которого можно скачать недостающие пакеты. У меня установлен apt-cacher, который указан в файле /etc/apt/sources.list. Программа сама предлагает мне использовать его, я соглашаюсь нажатием Enter:</p>
+
+		<pre class="console">Debian mirror [http://127.0.0.1:3142/debian/]:</pre>
+
+		<p>После чего программа начнёт скачивание недостающих пакетов из сети. Для скачивания используется программа wget. Если Вы хотите скачивать недостающие файлы через прокси-сервер, можно настроить переменные окружения или конфигурацию wget, в которой указать адрес, порт имя и пароль используемого прокси-сервера.</p>
+
+		<p>Я таким образом закачал себе все три основных диска и диск с обновлениями. Насколько я понял, диск с обновлениями содержит только те пакеты, которые изменились с прошлого выпуска, потому что этот диск мне не пришлось скачивать - достаточно было указать три основных уже скачанных смонтированных диска. Имея этот диск можно обновить систему с предыдущего выпуска до текущего.</p>
+
+		<p>Итак, краткое описание использования программы.</p>
+
+		<ol>
+			<li>Нужно установить в системе пакет jigdo-file.</li>
+
+			<li>Скачать файлы *.jigdo и *.template с официального сайта Debian.</li>
+
+			<li>Приготовить файлы с дисков Debian предыдущих версий, каталоги с deb-пакетами. Они могут пригодиться для того, чтобы не пришлось скачивать все диски целиком.</li>
+
+			<li>Запускать команду jigdo-lite для каждого jigdo-файла.</li>
+
+			<li>На запрос программы "Files to scan:" можно ответить вводом пути до источника файлов, можно ввести цифру из меню для уже указанного однажды каталога, можно нажать Enter, если источников больше нет.</li>
+
+			<li>На запрос "Debian mirror [http://127.0.0.1:3142/debian/]:" ввести URL зеркала или просто нажать Enter, чтобы использовать предложенное зеркало.</li>
+
+			<li>После завершения всех пунктов наслаждаться готовыми свежими образами системы.</li>
+		</ol>
+
+		<p>Для скачивания через прокси можно соответствующим образом настроить wget, чтобы для скачивания не нужно было держать постоянно открытым отдельный терминал, можно воспользоваться программой screen.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Скачивание образов дисков Debian с использованием jigdo-lite">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

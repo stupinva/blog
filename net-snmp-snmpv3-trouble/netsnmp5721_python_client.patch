@@ -1,0 +1,35 @@
+--- python/netsnmp/client_intf.c.orig	2014-02-19 13:36:42.000000000 +0600
++++ python/netsnmp/client_intf.c	2016-09-06 15:54:26.469612347 +0500
+@@ -821,14 +821,20 @@
+ 
+       case TYPE_IPADDR:
+         vars->type = ASN_IPADDRESS;
+-        vars->val.integer = (long *)malloc(sizeof(long));
++        in_addr_t addr = 0;
+         if (val)
+-            *(vars->val.integer) = inet_addr(val);
++            addr = inet_addr(val);
++
++        if (addr && (addr != -1)) {
++            vars->val.string = malloc(sizeof(in_addr_t));
++            vars->val_len = sizeof(in_addr_t);
++            memcpy(vars->val.string, &addr, sizeof(in_addr_t));
++        }
+         else {
+             ret = FAILURE;
+-            *(vars->val.integer) = 0;
++            vars->val.string = (u_char*)strdup("");
++            vars->val_len = 0;
+         }
+-        vars->val_len = sizeof(long);
+         break;
+ 
+       case TYPE_OBJID:
+@@ -2519,6 +2525,7 @@
+             tmplen = sizeof(tmp_val_str)-1;
+         }
+ 	memcpy(tmp_val_str, val, tmplen);
++        tmp_val_str[tmplen] = '\0';
+ 	if (type==TYPE_INTEGER && use_enums && tp && tp->enums) {
+ 	  for(ep = tp->enums; ep; ep = ep->next) {
+ 	    if (val && !strcmp(ep->label, val)) {

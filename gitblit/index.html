@@ -1,0 +1,161 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="stretch,java,git,nginx,debian,linux,gitblit" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2019-07-21 -->
+		<title>Установка Gitblit</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Установка Gitblit</h1>
+
+		<p>Gitblit - это веб-интерфейс для работы с репозиториями git. Приложение написано на языке Java и поэтому его довольно легко запустить как под управлением Unix-системы, так и под управлением операционной системы Windows.</p>
+
+		<h2>1. Скачивание репозитория</h2>
+
+		<p>Скачиваем и распаковываем архив:</p>
+
+		<pre class="console">$ wget http://dl.bintray.com/gitblit/releases/gitblit-1.8.0.tar.gz
+$ tar xzvf gitblit-1.8.0.tar.gz
+$ cd gitblit-1.8.0</pre>
+
+		<h2>2. Разработка плана развёртывания</h2>
+
+		<p>Судя по содержимому файла service-ubuntu.sh, запуск приложения происходит при помощи команды:</p>
+
+		<pre class="code">/usr/bin/java --chuid $GITBLIT_USER --chdir $GITBLIT_PATH -- $ARGS</pre>
+
+		<p>По умолчанию настройки имеют следующие значения:</p>
+
+		<pre class="code">GITBLIT_PATH=/opt/gitblit
+GITBLIT_BASE_FOLDER=/opt/gitblit/data
+GITBLIT_USER="gitblit"
+source ${GITBLIT_PATH}/java-proxy-config.sh
+ARGS="-server -Xmx1024M ${JAVA_PROXY_CONFIG} -Djava.awt.headless=true -jar gitblit.jar --baseFolder $GITBLIT_BASE_FOLDER --dailyLogFile"</pre>
+
+		<p>В файле java-proxy-config.sh можно настроить прокси-сервер, на случай если система, на которой будет развёрнуто приложение, не имеет прямого выхода в Интернет. Будем считать, что нас такой случай не интересует. Если понадобится, можно будет просто соответствующим образом поменять значение ARGS.</p>
+
+		<p>Наша задача подготовить окружение для работы приложения и создать service-файл для запуска и остановки приложения через systemd. Нужно:</p>
+
+		<ol>
+			<li>Установить java</li>
+
+			<li>Создать пользователя gitblit, который указан в переменной GITBLIT_USER</li>
+
+			<li>Создать каталоги для приложения и его данных и задать значения переменных GITBLIT_PATH и GITBLIT_BASE_FOLDER</li>
+
+			<li>Подготовить файл с настройками переменных окружения /etc/default/gitblit</li>
+
+			<li>Подготовить service-файл для управления gitblit через systemd</li>
+
+			<li>Настроить проксирование запросов к gitblit через nginx</li>
+		</ol>
+
+		<h2>3. Установка Java</h2>
+
+		<p>На официальной странице проекта по ссылке <a href="http://gitblit.com/">http://gitblit.com/</a>, в разделе «Java Runtime Requirement» написано, что Gitblit требует для работы Java 7 Runtime Environment (JRE) или Java 7 Development Kit (JDK). Разработкой мы заниматься пока не собираемся, поэтому обойдёмся JRE. В дистрибутиве Debian Stretch имеется только Java версии 8. Установим соответствующий пакет:</p>
+
+		<pre class="console"># apt-get install openjdk-8-jre-headless</pre>
+
+		<h2>4. Создание пользователя</h2>
+
+		<p>Для создания пользователя gitblit выполним команду:</p>
+
+		<pre class="console"># useradd -M -r gitblit</pre>
+
+		<h2>5. Создание каталогов</h2>
+
+		<p>Создадим каталог приложения вручную:</p>
+
+		<pre class="console"># mkdir -p /opt/gitblit
+# chown gitblit:gitblit /opt/gitblit
+# chmod o= /opt/gitblit</pre>
+
+		<p>Скопируем в него распакованные файлы и проставим права доступа к ним:</p>
+
+		<pre class="console"># cd /opt/gitblit
+# cp -R /home/stupin/gitblit/gitblit-1.8.0/* .
+# chown gitblit:gitblit -R *
+# chmod o= -R *</pre>
+
+		<h2>6. Создание файла /etc/default/gitblit</h2>
+
+		<p>Создаём файл /etc/default/gitblit со следующим содержимым:</p>
+
+		<pre class="code">ARGS="-server -Xmx1024M -Djava.awt.headless=true -jar /home/gitblit/gitblit.jar --baseFolder /home/gitblit/data --dailyLogFile"</pre>
+
+		<p>В файле /home/gitblit/data/default.properties меняем следующие настройки:</p>
+
+		<pre class="code">web.canonicalUrl = https://stupin.su/git/
+server.contextPath = /
+server.httpPort = 8080
+server.httpsPort = 0
+server.httpBindInterface = 127.0.0.1
+server.httpBindInterface = 127.0.0.1</pre>
+
+		<p>С этими настройками приложение будет принимать подключения по протоколу HTTP на порт 8080 на локальном петлевом интерфейсе. На этот порт мы будем пробрасывать запросы, поступающие в nginx на адрес https://stupin.su/git/</p>
+
+		<h2>7. Создание service-файла</h2>
+
+		<p>Создадим файл /etc/systemd/system/gitblit.service со следующим содержимым:</p>
+
+		<pre class="code">[Unit]
+
+Description=Managing, viewing, and serving Git repositories
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/default/gitblit
+WorkingDirectory=/opt/gitblit
+User=gitblit
+ExecStart=/usr/bin/java $ARGS
+Restart=always
+
+[Install]
+WantedBy=multi-user.target</pre>
+
+		<p>Включим автозапуск сервиса при старте системы и запустим его вручную:</p>
+
+		<pre class="console"># systemctl enable gitblit
+# systemctl start gitblit</pre>
+
+		<h2>8. Настройка проксирования через nginx</h2>
+
+		<p>Если nginx ещё не установлен, то установить его можно при помощи следующей команды:</p>
+
+		<pre class="console"># apt-get install nginx-light</pre>
+
+		<p>Впишем в конфигурацию nginx (в моём случае это файл /etc/nginx/sites-enabled/root) в секцию server следующий блок:</p>
+
+		<pre class="code"># Gitblit
+location /git/ {
+  rewrite /git/(.*) /$1 break;
+  proxy_redirect off;
+  proxy_bind 127.0.0.1;
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_pass http://127.0.0.1:8080/;
+}</pre>
+
+		<p>Все запросы, поступающие на адрес https://stupin.su/git/ передаются на обработку на адрес http://127.0.0.1:8080. При этом из адреса URL вырезается базовый каталог /git и запросы поступают в корневой каталог приложения.</p>
+
+		<p>И перезагрузим настройки nginx:</p>
+
+		<pre class="console"># systemctl reload nginx</pre>
+
+		<h2>9. Начальная настройка gitblit</h2>
+
+		<p>Для первого входа в веб-интерфейс gitblit используется учётная запись admin с паролем admin.</p>
+
+		<h2>10. Использованные материалы</h2>
+
+		<p><a href="https://www.unixmen.com/install-gitblit-ubuntu-fedora-centos/">Install Gitblit On Ubuntu / Fedora / CentOS</a></p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Установка Gitblit">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

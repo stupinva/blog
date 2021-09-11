@@ -1,0 +1,114 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="patch,openntpd,linux,debian,wheezy,troubleshooting" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-03-26 -->
+		<title>Таймаут DNS в OpenNTPd</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Таймаут DNS в OpenNTPd</h1>
+
+		<p>Как-то на работе настраивал сервер для отправки в филиал. Всё настроил, начал уже отключать от сервера провода, вдруг решил ещё раз проверить какой-то файл конфигурации. Включил сервер и обнаружил, что загрузка замерла.</p>
+
+		<p>Стал разбираться, что же не так. Как оказалось, загрузка остановилась на этапе запуска OpenNTPd. Заметил, что сервер не был подключен к сети. Воткнул сеть - сервер стал загружаться дальше. В интернете нашёл описание этой ошибки в OpenNTPd: <a href="https://bugs.gentoo.org/show_bug.cgi?id=493358">net-misc/openntpd - failed dns results in extended startup delay when -s option in use</a></p>
+
+		<p>Проблема заключается в том, что у OpenNTPd предусмотрен таймаут для NTP-серверов, но не предусмотрен таймаут для DNS-серверов, поэтому демон продолжает в бесконечном цикле выполнять DNS-запросы, пытаясь узнать имена NTP-серверов.</p>
+
+		<p>Проблему можно решить одним из способов:</p>
+
+		<ul>
+			<li>Убрать из настроек опцию -s,</li>
+
+			<li>Прописать в конфигурацию IP-адреса NTP-серверов, а не доменные имена,</li>
+
+			<li>Пропатчить пакет патчем из этого отчёта об ошибке.</li>
+		</ul>
+
+		<p>Я решил тогда пропатчить пакет. Потом я много раз пользовался этим пакетом, но описать его сборку всё забывал. Вот сейчас решил всё-таки задокументировать эту процедуру, хотя в новых версиях Debian она станет больше не нужной, т.к. в новых версиях OpenNTPd ошибка уже исправлена.</p>
+
+		<p>Для начала отредактируем файл /etc/apt/sources.list и добавим строчки с репозиториями deb-src с исходными текстами:</p>
+
+		<pre class="code">deb http://mirror.ufanet.ru/debian/ wheezy main contrib non-free
+deb http://mirror.ufanet.ru/debian/ wheezy-updates main contrib non-free
+deb http://mirror.ufanet.ru/debian/ wheezy-proposed-updates main contrib non-free
+deb http://mirror.ufanet.ru/debian-security wheezy/updates main contrib non-free
+
+deb-src http://mirror.ufanet.ru/debian/ wheezy main contrib non-free
+deb-src http://mirror.ufanet.ru/debian/ wheezy-updates main contrib non-free
+deb-src http://mirror.ufanet.ru/debian/ wheezy-proposed-updates main contrib non-free
+deb-src http://mirror.ufanet.ru/debian-security wheezy/updates main contrib non-free</pre>
+
+		<p>Установим инструменты, необходимые для сборки пакета:</p>
+
+		<pre class="console"># apt-get install dpkg-dev devscripts fakeroot</pre>
+
+		<p>Установим пакет с исходными текстами openntpd:</p>
+
+		<pre class="console"># apt-get source openntpd</pre>
+
+		<p>Скачаем подготовленный мной патч:</p>
+
+		<pre class="console"># wget <a href="openntpd-20080406p-dns-timeout.patch">openntpd-20080406p-dns-timeout.patch</a></pre>
+
+		<p>Перейдём в каталог с исходными текстами пакета:</p>
+
+		<pre class="console"># cd openntpd-20080406p</pre>
+
+		<p>Наложим скачанный патч:</p>
+
+		<pre class="console"># patch -Np0 &lt; ../openntpd-20080406p-dns-timeout.patch</pre>
+
+		<p>Установим пакеты, необходимые для сборки пакета openntpd:</p>
+
+		<pre class="console"># apt-get build-dep openntpd</pre>
+
+		<p>Оформим изменения, сделанные в исходных текстах, в виде патча:</p>
+
+		<pre class="console"># dpkg-source --commit</pre>
+
+		<p>В ответ на запрос имени заплатки введём dns-timeout.</p>
+
+		<p>Содержимое заголовка заплатки:</p>
+
+		<pre class="code">Description: DNS timeout added
+ Added patch from https://bugs.gentoo.org/show_bug.cgi?id=493358
+ .
+ openntpd (20080406p-4) unstable; urgency=low
+Author: Vladimir Stupin &lt;vladimir@stupin.su&gt;
+Last-Update: &lt;2017-02-09&gt;
+
+--- openntpd-20080406p.orig/ntpd.c
++++ openntpd-20080406p/ntpd.c</pre>
+
+		<p>Теперь опишем сделанные изменения в журнале изменений:</p>
+
+		<pre class="console"># dch -i</pre>
+
+		<p>Свежая запись в журнале будет выглядеть следующим образом:</p>
+
+		<pre class="code">openntpd (20080406p-4.1) UNRELEASED; urgency=low
+
+  * DNS timeout added
+
+ -- Vladimir Stupin &lt;vladimir@stupin.su&gt;  Thu, 09 Mar 2017 22:11:37 +0500</pre>
+
+		<p>Соберём новый пакет с исходными текстами и двоичный пакет:</p>
+
+		<pre class="console"># dpkg-buildpackage -us -uc -rfakeroot</pre>
+
+		<p>Теперь можно перейти на уровень выше и установить собранный пакет:</p>
+
+		<pre class="console"># cd ..
+# dpkg -i openntpd_20080406p-4.1_amd64.deb</pre>
+
+		<p>С новым пакетом пауза в процессе загрузки составляет 1 минуту 40 секунд, что вполне приемлемо, т.к. сервер в конце концов всё-таки загружается, а на фоне всего процесса загрузки эта дополнительная пауза почти не заметна.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Таймаут DNS в OpenNTPd">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

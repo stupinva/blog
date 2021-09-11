@@ -1,0 +1,120 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="python,django,ldap" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-07-16 -->
+		<title>Бэкенд для LDAP-аутентификации в Django</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Бэкенд для LDAP-аутентификации в Django</h1>
+
+		<p>Написал небольшой модуль для аутентификации в Django через LDAP-сервер. Для входа нужно ввести полное имя пользователя в формате user@domain.tld и пароль пользователя.</p>
+
+		<p>Модуль учитывает состояние пользователя - заблокирован он в каталоге LDAP или нет. Если пользователь найден в LDAP, но отсутствует в таблице auth_user, то пользователь создаётся и помечается активным. Если пользователь не найден в LDAP (может быть не найден из-за неверного пароля или из-за того, что пользователь заблокирован), но найден в таблице auth_user, то отметка активности пользователя в таблице снимается.</p>
+
+		<p>При каждом входе из каталога LDAP в таблицу auth_user копируются имя пользователя, фамилия и почтовый ящик.</p>
+
+		<p>При первом входе пользователя в поле пароля в таблице auth_user прописывается случайно сгенерированный пароль. Это делается для того, чтобы пользователь, получивший доступ к базе данных или интерфейсу администрирования Django, не смог скопировать хэш настоящего пароля пользователя и не смог бы с помощью специальных программ подобрать пароль, подходящий к этому хэшу. Можно было, конечно, поступить и проще - прописывать в поле хэша пароля всегда один и тот же текст, который не может получиться в результате хэширования пароля.</p>
+
+		<p>Модуль аутентификации LDAP может использоваться и совместно со стандартным модулем аутентификации Django. Именно поэтому в базу данных каждый раз вносится случайно сгенерированный пароль. Если бы в базу данных каждый раз вносился один и тот же пароль (пусть даже и в хэшированном виде), то всё ещё оставалась бы возможность войти под учётной записью этого пользователя, зная этот стандартный пароль, а не настоящий пароль пользователя в каталоге LDAP.</p>
+
+		<p>Сохраним бэкенд в файл application/ldap_backend.py внутри каталога проекта:</p>
+
+		<pre class="code"># -*- coding: UTF-8 -*-
+
+import random, ldap
+from django.contrib.auth.models import User
+from django.contrib.auth.hashers import make_password
+
+# Функция, генерирующая пароль или ключ указанной сложности
+def genkey(upper=True, lower=True, digits=True, signs=False, length=64):
+    chars = ''
+
+    if upper:
+        chars += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    if lower:
+        chars += 'abcdefghijklmnopqrstuvwxyz'
+    if digits:
+        chars += '0123456789'
+    if signs:
+        chars += '()[]{}&lt;&gt;|/~!@#$%^&amp;,.;:*-+=_'
+
+    key = ''
+    num = len(chars)
+    for i in xrange(0, length):
+        j = int(random.random() * num)
+        key += chars[j]
+    return key
+
+class LDAPBackend(object):
+    def authenticate(self, username=None, password=None):
+        # Ищем пользователя в LDAP
+        try:
+            login, domain = username.split('@')
+        except ValueError:
+            return None
+
+        base_dn = domain.split('.')
+        base_dn = map(lambda x: 'dc=' + x, base_dn)
+        base_dn = ','.join(base_dn)
+
+        l = ldap.initialize('ldap://' + domain)
+        try:
+            l.simple_bind_s(username, password)
+        except ldap.INVALID_CREDENTIALS:
+            return None
+        l.set_option(ldap.OPT_REFERRALS, 0)
+        result = l.search_s(base_dn,
+                            ldap.SCOPE_SUBTREE,
+                            '(&amp;(sAMAccountName=%s)(objectClass=user)(!(UserAccountControl:1.2.840.113556.1.4.803:=2)))' % login,
+                            None)
+        found, data = result[0]
+        l.unbind_s()
+
+        # Ищем пользователя в django или создаём его
+        try:
+            user = User.objects.get(username=username)
+        except User.DoesNotExist:
+            user = User(username=username)
+            user.password = make_password(genkey())
+            user.is_staff = True
+            user.is_superuser = False
+
+        # Обновляем пользователя в django
+        if found:
+            user.email = data.get('mail', [''])[0]
+            user.first_name = data.get('givenName', [''])[0].decode('UTF-8') # data.get('middleName', [''])[0].decode('UTF-8')
+            user.last_name = data.get('sn', [''])[0].decode('UTF-8')
+            user.is_active = True
+        else:
+            user.is_active = False
+        user.save()
+
+        return user
+
+    def get_user(self, user_id):
+        try:
+            return User.objects.get(pk=user_id)
+        except User.DoesNotExist:
+            return None</pre>
+
+		<p>Для использования этого модуля аутентификации, нужно прописать его в настройках проекта, в файле settings.py:</p>
+
+		<pre class="code">AUTHENTICATION_BACKENDS = (
+  <b>'application.ldap_backend.LDAPBackend',</b>
+  'django.contrib.auth.backends.ModelBackend'
+)</pre>
+
+		<p>Если стандартная аутентификация Django не требуется, то стандартный модуль можно отключить.</p>
+
+		<p>Если у кого-то есть замечания или предложения по доработке модуля - готов вас выслушать.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Бэкенд для LDAP-аутентификации в Django">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

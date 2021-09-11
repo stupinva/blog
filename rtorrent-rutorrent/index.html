@@ -1,0 +1,173 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="rtorrent,lighttpd,rutorrent" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2009-10-14 -->
+		<title>rtorrent + rutorrent</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>rtorrent + rutorrent</h1>
+
+		<p>В последнее время нахожусь в поисках оптимального torrent-клиента. Когда-то я пользовался transmission-daemon в купе с web-интерфейсом clutch, затем пересел на rtorrent, запущенный в сеансе screen. При необходимости управлял им через ssh.</p>
+
+		<p>Недавно снова попробовал свежую версию transmission-daemon. Как оказалось, в свежей версии transmission-daemon web-клиент уже встроен вовнутрь демона. Работает без падений - всё отлично, но хочется рассмотреть по возможности побольше вариантов, чтобы выбрать оптимальный.</p>
+
+		<p>Недавно я наткнулся на лестные отзывы о web-интерфейсе rutorrent для rtorrent. Сам интерфейс очень похож на web-интерфейс (и на GUI-интерфейс) программы uTorrent.</p>
+
+		<p>web-интерфейс будет обслуживаться web-сервером lighttpd, а rtorrent будет запущен в screen-сеансе. Для работы web-интерфейса нам понадобится PHP, а для настройки ограничения доступа - утилита htdigest из пакета apache2-utils. Если вы не хотите её устанавливать, то вместо неё можете воспользоваться следующим сценарием <a href="lightdigest.sh">lightdigest.sh</a>.</p>
+
+		<p>Поставим необходимое нам:</p>
+
+		<pre class="console"># aptitude install rtorrent screen lighttpd php5-cgi apache2-utils</pre>
+
+		<p>Для начала я создал простенький файл конфигурации ~/.rtorrent.rc для rtorrent в домашнем каталоге пользователя, от имени которого будет работать rtorrent:</p>
+
+		<pre class="code">port_range = 6925-6925
+directory = /home/rtorrent
+session = /home/rtorrent/.rtorrent-session/
+load_start = /home/rtorrent/torrents/*
+scgi_port = 127.0.0.1:5000</pre>
+
+		<p>port_range - опция задаёт диапазон TCP-портов, который будет прослушиваться в ожидании подключения других torrent-клиентов и будет анонсироваться трекерам. В данном случае это всего один TCP-порт 6925. Если его не указать, то при каждом запуске rtorrent будет слушать и анонсировать случайный диапазон портов. Задаю я этот параметр по одной простой причине - чтобы потом проковырять в фаерволле соответствующую дырочку.</p>
+
+		<ul>
+			<li><b>directory</b> - опция задаёт каталог, в который будет производиться закачка.</li>
+
+			<li><b>session</b> - опция задаёт каталог, в который будут помещаться активные торренты. При перезапуске rtorrent эти торренты автоматически будут возобновлены.</li>
+
+			<li><b>load_start</b> - задаёт имена торрент-файлов, которые необходимо добавить к текущему сеансу.</li>
+
+			<li><b>scgi_port</b> - настраивает прослушивание управляющего TCP-порта. Управление происходит по протоколу XML-RPC.</li>
+		</ul>
+
+		<p>Теперь настроим lighttpd, добавим в файл /etc/lighttpd/lighttpd.conf следующие настройки:</p>
+
+		<pre class="code">server.modules += ( "mod_fastcgi" )
+
+fastcgi.server = (
+  ".php" =&gt;
+  (
+    (
+      "bin-path" =&gt; "/usr/bin/php5-cgi",
+      "socket" =&gt; "/tmp/php.socket",
+      "max-procs" =&gt; 2,
+      "idle-timeout" =&gt; 20,
+      "bin-environment" =&gt;
+      (
+        "PHP_FCGI_CHILDREN" =&gt; "1",
+        "PHP_FCGI_MAX_REQUESTS" =&gt; "10000"
+      ),
+      "bin-copy-environment" =&gt;
+      (
+        "PATH",
+        "SHELL",
+        "USER"
+      ),
+      "broken-scriptfilename" =&gt; "enable"
+    )
+  )
+)
+
+server.modules += ( "mod_scgi" )
+
+scgi.server = (
+  "/RPC2" =&gt;
+  (
+    "127.0.0.1" =&gt;
+    (
+      "host" =&gt; "127.0.0.1",
+      "port" =&gt; 5000,
+      "check-local" =&gt; "disable",
+      "disable-time" =&gt; 0,
+    )
+  )
+)
+
+server.modules += ( "mod_auth" )
+
+auth.backend = "htdigest"
+auth.backend.htdigest.userfile = "/etc/lighttpd/htdigest"
+
+auth.require = (
+  "/RPC2" =&gt;
+  (
+    "method" =&gt; "digest",
+    "realm" =&gt; "rTorrent RPC",
+    "require" =&gt; "user=rtorrent"
+  )
+)</pre>
+
+		<p>Этот фрагмент включает и настраивает три плагина lighttpd:</p>
+
+		<ol>
+			<li>fastcgi - для обслуживания php-сценариев web-интерфейса,</li>
+
+			<li>scgi - для проксирования обращений к URL'у "/RPC2" на локальный TCP-сокет 5000,</li>
+
+			<li>auth - для ограничения доступа к этому URL'у по имени пользователя и паролю.</li>
+		</ol>
+
+		<p>С помощью утилиты htdigest создадим файл с паролем для пользователя rtorrent и области "rTorrent RPC":</p>
+
+		<pre class="console"># htdigest -c /etc/lighttpd/htdigest "rTorrent RPC" rtorrent</pre>
+
+		<p>Если в файле паролей уже есть какие-то записи, то предыдущую команду выполним без опции "-c", чтобы файл не был перезаписан, а был только лишь дополнен новой записью. Соответственно, если вы уже использовали авторизацию по htdigest, файл паролей может находиться в другом месте, в том куда вы его до этого положили. В таком случае нужно поправить путь к файлу паролей в опции auth.backend.htdigest.userfile, указанной в фрагменте /etc/lighttpd/lighttpd.conf выше.</p>
+
+		<p>Теперь пришло время скачать со страницы <a href="http://code.google.com/p/rutorrent/downloads/list">http://code.google.com/p/rutorrent/downloads/list</a> архив rtorrent с файлами web-интерфейса rutorrent. Остальные перечисленные на этой странице файлы являются плагинами к rutorrent.</p>
+
+		<pre class="console">$ wget http://rutorrent.googlecode.com/files/rtorrent-2.7.tar.gz</pre>
+
+		<p>Создадим каталог для размещения файлов из архива:</p>
+
+		<pre class="console"># cd /var/www
+$ mkdir rutorrent</pre>
+
+		<p>И распакуем архив в него:</p>
+
+		<pre class="console"># tar xzvf rtorrent-2.7.tar.gz -C /var/www/rutorrent</pre>
+
+		<p>Видим, что файлы распаковались в каталог /var/www/rutorrent/rtorrent. Мне это не понравилось, я переместил файлы так, как и было изначально мной задумано:</p>
+
+		<pre class="console"># cd /var/www/rutorrent
+# mv rtorrent/* .
+# rmdir rtorrent</pre>
+
+		<p>Теперь дадим приложению права на запись в каталоги torrents и settings:</p>
+
+		<pre class="console"># chown www-data:www-data torrents settings</pre>
+
+		<p>Заходим по адресу http://ваш-IP/rutorrent, проходим аутентификацию и изучаем интерфейс:</p>
+
+		<img src="rutorrent.png" />
+
+		<p>Примечания:</p>
+
+		<ol>
+			<li>При работе web-интерфейса выяснилось, что он неплохо умеет ронять rtorrent.</li>
+
+			<li>Пищу для дальнейших размышлений на тему улучшения системы даёт сообщение web-интерфейса: "rTorrent скомпилирован с некорректной версией библиотеки xmlrpc-c, без поддержки 8-байтовых целых. Версия библиотеки должна быть &gt;= 1.11. Часть функциональности будет недоступна."</li>
+
+			<li>Заметка пока-что оставляет за кадром вопросы автозапуска rtorrent в сеансе screen, возможно в скором времени я доберусь до этого вопроса.</li>
+
+			<li>Возможно я пропустил установку и настройку каких-то жизненно важных для работы связки пакетов.</li>
+		</ol>
+
+		<h2>Список использованных материалов:</h2>
+
+		<ol>
+			<li><a href="http://code.google.com/p/rutorrent/wiki/Main">rutorrent - главная страница</a></li>
+
+			<li><a href="Using XMLRPC with rtorrent">http://libtorrent.rakshasa.no/wiki/RTorrentXMLRPCGuide</a></li>
+
+			<li><a href="http://redmine.lighttpd.net/projects/lighttpd/wiki/Docs:ModFastCGI">Lighttpd - mod_fastcgi</a> - настройки модуля fastcgi один в один совпадают с настройками модуля sgci, поэтому документацию на модуль scgi нужно смотреть тоже здесь.</li>
+		</ol>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=rtorrent + rutorrent">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,34 @@
+--- snmplib/snmpusm.c.orig    2016-08-10 11:42:17.000000000 +0500
++++ snmplib/snmpusm.c 2016-08-10 11:46:34.000000000 +0500
+@@ -2213,7 +2213,7 @@
+          * XXX  Contrary to the pseudocode:
+          *      See if boots is invalid first.
+          */
+-        if (theirBoots == ENGINEBOOT_MAX || theirBoots > boots_uint) {
++        if (theirBoots == ENGINEBOOT_MAX) {
+             DEBUGMSGTL(("usm", "%s\n", "Remote boot count invalid."));
+ 
+             *error = SNMPERR_USM_NOTINTIMEWINDOW;
+@@ -2223,20 +2223,11 @@
+ 
+         /*
+          * Boots is ok, see if the boots is the same but the time
+-         * is old.
++         * is acceptable old.
+          */
+-        if (theirBoots == boots_uint && time_uint < theirLastTime) {
+-            if (time_difference > USM_TIME_WINDOW) {
+-                DEBUGMSGTL(("usm", "%s\n", "Message too old."));
+-                *error = SNMPERR_USM_NOTINTIMEWINDOW;
+-                return -1;
+-            }
+-
+-            else {              /* Old, but acceptable */
+-
+-                *error = SNMPERR_SUCCESS;
+-                return 0;
+-            }
++        if (theirBoots == boots_uint && time_uint < theirLastTime && time_difference < USM_TIME_WINDOW) {
++            *error = SNMPERR_SUCCESS;
++            return 0;
+         }

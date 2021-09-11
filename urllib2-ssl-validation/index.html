@@ -1,0 +1,43 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="python,python27,linux,debian,urllib2,ssl" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2019-11-17 -->
+		<title>Проверка действительности SSL-сертификата в urllib2</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Проверка действительности SSL-сертификата в urllib2</h1>
+
+		<p>Эта очень короткая заметка представляет собой дополнение к одной из моих прошлых заметок: <a href="../urllib2/">Использование urllib2 в Python</a>. После обновления Debian с релиза Wheezy до релиза Stretch библиотека urllib2 при обращении к HTTPS-ресурсам стала проверять действительность сертификата. Т.к. в моём случае на этих ресурсах использовался сертификат, подписанный удостоверяющим центром локальной сети, то обращения к таким ресурсам приводили к ошибкам: библиотека urllib2 в подобных случаях исторгала из своих недр исключение ssl.SSLError.</p>
+
+		<p>Для исправления этой ошибки нужно было во-первых добавить сертификат удостоверящюего центра локальной сети в список доверенных, а во-вторых - указать библиотеке urllib2 список доверенных сертификатов.</p>
+
+		<p>Первым делом нужно установить в систему стандартные сертификаты удостоверяющих центров. Сделать это можно путём установки пакета ca-certificates:</p>
+
+		<pre class="console"># apt-get install ca-certificates</pre>
+
+		<p>Дополнительные сертификаты удостоверяющих центров, которым следует доверять, можно положить в каталог /usr/local/share/ca-certificates, после чего обновить файл /etc/ssl/certs/ca-certificates.crt при помощи незамысловатой команды:</p>
+
+		<pre class="console"># update-ca-certificates</pre>
+
+		<p>Теперь можно указать файл /etc/ssl/certs/ca-certificates.crt библиотеке urllib2. Сделать это можно, добавив в список обработчиков запросов дополнительный обработчик, который занимается проверкой действительности SSL-сертификатов. В прошлой статье уже имеются примеры использования сразу нескольких разных обработчиков. Если воспользоваться тем же подходом, то получится примерно так:</p>
+
+		<pre class="code">handlers = []
+
+# Добавляем обработчик HTTPS-запросов
+context = ssl.create_default_context()
+context.load_verify_locations('/etc/ssl/certs/ca-certificates.crt')
+handler = urllib2.HTTPSHandler(context=context)
+handlers.append(handler)
+
+opener = urllib2.build_opener(*handlers)</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Проверка действительности SSL-сертификата в urllib2">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

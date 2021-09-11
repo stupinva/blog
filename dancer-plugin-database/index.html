@@ -1,0 +1,60 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="dancer,dancer::plugin::database,perl" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2012-11-04 -->
+		<title>Подключение к базе данных с помощью Dancer::Plugin::Database</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Подключение к базе данных с помощью Dancer::Plugin::Database</h1>
+
+		<p>При написании веб-приложений обычно используется база данных. Безусловно, для подключения к базе данных можно воспользоваться обычным для Perl модулем DBI. Однако в Perl-фреймворке Dancer для этих целей есть удобная обёртка - плагин Database.</p>
+
+		<p>Поставим соответствующий модуль:</p>
+
+		<pre class="console"># apt-get install libdancer-plugin-database-perl</pre>
+
+		<p>Перейдём в каталог с нашим Dancer-приложением, откроем файл конфигурации config.yml и впишем туда настройки подключения к базе данных:</p>
+
+		<pre class="code">plugins:
+  Database:
+    driver:                     "mysql"
+    database:                   "db"
+    host:                       "localhost"
+    port:                       3306
+    username:                   "user"
+    password:                   "password"
+    connection_check_threshold: 10
+    on_connect_do:              "SET CHARACTER SET 'UTF8'"</pre>
+
+		<p>Настройка connection_check_threshold задаёт частоту проверки доступности подключения к базе данных. Если последняя проверка доступности подключения проводилась более 10 секунда назад, то проводится новая проверка. Если было обнаружено, что подключение к базе данных пропало, оно будет переустановлено.</p>
+
+		<p>Сразу после подключения к базе данных выполнится команда (или несколько команд), указанная в настройке on_connection_do.</p>
+
+		<p>Плагин позволяет указать объект, который будет обрабатывать запросы к базе данных вместо используемого по умолчанию DBI::db. Можно определить несколько подключений к базе данных или назначить обработчики ошибок. В плагине определено несколько методов, позволяющих в простейших случаях обходиться без написания SQL-запросов.</p>
+
+		<p>Для использования плагина в основной модуль нашего веб-приложения lib/test.pm нужно прописать строчку подключения модуля:</p>
+
+		<pre class="code">use Dancer::Plugin::Database;</pre>
+
+		<p>Теперь для выполнения запросов к базе данных можно использовать методы, обычные для модуля DBI:</p>
+
+		<pre class="code">my $sth = database-&gt;prepare("SELECT COUNT(*) FROM users");</pre>
+
+		<p>Более подробно о плагине написано в его документации:</p>
+
+		<pre class="console">$ perldoc Dancer::Plugin::Database</pre>
+
+		<p>Напоследок приведу картинку, не иллюстрирующую ничего из сказанного, однако сформированную с использованием описанного плагина и рассмотренного ранее модуля Dancer::Template::HtmlTemplate:</p>
+
+		<img src="dancer-plugin-database.png" />
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Подключение к базе данных с помощью Dancer::Plugin::Database">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

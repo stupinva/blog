@@ -1,0 +1,44 @@
+Index: zabbix-3.4.12-1+buster/frontends/php/include/triggers.inc.php
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/frontends/php/include/triggers.inc.php
++++ zabbix-3.4.12-1+buster/frontends/php/include/triggers.inc.php
+@@ -2170,6 +2170,7 @@ function getTriggersHostsList(array $tri
+ 			'output' => ['hostid', 'name', 'status', 'maintenanceid', 'maintenance_status', 'maintenance_type'],
+ 			'selectGraphs' => API_OUTPUT_COUNT,
+ 			'selectScreens' => API_OUTPUT_COUNT,
++			'selectInventory' => ['location'],
+ 			'hostids' => array_keys($hostids),
+ 			'preservekeys' => true
+ 		])
+Index: zabbix-3.4.12-1+buster/frontends/php/app/views/monitoring.widget.problems.view.php
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/frontends/php/app/views/monitoring.widget.problems.view.php
++++ zabbix-3.4.12-1+buster/frontends/php/app/views/monitoring.widget.problems.view.php
+@@ -54,6 +54,7 @@ $table = (new CTableInfo())
+ 		$show_recovery_data ? _('Status') : null,
+ 		_('Info'),
+ 		($data['sortfield'] === 'host') ? [_('Host'), $sort_div] : _('Host'),
++		($data['sortfield'] === 'location') ? [_('Location'), $sort_div] : _('Location'),
+ 		[
+ 			($data['sortfield'] === 'problem') ? [_('Problem'), $sort_div] : _('Problem'),
+ 			' &bullet; ',
+@@ -198,11 +199,19 @@ foreach ($data['data']['problems'] as $e
+ 		];
+ 	}
+ 
++	$trigger_hosts = array_values($data['data']['triggers_hosts'][$trigger['triggerid']]);
++	$locations = array();
++	foreach($trigger_hosts as $host)
++	{
++		$locations[] = $host['inventory']['location'];
++	}
++
+ 	$table->addRow(array_merge($row, [
+ 		$show_recovery_data ? $cell_r_clock : null,
+ 		$show_recovery_data ? $cell_status : null,
+ 		makeInformationList($info_icons),
+ 		$triggers_hosts[$trigger['triggerid']],
++		join(', ', $locations),
+ 		$description,
+ 		(new CCol(
+ 			($problem['r_eventid'] != 0)

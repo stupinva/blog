@@ -1,0 +1,140 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="vtund,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2012-09-02 -->
+		<title>Настройка vtun в Debian</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка vtun в Debian</h1>
+
+		<p>Опишу настройку vtun для довольно экзотической задачи, которая тем не менее даёт хорошее представление о возможностях vtund.</p>
+
+		<h2>1. Постановка задачи</h2>
+
+		<p>Имеется две локальные сети network1 и network2 за шлюзами gateway1 и gateway2 соответственно. Шлюз gateway1 имеет "белый" IP-адрес, а второй шлюз может выходить в интернет только через NAT на вышестоящем шлюзе nat_gateway:</p>
+
+		<pre>   _____________    ________                    _____________      ________       _____________
+  /            /   |        |                  |             |    |        |     /            /
+ /  network1  /----|gateway1|----/internet/----O nat_gateway |----|gateway2|----/  network2  /
+/____________/     |________|                  |_____________|    |________|   /____________/</pre>
+
+		<p>Требуется, чтобы сеть network1 могла ходить в сеть network2, но таким образом, чтобы узлы из сети network2 не знали о существовании каких-то других сетей, а считали, что с ними связывается непосредственно сам шлюз gateway2. То есть, необходимо на шлюзе gateway2 настроить трансляцию адресов network1 в локальный адрес шлюза gateway2.</p>
+
+		<p>Сеть network1: 10.0.0.1/24</p>
+
+		<p>Сеть network2: 192.168.0.0/24</p>
+
+		<p>Доменное имя gateway1 в интернете - server.domain.tld.</p>
+
+		<h2>2. Настроим vtund на шлюзе gateway1 в режиме сервера</h2>
+
+		<p>В файл /etc/default/vtund внесём следующую строчку:</p>
+
+		<pre class="code">RUN_SERVER=yes</pre>
+
+		<p>В файле /etc/vtund.conf опишем конфигурацию сервера:</p>
+
+		<pre class="code">options {
+  type stand;
+  port 5000;
+
+  bindaddr {
+    iface eth0;
+  };
+
+  ifconfig /sbin/ifconfig;
+  ip /sbin/ip;
+  firewall /sbin/iptables;
+}
+
+vpn1 {
+  passwd mysecret;
+  type tun;
+  proto tcp;
+  compress no;
+  encrypt yes;
+  keepalive yes;
+  stat yes;
+  multi killold;
+
+  up {
+    ifconfig "%% 192.168.1.1 pointopoint 192.168.1.2";
+    ip "route add 192.168.0.0/24 dev %%";
+  };
+
+  down {
+    ifconfig "%% down";
+    ip "route delete 192.168.0.0/24 dev %%";
+  };
+}</pre>
+
+		<h2>3. Настроим vtund на шлюзе gateway2 в режиме клиента</h2>
+
+		<p>В файл /etc/default/vtund внесём следующие строчки:</p>
+
+		<pre class="code">CLIENT0_NAME="vpn1"
+CLIENT0_HOST="server.domain.tld"</pre>
+
+		<p>В файле /etc/vtund.conf опишем конфигурацию клиента:</p>
+
+		<pre class="code">options {
+  type stand;
+  port 5000;
+
+  ifconfig /sbin/ifconfig;
+  ip /sbin/ip;
+  firewall /sbin/iptables;
+}
+
+vpn1 {
+  passwd mysecret;
+  type tun;
+  proto tcp;
+  compress no;
+  encrypt yes;
+  stat yes;
+  persist yes;
+
+  srcaddr {
+    iface eth0;
+  };
+
+  up {
+    ifconfig "%% 192.168.1.2 pointopoint 192.168.1.1";
+    ip "route add 10.0.0.0/24 dev %%";
+    firewall "-t nat -A POSTROUTING -o eth0 -j MASQUERADE";
+  };
+
+  down {
+    ifconfig "%% down";
+    ip "route delete 10.0.0.0/24 dev %%";
+    firewall "-t nat -D POSTROUTING -o eth0 -j MASQUERADE";
+  };
+}</pre>
+
+		<h2>4. Описание работы настроенной системы</h2>
+
+		<p>Итак, работать это будет следующим образом. Шлюз gateway2 устанавливает соединение со шлюзом gateway1, используя доменное имя сервера server.domain.tld, TCP-порт сервера 5000 и пароль mysecret. Между шлюзами устанавливается туннель точка-точка, через который шлюз gateway1 будет отправлять пакеты для сети network2 192.168.0.0/24, находящийся за шлюзом gateway2. В свою очередь, шлюз gateway2 будет отправлять пакеты для сети network1 10.0.0.0/24 через шлюз gateway1.</p>
+
+		<p>При этом, если узел сети network1 10.0.0.0/24 попытается связаться с узлом из сети network2 192.168.0.0/24, шлюз gateway2 будет транслировать адреса сети network1 10.0.0.0/24 в свой локальный адрес (в терминологии iptables это называется SNAT или MASQUERADE).</p>
+
+		<p>В случае обрыва соединения gateway2 будет самостоятельно переустанавливать подключение. gateway1, при этом, допускает подключение только одного клиента и все предыдущие подключения будут заменяться вновь установленными.</p>
+
+		<h2>5. Особенности, достоинства и недостатки</h2>
+
+		<p>Файл /etc/default/vtund допускает настройку установки до 10 клиентских соединений (легко увеличивается редактированием скрипта инициализации /etc/init.d/vtun). Количество соединений, принимаемых сервером, не ограничено - их можно настроить в файле /etc/vtund.conf. При этом vtund может быть одновременно клиентом для одной части соединений и сервером для другой части соединений.</p>
+
+		<p>Из недостатков можно отметить только один - для каждого соединения необходимо прописывать собственные настройки, т.к. vtund не поддерживает встроенную возможность раздавать клиентам адреса из заранее заданного пула. Теоретически это можно реализовать с помощью внешних скриптов. Я считаю, что это не очень большой недостаток, т.к. этот недостаток является оборотной стороной достоинства vtund - простоты настройки (в отличие, например, от openvpn).</p>
+
+		<p>При настройке vtund я воспользовался собственными переводами страниц руководства: <a href="http://manpages.ylsoftware.com/ru/vtund.conf.5.html">vtund.conf(5)</a> и <a href="http://manpages.ylsoftware.com/ru/vtund.8.html">vtund(8)</a>.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка vtun в Debian">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

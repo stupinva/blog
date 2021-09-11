@@ -1,0 +1,205 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="python,nginx,linux,debian,wheezy,uwsgi,bottle,mapnik" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2014-09-07 -->
+		<title>Тайловый сервер на основе Python, Mapnik и Bottle</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Тайловый сервер на основе Python, Mapnik и Bottle</h1>
+
+		<p><a href="../mapnik-part1/">В прошлом</a> <a href="../mapnik-part2/">я писал</a> <a href="../mapnik-part3/">серию</a> <a href="../mapnik-part4/">статей</a> о настройке тайлового сервера на основе apache2, renderd и модуля mod_tile. Недостаток этой связки, с моей точки зрения, заключается во-первых в необходимости использования apache, а во-вторых в том, что renderd и mod_tile отсутствуют в репозиториях Debian. Из-за второго недостатка нет уверенности в том, что при очередном обновлении её удастся успешно собрать и продолжить использовать.</p>
+
+		<p>Несколько месяцев назад мне попалась статья Дениса Рыкова <a href="http://gis-lab.info/qa/dynamic-tms.html">Основы работы динамических TMS-сервисов</a>, в которой приводится пример тайлового сервера, написанного на Python с использованием веб-фреймворка Bottle и библиотеки Mapnik. Статья привлекла моё внимание ещё потому, что в последних проектах я начал пользоваться фреймворком Bottle. Этот фреймворк обладает минимальным количеством зависимостей и может всё, что мне нужно от веб-фреймворков (да, мои потребности не велики), не навязывая при этом собственный стиль разработки, как это происходит, например, с Django.</p>
+
+		<p>Я решил воспользоваться этой статьёй для того, чтобы избавить себя от возможных проблем с используемой мной связкой на основе apache2, renderd и mod_tile.</p>
+
+		<h2>1. Тайловый сервер</h2>
+
+		<p>Для начала установим библиотеку Mapnik и веб-фреймворк Bottle:</p>
+
+		<pre class="console"># apt-get install python-mapnik2 python-bottle</pre>
+
+		<p>Сам тайловый сервер разместим в файле /usr/local/share/tiles/main.py:</p>
+
+		<pre class="code">#!/usr/bin/python
+# -*- coding: UTF-8 -*-
+
+from bottle import get, response, run, debug, app, HTTPError
+import mapnik2 as mapnik
+import os
+
+from settings import TILE_WIDTH, TILE_HEIGHT, BBOX_MINX, BBOX_MINY, BBOX_MAXX, BBOX_MAXY, MAPNIK_CONFIGS, CACHE_PATH
+
+# Сохранение тайла в файловую систему в целях кэширования
+def save_tile(filename, body):
+    path, name = os.path.split(filename)
+    try:
+        os.makedirs(path)
+    except:
+        pass
+    file = open(filename, 'w')
+    file.write(body)
+    file.close() 
+ 
+@get('/&lt;service&gt;/1.0.0/&lt;layer&gt;/&lt;z:int&gt;/&lt;x:int&gt;/&lt;y:int&gt;.png')
+def tms(service, layer, z, x, y):
+    # Считаем охват тайла на выбранном масштабном уровне
+    stepx = (BBOX_MAXX - 1.0 - BBOX_MINX) / (2 ** z)
+    stepy = (BBOX_MAXY - 1.0 - BBOX_MINY) / (2 ** z)
+
+    # Выбираем охват тайла из словаря extents согласно типу запрашиваемого сервиса (tms или xyz)
+    if service == 'tms':
+        box = mapnik.Box2d(BBOX_MINX + x * stepx,
+                           BBOX_MINY + y * stepy,
+                           BBOX_MINX + (x + 1) * stepx,
+                           BBOX_MINY + (y + 1) * stepy)
+    elif service == 'xyz':
+        box = mapnik.Box2d(BBOX_MINX + x * stepx,
+                           BBOX_MAXY - (y + 1) * stepy,
+                           BBOX_MINX + (x + 1) * stepx,
+                           BBOX_MAXY - y * stepy)
+ 
+    # Указываем путь, где находится файл с настройками Mapnik
+    map = mapnik.Map(TILE_WIDTH, TILE_HEIGHT)
+    mapnik.load_map(map, os.path.join(MAPNIK_CONFIGS, layer + '.xml'))
+ 
+    # Нацеливаем карту на выбранный охват
+    map.zoom_to_box(box)
+ 
+    # Отрисовываем тайл
+    image = mapnik.Image(map.width, map.height)
+    mapnik.render(map, image)
+    body = image.tostring('png')
+
+    # Сохраняем тайл в файловой системе
+    filename = os.path.join(CACHE_PATH, service, '1.0.0', layer, str(z), str(x), str(y) + '.png')
+    save_tile(filename, body)
+
+    # Передаём ответ клиенту
+    response.content_type = 'image/png'
+    return body
+
+if __name__ == '__main__':
+    debug(True)
+    run(host = '0.0.0.0', port = 8080)
+else:
+    application = app()</pre>
+
+		<p>В отдельном файле /usr/local/share/tiles/settings.py разместим настройки этого приложения:</p>
+
+		<pre class="code">#!/usr/bin/python
+# -*- coding: UTF-8 -*-
+
+# Размеры тайла
+TILE_WIDTH = 256
+TILE_HEIGHT = 256
+
+# Размеры карты
+BBOX_MINX = -20037508.0
+BBOX_MINY = -20037508.0
+BBOX_MAXX = 20037508.0
+BBOX_MAXY = 20037508.0
+
+# Каталог с xml-файлами с описаниями слоёв
+MAPNIK_CONFIGS = '/etc/mapnik-osm-data/'
+# Каталог для хранения кэша тайлов
+CACHE_PATH = '/var/cache/tiles'</pre>
+
+		<p>Таким образом, в запросе можно указывать имя слоя, тайл из которого нужно вернуть. Имя слоя преобразуется в имя XML-файла, из которого извлекается его описание. Например, слою OpenStreetMap будет соответствовать запрос http://tiles.domain.tld/xyz/1.0.0/osm/0/0/0.png, при обслуживании которого будет использован файл /etc/mapnik-osm-data/osm.xml.</p>
+
+		<p>Создадим каталог для кэша тайлов:</p>
+
+		<pre class="console"># mkdir /var/cache/tiles</pre>
+
+		<p>Проставим права доступа к нему для веб-сервера:</p>
+
+		<pre class="console"># chown www-data:www-data /var/cache/tiles</pre>
+
+		<h2>2. Сервер приложений uwsgi</h2>
+
+		<p>Установим uwsgi и плагин к нему uwsgi-plugin-python, если они ещё не установлены:</p>
+
+		<pre class="console"># apt-get install uwsgi uwsgi-plugin-python</pre>
+
+		<p>Создадим файл конфигурации /etc/uwsgi/apps-available/tiles.ini:</p>
+
+		<pre class="code">[uwsgi]
+
+procname = uwsgi-tiles
+procname-master = uwsgi-tiles-master
+
+chdir = /usr/local/share/tiles
+#module = app:application
+mount = /=main:application
+plugin = python27
+master = true
+processes = 8</pre>
+
+		<p>Добавим файл конфигурации в каталог включенных приложений:</p>
+
+		<pre class="console"># cd /etc/uwsgi/apps-enabled
+# ln -s /etc/uwsgi/apps-available/tiles.ini .</pre>
+
+		<p>Запустим новое приложение:</p>
+
+		<pre class="console"># /etc/init.d/uwsgi start tiles</pre>
+
+		<h2>3. Веб-сервер nginx</h2>
+
+		<p>Установим nginx, если он ещё не установлен:</p>
+
+		<pre class="console"># apt-get install nginx-full</pre>
+
+		<p>Для доступа к файлам в кэше и запросе файла у тайлового сервера при их отсутствии в кэше создадим файл конфигурации. Например, если этот веб-сервер будет использоваться только для отрисовки тайлов, можно создать файл /etc/nginx/sites-available/default со следующим содержимым:</p>
+
+		<pre class="code">server {
+  listen 0.0.0.0:80;
+#  server_name tiles.domain.tld;
+
+  root /var/www;
+
+  location @tiles {
+    uwsgi_pass unix:/var/run/uwsgi/app/tiles/socket;
+    include uwsgi_params;
+  }
+
+  location /tms/ {
+    root /var/cache/tiles/;
+    try_files $uri @tiles;
+  }
+
+  location /xyz/ {
+    root /var/cache/tiles/;
+    try_files $uri @tiles;
+  }
+}</pre>
+
+		<p>Включим использование этого файла веб-сервером:</p>
+
+		<pre class="console"># cd /etc/nginx/sites-enabled
+# ln -s /etc/nginx/sites-available/tiles .</pre>
+
+		<p>Перезапустим nginx, чтобы его новые настройки вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/nginx restart</pre>
+
+		<h2>4. Очистка кэша</h2>
+
+		<p>Осталось только настроить периодическую чистку кэша от тайлов, к которым давно не было обращений. Это позволит достичь более высокой эффективности кэша в пересчёте на его объём. Сделать это просто - можно воспользоваться обычыми для Unix инструментами - планировщиком задач cron и командой find. Добавим в файл /etc/crontab такую строчку:</p>
+
+		<pre class="code">30    8 * * *   www-data     find /var/cache/tiles -type f -atime 14 -delete ; find /var/cache/tiles -type d -empty -delete</pre>
+
+		<p>Из каталога кэша тайлов будут удаляться файлы, к которым не обращались более 14 дней, а также пустые каталоги.</p>
+
+		<p>Хочу отметить, что рассматриваемый тайловый сервер - скорее заготовка, т.к. он, например, практически не осуществляет обработку возможных исключительных ситуаций - отсутствие файла конфигурации, отсутсвие прав доступа к каталогу тайлов и т.п. Такие исключительные ситуации в конечном итоге попадают в фреймворк Bottle, который при их возникновении просто сообщает о внутренней ошибке сервера с кодом 500.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Тайловый сервер на основе Python, Mapnik и Bottle">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

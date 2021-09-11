@@ -1,0 +1,957 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="clamav,greylistd,linux,debian,exim,postfixadmin,wheezy,mysql" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2014-04-20 -->
+		<title>Настройка Exim</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка Exim</h1>
+
+		<p>На сей раз я опишу альтернативный вариант настройки <a href="../postfix/">ранее описанной мной почтовой системы</a>, в которой место Postfix займёт Exim.</p>
+
+		<p>Ранее, где-то в начале 2008 года, я уже настраивал почтовую систему на основе Exim. С тех пор я успел напрочь забыть всю конкретику, но у меня осталось благоприятное впечатление об этом почтовом сервере. Этот почтовый сервер оказался настолько гибким в настройке, что я бы скорее назвал его языком программирования почтовых систем, а не почтовым сервером :)</p>
+
+		<p>Эти системы отличаются по архитектуре и целям. Postfix исповедует подход Unix - состоит из небольших взаимодействующих между собой программ. Большое внимание в Postfix уделяется безопасности и надёжности. Каждая программа решает небольшую задачу и использует минимум необходимых прав, зачастую работая в chroot. Есть центральный процесс-диспетчер, который при необходимости перезапустит неожиданно завершившуюся программу. Процесс-диспетчер периодически перезапускает и нормально работающие программы, чтобы защититься от потенциальных утечек памяти. В Postfix есть множество настроек на разные случаи жизни, однако если нужной настройки нет, то скорее всего без дополнительной программы не обойтись.</p>
+
+		<p>Exim концентрируется на богатстве возможностей обработки почты. У него тоже есть процесс-диспетчер, но процессы не настолько узко специализированы и не запускаются в chroot. Он менее безопасен по дизайну, однако написан довольно аккуратно. Поэтому на практике он не сильно проигрывает в безопасности. Но и рисковать лишний раз не стоит: если вам не нужно чего-то особого и хватает возможностей Postfix, я бы порекомендовал пользоваться Postfix. У Exim нет жёстко фиксированных настроек, в большинстве случаев необходимое поведение можно сконструировать, используя различные встроенные функции.</p>
+
+		<p>В сети не так часто встречается документация по настройке Exim, однако он хорошо документирован и, на мой взгляд, понять принципы его настройки гораздо проще. Имеются даже переводы документации на русский язык.</p>
+
+		<p>С переводами документации связана неприятная история. Есть два человека, каждый из которых считает себя настоящим автором перевода, обвиняя другого в воровстве. Первый - Алекс Кеда, <a href="http://www.lissyara.su/doc/exim/4.70/">Exim 4.70</a> и второй - Алексей Паутов, <a href="http://www.rldp.ru/exim/exim480r/exim48.htm">Exim 4.80</a>. Я долго изучал оба перевода, искал различные варианты в сети, изучал содержимое web.archive.org с целью понять, чем отличаются переводы и кому принадлежит первенство. Оказалось, что переводы имеют общую основу, отличаясь небольшими деталями. Перевод, сделанный Алексом Кеда, был довольно неуклюжим, но появился в сети в 2007 году. Более того - по веб-архиву можно даже заметить, что он появлялся поэтапно. На сайте Алексея Паутова перевод появился целиком в 2008 году, но был хорошо отредактирован. Конечно, на основании данных одного лишь вебархива нельзя делать далеко идущие выводы. Может быть Алексей Паутов ранее размещал перевод на каком-то другом сайте, упоминания которого сейчас в интернете исчезли полностью. Но если не усложнять, то автором оригинала определённо был Алекс Кеда. Однако, на текущий момент более актуальный и аккуратный перевод можно найти на сайте Алексея Паутова.</p>
+
+		<h2>1. Установка</h2>
+
+		<p>Установим SMTP-сервер Exim:</p>
+
+		<pre class="console"># apt-get install exim4-daemon-heavy</pre>
+
+		<p>Я решил не пользоваться системой конфигурации Exim, которая принята Debian. В ней нет некоторых частей конфигурации, которые мне понадобятся. Добавить их не проблема, однако придётся ещё исправлять другие файлы, идущие в дистрибутиве, чтобы отключить их обработку в случае использования необходимых мне файлов. А это уже показалось мне неоправданной тратой времени - много хлопот без явной выгоды.</p>
+
+		<p>К счастью, каких-то особых действий для отключения этой системы конфигурирования не требуется - достаточно просто создать файл /etc/exim4/exim4.conf, в который и вписать необходимые настройки. В качестве прототипа этого файла я воспользовался информацией из документации: <a href="http://www.exim.org/exim-html-current/doc/html/spec_html/ch-the_default_configuration_file.html">Chapter 7 - The default configuration file</a>. Для интеграции Exim и Dovecot я воспользовался информацией из wiki-системы Dovecot: <a href="http://wiki2.dovecot.org/LDA/Exim">Dovecot LDA with Exim</a>, <a href="http://wiki2.dovecot.org/HowTo/EximAndDovecotSASL">Exim and Dovecot SASL</a>. Для интеграции Exim и базы данных Postfixadmin я воспользовался своей предыдущей заметкой <a href="../postfix/">Установка и настройка Postfix, OpenDKIM, ClamAV-Milter, Milter-Greylist</a>.</p>
+
+		<p>Получился такой файл /etc/exim4/exim4.conf:</p>
+
+		<pre class="code"># Имя нашей почтовой системы
+primary_hostname = mail.domain.tld
+
+# База данных MySQL и учётные данные для работы с ней
+hide mysql_servers = localhost/postfixadmin/exim/exim_password
+
+# Список доменов нашей почтовой системы
+domainlist local_domains = ${lookup mysql{SELECT domain \
+                                          FROM domain \
+                                          WHERE domain = '${quote_mysql:$domain}' \
+                                            AND backupmx = 0 \
+                                            AND active = 1}}
+
+# Список доменов, для которых наша почтовая система является резервной
+domainlist relay_domains = ${lookup mysql{SELECT domain \
+                                          FROM domain \
+                                          WHERE domain = '${quote_mysql:$domain}' \
+                                            AND backupmx = 1 \
+                                            AND active = 1}}
+# Список узлов, почту от которых будем принимать без проверок
+hostlist relay_from_hosts = 
+
+# Правила для проверок
+acl_not_smtp = acl_check_not_smtp
+acl_smtp_rcpt = acl_check_rcpt
+acl_smtp_data = acl_check_data
+
+# Сокет-файл антивируса ClamAV
+av_scanner = clamd:/var/run/clamav/clamd.ctl
+# Сокет-файл SpamAssassin
+# spamd_address =
+
+# Отключаем IPv6, слушаем порты 25 и 587
+disable_ipv6
+daemon_smtp_ports = 25 : 587
+
+# Дописываем домены отправителя и получателя, если они не указаны
+qualify_domain = domain.tld
+qualify_recipient = domain.tld
+
+# Exim никогда не должен запускать процессы от имени пользователя root
+never_users = root
+
+# Проверять прямую и обратную записи узла отправителя по DNS
+host_lookup = *
+
+# Отключаем проверку пользователей узла отправителя по протоколу ident
+rfc1413_hosts = *
+rfc1413_query_timeout = 0s
+
+# Только эти узлы могут не указывать домен отправителя или получателя
+sender_unqualified_hosts = +relay_from_hosts
+recipient_unqualified_hosts = +relay_from_hosts
+
+# Лимит размера сообщения, 30 мегабайт
+message_size_limit = 30M
+
+# Запрещаем использовать знак % для явной маршрутизации почты
+percent_hack_domains =
+
+# Настройки обработки ошибок доставки, используются значения по умолчанию
+ignore_bounce_errors_after = 2d
+timeout_frozen_after = 7d
+
+begin acl
+
+  # Проверки для локальных отправителей
+  acl_check_not_smtp:
+     accept
+
+  # Проверки на этапе RCPT
+  acl_check_rcpt:
+    accept hosts = :
+
+    # Отклоняем неправильные адреса почтовых ящиков  
+    deny message = Restricted characters in address
+         domains = +local_domains
+         local_parts = ^[.] : ^.*[@%!/|]
+
+    # Отклоняем неправильные адреса почтовых ящиков  
+    deny message = Restricted characters in address
+         domains = !+local_domains
+         local_parts = ^[./|] : ^.*[@%!] : ^.*/\\.\\./
+
+    # В локальные ящики postmaster и abuse принимает почту всегда
+    accept local_parts = postmaster : abuse
+           domains = +local_domains
+
+    # Проверяем существование домена отправителя
+    require verify = sender
+
+    # Принимаем почту от доверенных узлов, попутно исправляя заголовки письма
+    accept hosts = +relay_from_hosts
+           control = submission
+
+    # Принимаем почту от аутентифицированных узлов, попутно исправляя заголовки письма
+    accept authenticated = *
+           control = submission/domain=
+
+    # Для не доверенных и не аутентифицированных требуется, чтобы получатель был в домене,
+    # ящик которого находится у нас или для которого мы являемся резервным почтовым сервером
+    require message = Relay not permitted
+            domains = +local_domains : +relay_domains
+
+    # Если домен правильный, то проверяем получателя
+    require verify = recipient
+
+    accept
+
+begin routers
+
+  # Поиск транспорта для удалённых получателей
+  dnslookup:
+    driver = dnslookup
+    domains = ! +local_domains
+    transport = remote_smtp
+    ignore_target_hosts = 0.0.0.0 : 127.0.0.0/8
+    no_more
+
+  # Пересылки для локальных получателей из файла /etc/aliases
+  system_aliases:
+    driver = redirect
+    allow_fail
+    allow_defer
+    domains = domain.tld
+    data = ${lookup{$local_part}lsearch{/etc/aliases}}
+
+  # Пересылки с ящика на ящик в локальных доменах из Postfixadmin
+  aliases:
+    driver = redirect
+    allow_fail
+    allow_defer
+    data = ${lookup mysql{SELECT LCASE(goto) \
+                          FROM alias \
+                          WHERE address = LCASE('${quote_mysql:$local_part@$domain}') \
+                            AND active = 1}}
+
+  # Пересылки на одноимённые ящики в другом домене из Postfixadmin
+  alias_domain:
+    driver = redirect
+    allow_fail
+    allow_defer
+    data = ${lookup mysql{SELECT alias.goto \
+                          FROM alias_domain \
+                          JOIN alias ON alias.address = LCASE('${quote_mysql:$local_part@$domain}') \
+                            AND alias.active = 1 \
+                          WHERE alias_domain.alias_domain = LCASE('${quote_mysql:$domain}') \
+                            AND alias_domain.active = 1}}
+
+  # Пересылки на ящик по умолчанию в локальном домене из Postfixadmin
+  alias_domain_catchall:
+    driver = redirect
+    allow_fail
+    allow_defer
+    data = ${lookup mysql{SELECT alias.goto \
+                          FROM alias_domain \
+                          JOIN alias ON alias.address = LCASE('${quote_mysql:@$domain}') \
+                            AND alias.active = 1 \
+                          WHERE alias_domain.alias_domain = LCASE('${quote_mysql:$domain}') \
+                            AND alias_domain.active = 1}}
+  
+  # Получение почты на локальный ящик из Postfixadmin
+  mailbox:
+    driver = accept
+    condition = ${lookup mysql{SELECT maildir \
+                               FROM mailbox \
+                               WHERE username = LCASE('${quote_mysql:$local_part@$domain}') \
+                                 AND active = 1}{yes}{no}}
+    transport = dovecot_virtual_delivery
+
+  # Получение почты на локальный ящик с альтернативным доменным именем из Postfixadmin
+  alias_domain_mailbox:
+    driver = accept
+    condition = ${lookup mysql{SELECT mailbox.maildir \
+                               FROM alias_domain \
+                               JOIN mailbox ON mailbox.local_part = LCASE('${quote_mysql:$local_part}') \
+                                 AND mailbox.domain = alias_domain.target_domain \
+                                 AND mailbox.active = 1 \
+                               WHERE alias_domain.alias_domain = LCASE('${quote_mysql:$domain}') \
+                                 AND alias_domain.active = 1}{yes}{no}}
+    transport = dovecot_virtual_delivery
+    cannot_route_message = Unknown user
+
+begin transports
+
+  # Транспорт для удалённых получателей
+  remote_smtp:
+    driver = smtp
+
+  # Транспорт для локальных получателей из Dovecot
+  dovecot_virtual_delivery:
+    driver = pipe
+    command = /usr/lib/dovecot/dovecot-lda -d $local_part@$domain -f $sender_address
+    message_prefix =
+    message_suffix =
+    delivery_date_add
+    envelope_to_add
+    return_path_add
+    log_output
+    user = vmail
+    temp_errors = 64 : 69 : 70: 71 : 72 : 73 : 74 : 75 : 78
+
+begin retry
+
+  *   *   F,2h,15m; G,16h,1h,1.5; F,4d,6h
+
+begin rewrite
+
+begin authenticators
+
+  # Использование LOGIN-аутентификации из Dovecot
+  dovecot_login:
+    driver = dovecot
+    public_name = LOGIN
+    server_socket = /var/run/dovecot/auth-client
+    server_set_id = $auth1
+
+  # Использование PLAIN-аутентификации из Dovecot  
+  dovecot_plain:
+    driver = dovecot
+    public_name = PLAIN
+    server_socket = /var/run/dovecot/auth-client
+    server_set_id = $auth1</pre>
+
+		<p>Сразу поменяем права доступа к файлу конфигурации, чтобы обычные пользователи системы не смогли увидеть пароль доступа к базе данных:</p>
+
+		<pre class="console"># chmod u=rw,g=r,o= /etc/exim4/exim4.conf
+# chown root:Debian-exim /etc/exim4/exim4.conf</pre>
+
+		<p>Для того, чтобы exim мог извлекать данные из базы данных Postfixadmin, добавим пользователя exim:</p>
+
+		<pre class="code">USE mysql;
+
+INSERT INTO user(user, password, host) VALUES('exim', PASSWORD('exim_password'), 'localhost');
+
+FLUSH PRIVILEGES;</pre>
+
+		<p>Дадим пользователю exim доступ к таблице ящиков, доменов, псевдонимов, псевдонимов доменов и квот:</p>
+
+		<pre class="code">USE mysql;
+
+INSERT INTO tables_priv(host, db, user, table_name, table_priv, column_priv) VALUES
+('localhost', 'postfixadmin', 'exim', 'alias', '', 'Select'),
+('localhost', 'postfixadmin', 'exim', 'alias_domain', '', 'Select'),
+('localhost', 'postfixadmin', 'exim', 'mailbox', '', 'Select'),
+('localhost', 'postfixadmin', 'exim', 'domain', '', 'Select'),
+('localhost', 'postfixadmin', 'exim', 'quota2', '', 'Select');
+
+INSERT INTO columns_priv(host, db, user, table_name, column_name, column_priv) VALUES
+('localhost', 'postfixadmin', 'exim', 'alias', 'goto', 'Select'),
+('localhost', 'postfixadmin', 'exim', 'alias', 'address', 'Select'),
+('localhost', 'postfixadmin', 'exim', 'alias', 'active', 'Select');
+
+INSERT INTO columns_priv(host, db, user, table_name, column_name, column_priv) VALUES
+('localhost', 'postfixadmin', 'exim', 'alias_domain', 'target_domain', 'Select'),
+('localhost', 'postfixadmin', 'exim', 'alias_domain', 'alias_domain', 'Select'),
+('localhost', 'postfixadmin', 'exim', 'alias_domain', 'active', 'Select');
+
+INSERT INTO columns_priv(host, db, user, table_name, column_name, column_priv) VALUES
+('localhost', 'postfixadmin', 'exim', 'mailbox', 'maildir', 'Select'),
+('localhost', 'postfixadmin', 'exim', 'mailbox', 'username', 'Select'),
+('localhost', 'postfixadmin', 'exim', 'mailbox', 'active', 'Select'),
+('localhost', 'postfixadmin', 'exim', 'mailbox', 'quota', 'Select'),
+('localhost', 'postfixadmin', 'exim', 'mailbox', 'local_part', 'Select'),
+('localhost', 'postfixadmin', 'exim', 'mailbox', 'domain', 'Select');
+
+INSERT INTO columns_priv(host, db, user, table_name, column_name, column_priv) VALUES
+('localhost', 'postfixadmin', 'exim', 'domain', 'domain', 'Select'),
+('localhost', 'postfixadmin', 'exim', 'domain', 'backupmx', 'Select'),
+('localhost', 'postfixadmin', 'exim', 'domain', 'active', 'Select');
+
+INSERT INTO columns_priv(host, db, user, table_name, column_name, column_priv) VALUES
+('localhost', 'postfixadmin', 'exim', 'quota2', 'username', 'Select'),
+('localhost', 'postfixadmin', 'exim', 'quota2', 'bytes', 'Select');
+
+FLUSH PRIVILEGES;</pre>
+
+		<p>Чтобы Exim мог использовать механизмы аутентификации из Dovecot, нужно вписать в файл /etc/dovecot/conf.d/10-master.conf, в секцию service auth следующие настройки:</p>
+
+		<pre class="code">unix_listener auth-client {
+  mode = 0660
+  user = Debian-exim
+}</pre>
+
+		<p>Осталось перезапустить Exim и Dovecot, чтобы Exim начали работать в минимальной конфигурации:</p>
+
+		<pre class="console"># /etc/init.d/dovecot restart
+# /etc/init.d/exim4 restart</pre>
+
+		<h2>2. Настройка антивируса</h2>
+
+		<p>Устанавливаем демон ClamAV для проверки файлов на вирусы:</p>
+
+		<pre class="console"># apt-get install clamav-daemon</pre>
+
+		<p>Сразу же обновляем антивирусную базу:</p>
+
+		<pre class="console"># freshclam</pre>
+
+		<p>Включим clamav в группу Debian-exim, чтобы он мог сканировать файлы, созданные Exim'ом:</p>
+
+		<pre class="console"># usermod -aG Debian-exim clamav</pre>
+
+		<p>Добавим в главную секцию файла /etc/exim4/exim4.conf путь к сокет-файлу ClamAV и ACL для этапа DATA:</p>
+
+		<pre class="console">av_scanner = clamd:/var/run/clamav/clamd.ctl
+acl_smtp_data = acl_check_data</pre>
+
+		<p>В секцию acl файла /etc/exim4/exim4.conf добавим правило, запрещающее приём писем, содержащих вирусы:</p>
+
+		<pre class="code">acl_check_data:
+
+  deny message = message contains a virus ($malware_name)
+       malware = *
+
+  accept</pre>
+
+		<p>Перезагрузим Exim, чтобы настройки вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/exim4 reload</pre>
+
+		<p>Осталось проверить, что антивирусная система используется. Для этого создадим специально предназначенный для таких целей тестовый файл EICAR:</p>
+
+		<pre class="console">$ echo -n 'X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' &gt; eicar.txt</pre>
+
+		<p>И попробуем его отправить во вложении с какого-нибудь почтового ящика почтовой системы на тот же ящик. Если письмо не пришло, значит антивирусная система работает. Для полной уверенности можно ещё заглянуть в журнал почтовой системы /var/log/exim4/mainlog, где должна появиться строчка вида:</p>
+
+		<pre class="code">2014-04-12 22:06:06 1WZ0RR-0007TO-RM H=localhost (domain.tld) [127.0.0.1] F=&lt;box@domain.tld&gt; A=dovecot_plain:box@domain.tld rejected after DATA: message contains a virus (Eicar-Test-Signature)</pre>
+
+		<h2>3. Проверка квот</h2>
+
+		<p>Добавим в файл /etc/exim4/exim4.conf в самый конец ACL acl_check_rcpt, но перед финальным правилом accept, следующие правила:</p>
+
+		<pre class="code">discard message = 422 Mailbox $local_part@$domain is over quota
+        domains = +local_domains
+        condition = ${lookup mysql{SELECT 1 \
+                                   FROM mailbox \
+                                   JOIN quota2 ON quota2.username = mailbox.username \
+                                     AND quota2.bytes + ${if ={$message_size}{-1}{${expand:message_size_limit}}{$message_size}} &gt;= mailbox.quota \
+                                   WHERE mailbox.username = LCASE('${quote_mysql:$local_part@$domain}') \
+                                     AND mailbox.active = 1}}
+
+discard message = 422 Mailbox $local_part@$domain is over quota
+        domains = +local_domains
+        condition = ${lookup mysql{SELECT 1 \
+                                   FROM alias_domain \
+                                   JOIN mailbox ON mailbox.local_part = LCASE('${quote_mysql:$local_part}') \
+                                     AND mailbox.domain = alias_domain.target_domain \
+                                     AND mailbox.active = 1 \
+                                   JOIN quota2 ON quota2.username = mailbox.username \
+                                     AND quota2.bytes + ${if ={$message_size}{-1}{${expand:message_size_limit}}{$message_size}} &gt;= mailbox.quota \
+                                   WHERE alias_domain.alias_domain = LCASE('${quote_mysql:$domain}') \
+                                     AND alias_domain.active = 1}}</pre>
+
+		<p>Эти правила используют размер сообщения, анонсированного системой отправителя на этапе MAIL FROM, чтобы проверить превышение квоты почтового ящика локального получателя. Если на этапе MAIL FROM не был анонсирован размер сообщения, то для проверки квоты используется максимальный размер сообщения, который может быть принят почтовой системой. Правило discard позволяет не отклонять сообщение полностью, а только лишь отказаться от одного из получателей, если его квота будет превышена. Если письмо адресовано нескольким получателям, то письмо будет принято только для тех получателей, у которых квота не превысится.</p>
+
+		<p>Тут стоит отметить, что окончательный размер письма может оказаться другим. Например, наш почтовый сервер добавит к письму несколько заголовков, в результате чего письмо получится немного больше. Отправитель может случайно или намеренно указать размер письма, не соответствующий действительности. На этапе DATA, когда известен точный размер письма, можно отказаться от всего письма целиком, но не от отдельных его получателей, что мне кажется неправильным. Поэтому я не проверяю квоты на этапе DATA, а полагаюсь на обработку ошибок Dovecot'ом, который инициирует отправку писем об ошибке доставки в адрес отправителя.</p>
+
+		<p>Осталось перезагрузить Exim, чтобы новые правила вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/exim4 reload</pre>
+
+		<h2>4. Настройка SSL/TLS</h2>
+
+		<p>Изменим настройки прослушиваемых портов в главной секции файла /etc/exim4/exim4.conf, добавив в список порт 465:</p>
+
+		<pre class="code">daemon_smtp_ports = 25 : 465 : 587</pre>
+
+		<p>Добавим настройки TLS в главную секцию файла /etc/exim4/exim4.conf:</p>
+
+		<pre class="code">tls_on_connect_ports = 465
+tls_advertise_hosts = *
+tls_certificate = /etc/ssl/mail.domain.tld.public.pem
+tls_privatekey = /etc/ssl/mail.domain.tld.private.pem</pre>
+
+		<p>Порт 465 используется для подключения сразу по шифрованному каналу SSL, без явного согласования шифрования. Порт 587 обычно используется для подключений со стороны почтовых клиентов, как правило, с обязательным использованием аутентификации. В рассматриваемой конфигурации порты 25 и 587 никак не различаются, поведение сервера одинаково на обоих портах.</p>
+
+		<p>Для задействования добавленных настроек TLS, перезапустим почтовый сервер:</p>
+
+		<pre class="console"># /etc/init.d/exim4 restart</pre>
+
+		<h2>5. Настройка DKIM-подписей</h2>
+
+		<p>Для удобного создания ключей DKIM-подписей можно установить пакет opendkim-tools:</p>
+
+		<pre class="console"># apt-get install opendkim-tools</pre>
+
+		<p>На самом деле необходимые ключи можно генерировать и при помощи openssl, т.к. пакет opendkim-tools содержит набор shell-скриптов, являющихся обёрткой над утилитой openssl.</p>
+
+		<p>Теперь создадим каталог для ключей и сгенерируем пару ключей для домена domain.tld:</p>
+
+		<pre class="console"># mkdir /etc/exim4/dkim
+# cd /etc/exim4/dkim
+# opendkim-genkey -D /etc/exim4/dkim/ -d domain.tld -s mail
+# mv mail.private mail.domain.tld.private
+# mv mail.txt mail.domain.tld.public</pre>
+
+		<p>Далее можно сгенерировать ключи для других доменов, обслуживаемых нашей почтовой системой.</p>
+
+		<p>Выставим права доступа к файлам приватных ключей:</p>
+
+		<pre class="console"># cd /etc/exim4/dkim
+# chmod u=rw,g=r,o= *
+# chown root:Debian-exim *</pre>
+
+		<p>Добавляем в секцию транспортов файла /etc/exim4/exim4.conf, в транспорт remote_smtp, настройки для добавления DKIM-подписей к письмам:</p>
+
+		<pre class="code">remote_smtp:
+  driver = smtp
+  dkim_domain = ${lc:${domain:$h_from:}}
+  dkim_selector = mail
+  dkim_private_key = ${if exists{/etc/exim4/dkim/$dkim_selector.$dkim_domain.private} \
+                                {/etc/exim4/dkim/$dkim_selector.$dkim_domain.private}{}}</pre>
+
+		<p>Достаточно перезагрузить конфигурацию, чтобы письма во внешние домены начали подписываться DKIM-ключами:</p>
+
+		<pre class="console"># /etc/init.d/exim4 reload</pre>
+
+		<h2>6. Проверка DKIM-подписей</h2>
+
+		<p>Воспользуемся встроенной в Exim возможностью проверки DKIM-подписей входящих писем. Я буду проверять подписи у тех писем, в которых они есть. Плюс к тому, будем требовать наличия правильной DKIM-подписи для доменов публичных почтовых сервисов, о которых заведомо известно, что они добавляют DKIM-подписи к своим письмам. Это позволит защититься от поддельных писем, якобы исходящих из доменов этих почтовых сервисов.</p>
+
+		<p>Зададим в главной секции файла /etc/exim4/exim4.conf домены, для которых требуется правильная DKIM-подпись:</p>
+
+		<pre class="code">domainlist dkim_required_domains = gmail.com : yandex.ru : rambler.ru : \
+                                   mail.ru : bk.ru : list.ru : inbox.ru</pre>
+
+		<p>В эту же главную секцию файла /etc/exim4/exim4.conf добавим имя списка управления доступом, который будет проверять DKIM-подпись:</p>
+
+		<pre class="code">acl_smtp_dkim = acl_check_dkim</pre>
+
+		<p>В секцию acl файла /etc/exim4/exim4.conf добавим описание самого списка управления доступом:</p>
+
+		<pre class="code">acl_check_dkim:
+
+  # Отклоняем письма с неправильной DKIM-подписью
+  deny message = Wrong DKIM signature 
+       dkim_status = fail
+
+  # Для выбранных доменов требуем наличия DKIM-подписи
+  deny message = Valid DKIM signature needed for mail from $sender_domain
+       sender_domains = +dkim_required_domains
+       dkim_status = none
+
+  accept</pre>
+
+		<p>Перезагрузим файл конфигурации Exim, чтобы настройки вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/exim4 reload</pre>
+
+		<h2>7. Настройка грейлистинга</h2>
+
+		<p>Для грейлистинга воспользуемся демоном greylistd, написанном на Python. Этот демон не настолько сложен, как milter-greylist, которым я воспользовался для настройки грейлистинга в Postfix, однако его простота с лихвой компенсируется возможностями Exim. Установим пакет greylistd:</p>
+
+		<pre class="console"># apt-get install greylistd</pre>
+
+		<p>greylistd предоставляет механизм, а политику можно определить в конфигурации Exim. Я придерживаюсь политики подвергать грейлистингу те узлы, которые оказались в чёрном списке. Для того, чтобы включить грейлистинг, нужно в самый конец списка управления доступом acl_check_rcpt до финального правила accept добавить следующую проверку:</p>
+
+		<pre class="code">defer message = Greylisting in action, try later
+      !senders = :
+      !hosts = ${if exists{/etc/greylistd/whitelist-hosts}\
+                          {/etc/greylistd/whitelist-hosts}{}} : \
+               ${if exists{/var/lib/greylistd/whitelist-hosts}\
+                          {/var/lib/greylistd/whitelist-hosts}{}}
+      dnslists = zen.spamhaus.org
+      condition = ${readsocket{/var/run/greylistd/socket}\
+                              {--grey $sender_host_address $sender_address $local_part@$domain}\
+                              {5s}{}{false}}</pre>
+
+		<p>В поле !senders можно прописать адреса тех отправителей, которые не должны подвергаться грейлистингу. Соответственно, чтобы узел с определённым IP-адресом не подвергался грейлистингу, его можно добавить в файл /etc/greylistd/whitelist-hosts.</p>
+
+		<p>Осталось попросить Exim перезагрузить файл конфигурации, чтобы новые настройки вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/exim4 reload</pre>
+
+		<h2>8. Настройка SPF-записи</h2>
+
+		<p>SPF-запись - это TXT-запись следующего вида:</p>
+
+		<pre class="code">domain.tld. IN TXT "v=spf1 +mx ~all"</pre>
+
+		<p>Если указанный домен обслуживает <a href="http://www.openspf.org/">Sender Policy Framework</a>, описывающему синтаксис SFP-записи - <a hfref="http://www.openspf.org/SPF_Record_Syntax">SPF Record Syntax</a>. Стоит также прочесть о наиболее частых ошибках, допускаемых при создании SFP-записи - <a href="http://www.openspf.org/FAQ/Common_mistakes">Common mistakes</a>.</p>
+
+		<h2>9. Проверка SPF-записей</h2>
+
+		<p>Имеются разные способы проверки SPF-записей почтовой системой Exim. Сейчас в официальном дитрибутиве Debian поставлюятся конфигурационные файлы, проверяющие SPF-записи при помощи Perl-программы из пакета libmail-spf-perl. При этом каждая проверка инициирует новый запуск программы. На мой взгляд это довольно расточительно. Ранее существовал пакет libmail-spf-query-perl, в составе которого имелся демон, к которому можно было обратиться через Unix-сокет. Этот способ уже гораздо лучше и по сути ничем не отличается от грейлистинга при помощи демона greylistd на Python'е. Однако сейчас этот пакет не поставляется в репозитории Debian и, похоже, вообще не поддерживается авторами.</p>
+
+		<p>Имеется ещё один способ проверки SPF-записей - при помощи самого Exim. Однако эта опция считается экспериментальной и поэтому отключена по умолчанию. Пакеты в Debian собраны тоже без нативной поддержки проверки SPF-записей. Поддержка эта имеется в Exim уже многие годы и многие годы носит статус экспериментальной. Я решил попробовать собрать пакет, в котором поддержка проверки SPF-записей включена.</p>
+
+		<p>Для начала скачиваем необходимое для сборки Exim:</p>
+
+		<pre class="console"># apt-get build-dep exim4
+# apt-get source exim4
+# cd exim4-4.80</pre>
+
+		<p>Открываем файл src/EDITME в текстовом редакторе и раскомментируем строчки, включающие поддержку SPF:</p>
+
+		<pre class="code">EXPERIMENTAL_SPF=yes
+CFLAGS  += -I/usr/local/include
+LDFLAGS += -lspf2</pre>
+
+		<p>Вызываем команду редактирования журнала изменений пакета:</p>
+
+		<pre class="console"># dch -i</pre>
+
+		<p>Отмечаем изменения, которые внесли в пакет:</p>
+
+		<pre class="code">exim4 (4.80-7.1) UNRELEASED; urgency=low
+
+  * Non-maintainer upload.
+  * Enabled experimental SPF support.
+
+ -- Vladimir Stupin &lt;vladimir@stupin.su&gt;  Sat, 12 Apr 2014 19:45:04 +0600</pre>
+
+		<p>Собираем пакет:</p>
+
+		<pre class="console"># dpkg-buildpackage -us -uc -b -rfakeroot</pre>
+
+		<p>Создаём файл /etc/apt/preferences.d/exim4 в текстовом редакторе и вносим настройки, фиксирующие пакет в системе:</p>
+
+		<pre class="code">Package: exim4-daemon-heavy
+Pin: version 4.80-7.1
+Pin-Priority: 1003</pre>
+
+		<p>Зафиксировать пакет нужно для того, чтобы пакет из дистрибутива не заменил собранный нами вручную. Поскольку дистрибутивный пакет собран без поддержки SPF, он не сможет понять правило проверки SPF в файле конфигурации и не запустится. В результате почтовая система не будет работать. Если в дистрибутиве появится обновление пакета, пакет придётся пересобрать и установить самостоятельно.</p>
+
+		<p>Теперь установим пакет с поддержкой SPF:</p>
+
+		<pre class="console"># cd ..
+# dpkg -i exim4-daemon-heavy_4.80-7.1_amd64.deb</pre>
+
+		<p>SPF-записи могут классифицировать IP-адрес одним из следующих образов:</p>
+
+		<ul>
+			<li>pass (+) - рекомендуется принять почту,</li>
+
+			<li>fail (-) - рекомендуется отклонить почту,</li>
+
+			<li>softfail (~) - рекомендуется принять почту, но пометить её как подозрительную,</li>
+
+			<li>neutral (?) - рекомендуется обрабатывать почту таким образом, как будто SPF-записи не существует.</li>
+		</ul>
+
+		<p>Дополнительно, есть ещё два статуса, которые сообщают о постоянной или временной ошибке проверки IP-адреса.</p>
+
+		<p>Когда SPF-записи были только придуманы, некоторые системные администраторы слишком буквально воспринимали их рекомендации. Случались ситуации, когда первичный почтовый сервер не принимал почту от своего резервного сервера лишь потому, что его IP-адресу соответствовала SPF-запись, предписывающая не принимать письмо. Поэтому сложилась практика не указывать политику fail, а использовать вместо неё политики softfail или neutral. На мой взгляд, если бы не было таких прямолинейных системных администраторов, не было бы никакого смысла в политиках, отличных от pass и fail.</p>
+
+		<p>Нормальная почта может исходить только от серверов отправителя и должна приходить на серверы получателя без каких-либо посторонних промежуточных серверов. Сервер получателя должен проверять соответствие отправителя SPF-политике на основных и резервных серверах, а при приёме писем с резервного сервера на основной уже не обращать внимания на то, что его резервный сервер не удовлетворяет политике SPF. Именно поэтому я воспринимаю политики softfail и neutral точно так же, как воспринимаю политику fail. Я в любом случае приму почту от резервного сервера, не смотря на рекомендации SPF-записи, но на резервном сервере я обязательно их проверю.</p>
+
+		<p>Перед правилами проверки квот почтовых ящиков в списке управления доступом acl_check_rcpt в секции acl файла /etc/exim4/exim4.conf добавим следующее правило, соответствующее описанным выше соображениям:</p>
+
+		<pre class="code">deny message = Reject due SPF policy
+     spf = fail : softfail : neutral</pre>
+
+		<p>Осталось лишь перезапустить Exim, чтобы заработал демон из собранного нами пакета и вступили в силу новые настройки:</p>
+
+		<pre class="console"># /etc/init.d/exim4 stop
+# /etc/init.d/exim4 start</pre>
+
+		<h2>10. Требование аутентификации</h2>
+
+		<p>Чтобы запретить локальным пользователям отправлять почту без аутентификации, добавим в конфигурацию такое правило:</p>
+
+		<pre class="code">deny message = Local sender must be authenticated
+     sender_domains = +local_domains
+     !authenticated = *</pre>
+
+		<p>Чтобы аутентифицированный пользователь не пытался подставить чужой адрес отправителя, добавим в конфигурацию такое правило:</p>
+
+		<pre class="code">deny message = Send your own mail from yourself
+     condition = ${if eq{$authenticated_id}{$sender_address}{no}{yes}}
+     authenticated = *</pre>
+
+		<p>Оба правила нужно добавить в секцию acl файла /etc/exim4/exim4.conf, в правило acl_check_rcpt перед принятием почты от аутентифицированных пользователей.</p>
+
+		<p>Осталось перезагрузить файл конфигурации, чтобы она вступила в силу:</p>
+
+		<pre class="console"># /etc/init.d/exim4 reload</pre>
+
+		<h2>11. Итоговый файл конфигурации</h2>
+
+		<p>В конечном итоге у меня получился такой файл конфигурации /etc/exim4/exim4.conf:</p>
+
+		<pre class="code"># Имя нашей почтовой системы
+primary_hostname = mail.domain.tld
+
+# База данных MySQL и учётные данные для работы с ней
+hide mysql_servers = localhost/postfixadmin/exim/exim_password
+
+# Список доменов нашей почтовой системы
+domainlist local_domains = ${lookup mysql{SELECT domain \
+                                          FROM domain \
+                                          WHERE domain = '${quote_mysql:$domain}' \
+                                            AND backupmx = 0 \
+                                            AND active = 1}}
+
+# Список доменов, для которых наша почтовая система является резервной
+domainlist relay_domains = ${lookup mysql{SELECT domain \
+                                          FROM domain \
+                                          WHERE domain = '${quote_mysql:$domain}' \
+                                            AND backupmx = 1 \
+                                            AND active = 1}}
+
+# Список узлов, почту от которых будем принимать без проверок
+hostlist relay_from_hosts = 
+
+# Домены, для которых требуется наличие правильной DKIM-подписи
+domainlist dkim_required_domains = gmail.com : yandex.ru : rambler.ru : \
+                                   mail.ru : bk.ru : list.ru : inbox.ru
+
+# Правила для проверок
+acl_not_smtp = acl_check_not_smtp
+acl_smtp_rcpt = acl_check_rcpt
+acl_smtp_data = acl_check_data
+acl_smtp_dkim = acl_check_dkim
+
+# Сокет-файл антивируса ClamAV
+av_scanner = clamd:/var/run/clamav/clamd.ctl
+
+# Сокет-файл SpamAssassin
+# spamd_address =
+
+# Отключаем IPv6, слушаем порты 25, 465 и 587
+disable_ipv6
+daemon_smtp_ports = 25 : 465 : 587
+tls_on_connect_ports = 465
+
+# Настройки сертификатов SSL/TLS
+tls_advertise_hosts = *
+tls_certificate = /etc/ssl/mail.domain.tld.public.pem
+tls_privatekey = /etc/ssl/mail.domain.tld.private.pem
+
+# Дописываем домены отправителя и получателя, если они не указаны
+qualify_domain = domain.tld
+qualify_recipient = domain.tld
+
+# Exim никогда не должен запускать процессы от имени пользователя root
+never_users = root
+
+# Проверять прямую и обратную записи узла отправителя по DNS
+host_lookup = *
+
+# Отключаем проверку пользователей узла отправителя по протоколу ident
+rfc1413_hosts = *
+rfc1413_query_timeout = 0s
+
+# Только эти узлы могут не указывать домен отправителя или получателя
+sender_unqualified_hosts = +relay_from_hosts
+recipient_unqualified_hosts = +relay_from_hosts
+
+# Лимит размера сообщения, 30 мегабайт
+message_size_limit = 30M
+
+# Запрещаем использовать знак % для явной маршрутизации почты
+percent_hack_domains =
+
+# Настройки обработки ошибок доставки, используются значения по умолчанию
+ignore_bounce_errors_after = 2d
+timeout_frozen_after = 7d
+
+begin acl
+
+  # Проверки для локальных отправителей
+  acl_check_not_smtp:
+     accept
+
+  # Проверки на этапе RCPT
+  acl_check_rcpt:
+
+    accept hosts = :
+
+    # Отклоняем неправильные адреса почтовых ящиков
+    deny message = Restricted characters in address
+         domains = +local_domains
+         local_parts = ^[.] : ^.*[@%!/|]
+
+    # Отклоняем неправильные адреса почтовых ящиков
+    deny message = Restricted characters in address
+         domains = !+local_domains
+         local_parts = ^[./|] : ^.*[@%!] : ^.*/\\.\\./
+
+    # В локальные ящики postmaster и abuse принимает почту всегда
+    accept local_parts = postmaster : abuse
+           domains = +local_domains
+
+    # Проверяем существование домена отправителя
+    require verify = sender
+
+    # Принимаем почту от доверенных узлов, попутно исправляя заголовки письма
+    accept hosts = +relay_from_hosts
+           control = submission
+
+    # Не даём локальным отправителям слать почту без аутентификации
+    deny message = Local sender must be authenticated
+         sender_domains = +local_domains
+         !authenticated = *
+
+    # Не даём локальным отправителям представляться чужим именем
+    deny message = Send your own mail from yourself
+         condition = ${if eq{$authenticated_id}{$sender_address}{no}{yes}}
+         authenticated = *
+
+    # Принимаем почту от аутентифицированных узлов, попутно исправляя заголовки письма
+    accept authenticated = *
+           control = submission/domain=
+
+    # Для не доверенных и не аутентифицированных требуется, чтобы получатель был в домене,
+    # ящик которого находится у нас или для которого мы являемся резервным почтовым сервером
+    require message = Relay not permitted
+            domains = +local_domains : +relay_domains
+
+    # Проверяем домена удалённого получателя или адрес локального получателя
+    require verify = recipient
+
+    # Отклоняем письма, не соответствующие политике домена отправителя
+    deny message = Reject due SPF policy
+         spf = fail : softfail : neutral
+
+    # Проверка квот получателя
+    discard message = 422 Mailbox $local_part@$domain is over quota
+            domains = +local_domains
+            condition = ${lookup mysql{SELECT 1 \
+                                       FROM mailbox \
+                                       JOIN quota2 ON quota2.username = mailbox.username \
+                                         AND quota2.bytes + ${if ={$message_size}{-1}{${expand:message_size_limit}}{$message_size}} &gt;= mailbox.quota \
+                                       WHERE mailbox.username = LCASE('${quote_mysql:$local_part@$domain}') \
+                                         AND mailbox.active = 1}}
+
+    # Проверка квот в случае использования альтернативного домена ящика получателя
+    discard message = 422 Mailbox $local_part@$domain is over quota
+            domains = +local_domains
+            condition = ${lookup mysql{SELECT 1 \
+                                       FROM alias_domain \
+                                       JOIN mailbox ON mailbox.local_part = LCASE('${quote_mysql:$local_part}') \
+                                         AND mailbox.domain = alias_domain.target_domain \
+                                         AND mailbox.active = 1 \
+                                       JOIN quota2 ON quota2.username = mailbox.username \
+                                         AND quota2.bytes + ${if ={$message_size}{-1}{${expand:message_size_limit}}{$message_size}} &gt;= mailbox.quota \
+                                       WHERE alias_domain.alias_domain = LCASE('${quote_mysql:$domain}') \
+                                         AND alias_domain.active = 1}}
+
+    # Если отправитель попал в чёрный список, отправляем его в грейлистинг
+    defer message = Greylisting in action, try later
+          log_message = greylisted.
+          !senders = :
+          !hosts = ${if exists{/etc/greylistd/whitelist-hosts}\
+                              {/etc/greylistd/whitelist-hosts}{}} : \
+                   ${if exists{/var/lib/greylistd/whitelist-hosts}\
+                              {/var/lib/greylistd/whitelist-hosts}{}}
+          dnslists = zen.spamhaus.org
+          condition = ${readsocket{/var/run/greylistd/socket}\
+                                  {--grey $sender_host_address $sender_address $local_part@$domain}\
+                                  {5s}{}{false}}
+
+    accept
+
+  acl_check_data:
+
+    # Отклоняем письма, содержащие вирусы
+    deny message = Message contains a virus ($malware_name)
+         malware = *
+
+    accept
+
+  acl_check_dkim:
+
+    # Отклоняем письма, содержащие DKIM-подпись, если она не правильная
+    deny message = Wrong DKIM signature
+         dkim_status = fail
+
+    # Отклоняем письма, не содержащие DKIM-подпись, предотвращая подделку писем
+    # из крупных почтовых систем, которые всегда добавляют DKIM-подпись
+    deny message = Valid DKIM signature needed for mail from $sender_domain
+         sender_domains = +dkim_required_domains
+         dkim_status = none
+
+    accept
+
+begin routers
+
+  # Поиск транспорта для удалённых получателей
+  dnslookup:
+    driver = dnslookup
+    domains = ! +local_domains
+    transport = remote_smtp
+    ignore_target_hosts = 0.0.0.0 : 127.0.0.0/8
+    no_more
+
+  # Пересылки для локальных получателей из файла /etc/aliases
+  system_aliases:
+    driver = redirect
+    allow_fail
+    allow_defer
+    domains = domain.tld
+    data = ${lookup{$local_part}lsearch{/etc/aliases}}
+
+  # Пересылки с ящика на ящик в локальных доменах из Postfixadmin
+  aliases:
+    driver = redirect
+    allow_fail
+    allow_defer
+    data = ${lookup mysql{SELECT LCASE(goto) \
+                          FROM alias \
+                          WHERE address = LCASE('${quote_mysql:$local_part@$domain}') \
+                            AND active = 1}}
+  
+  # Пересылки на одноимённые ящики в другом домене из Postfixadmin
+  alias_domain:
+    driver = redirect
+    allow_fail
+    allow_defer
+    data = ${lookup mysql{SELECT alias.goto \
+                          FROM alias_domain \
+                          JOIN alias ON alias.address = LCASE('${quote_mysql:$local_part@$domain}') \
+                            AND alias.active = 1 \
+                          WHERE alias_domain.alias_domain = LCASE('${quote_mysql:$domain}') \
+                            AND alias_domain.active = 1}}
+
+  # Пересылки на ящик по умолчанию в локальном домене из Postfixadmin
+  alias_domain_catchall:
+    driver = redirect
+    allow_fail
+    allow_defer
+    data = ${lookup mysql{SELECT alias.goto \
+                          FROM alias_domain \
+                          JOIN alias ON alias.address = LCASE('${quote_mysql:@$domain}') \
+                            AND alias.active = 1 \
+                          WHERE alias_domain.alias_domain = LCASE('${quote_mysql:$domain}') \
+                            AND alias_domain.active = 1}}
+
+  # Получение почты на локальный ящик из Postfixadmin
+  mailbox:
+    driver = accept
+    condition = ${lookup mysql{SELECT maildir \
+                               FROM mailbox \
+                               WHERE username = LCASE('${quote_mysql:$local_part@$domain}') \
+                                 AND active = 1}{yes}{no}}
+    transport = dovecot_virtual_delivery
+
+  # Получение почты на локальный ящик с альтернативным доменным именем из Postfixadmin
+  alias_domain_mailbox:
+    driver = accept
+    condition = ${lookup mysql{SELECT mailbox.maildir \
+                               FROM alias_domain \
+                               JOIN mailbox ON mailbox.local_part = LCASE('${quote_mysql:$local_part}') \
+                                 AND mailbox.domain = alias_domain.target_domain \
+                                 AND mailbox.active = 1 \
+                               WHERE alias_domain.alias_domain = LCASE('${quote_mysql:$domain}') \
+                                 AND alias_domain.active = 1}{yes}{no}}
+    transport = dovecot_virtual_delivery
+    cannot_route_message = Unknown user
+
+begin transports
+
+  # Транспорт для удалённых получателей
+  # Добавляем к исходящим письмам DKIM-подпись
+  remote_smtp:
+    driver = smtp
+    dkim_domain = ${lc:${domain:$h_from:}}
+    dkim_selector = mail
+    dkim_private_key = ${if exists{/etc/exim4/dkim/$dkim_selector.$dkim_domain.private} \
+                                  {/etc/exim4/dkim/$dkim_selector.$dkim_domain.private}{}}
+
+  # Транспорт для локальных получателей из Dovecot
+  dovecot_virtual_delivery:
+    driver = pipe
+    command = /usr/lib/dovecot/dovecot-lda -d $local_part@$domain -f $sender_address
+    message_prefix =
+    message_suffix =
+    delivery_date_add
+    envelope_to_add
+    return_path_add
+    log_output
+    user = vmail
+    temp_errors = 64 : 69 : 70: 71 : 72 : 73 : 74 : 75 : 78
+
+begin retry
+
+  *   *   F,2h,15m; G,16h,1h,1.5; F,4d,6h
+
+begin rewrite
+
+begin authenticators
+
+  # Использование LOGIN-аутентификации из Dovecot
+  dovecot_login:
+    driver = dovecot
+    public_name = LOGIN
+    server_socket = /var/run/dovecot/auth-client
+    server_set_id = $auth1
+
+  # Использование PLAIN-аутентификации из Dovecot
+  dovecot_plain:
+    driver = dovecot
+    public_name = PLAIN
+    server_socket = /var/run/dovecot/auth-client
+    server_set_id = $auth1</pre>
+
+		<p>Преимущества получившейся системы, на мой взгляд, заключаются в том, что используется небольшое количество дополнительных демонов, а всю логику работы можно понять, изучив всего один файл конфигурации. Если говорить о подсистеме SMTP, то в её состав входят лишь Exim, ClamAV и greylistd. Я намеренно не стал использовать систему оценки подозрительности письма по балльной системе (см. например <a href="http://www.info-x.org/freebsd/email/nastroika_pochtovoi_sistemy_agent_peresylki_pochty_exim.html">Настройка почтовой системы. Агент пересылки почты Exim</a>), чтобы в случае проблем можно было легко понять, почему определённое письмо не проходит. В случае с балльной системой понять точную причину сложнее, т.к. критическая сумма баллов может складываться из большого сочетания разных признаков.</p>
+
+		<p>При использовании Postfix в подсистему SMTP входили: Postfix, ClamAV, ClamAV-Milter, Milter-Greylist, OpenDKIM. Каждый демон имеет свой синтаксис конфигурационного файла, даже настройки Postfix разбросаны по десятку разных файлов. Логика работы Postfix в конечном счёте оказывается не столь очевидной, поскольку Milter-проверки вмешиваются в проверки собственно Postfix.</p>
+
+		<p>Если у вас есть замечания и предложения по описанным настройкам Exim, прошу высказываться, т.к. возможно я что-то упустил.</p>
+
+		<p>Дополнение от 3 мая 2014 года:</p>
+
+		<ol>
+			<li>Добавил правило проверки acl_not_smtp = acl_check_not_smtp для локальных отправителей, отправляющих почту не по протоколу SMTP, как правило, при помощи команды sendmail.</li>
+
+			<li>Убрал лишние транспорты из маршрута system_aliases - эти транспорты в рассматриваемой конфигурации не настраивались.</li>
+
+			<li>Уточнил маршрут system_aliases. Если система обслуживает несколько доменов, то файл /etc/aliases должен действовать только для домена, в котором находтся доменное имя почтовой системы.</li>
+		</ol>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка Exim">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

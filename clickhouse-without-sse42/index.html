@@ -1,0 +1,95 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="clickhouse,debian,linux" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2020-10-11 -->
+		<title>Пересборка ClickHouse для процессоров без поддержки SSE 4.2</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Пересборка ClickHouse для процессоров без поддержки SSE 4.2</h1>
+
+		<p>В официальных репозиториях Debian Buster появились пакеты с сервером и клиентом Clickhouse. По умолчанию сервер Clickhouse собран с использованием процессорных инструкций SSE 4.2, т.к. именно такие <a href="https://clickhouse.yandex/%E2%80%8Bdocs/%E2%80%8Bru/%E2%80%8Bgetting_started/#%E2%80%8Bsistemnye-trebovaniia">системные требования</a> указаны на официальной странице проекта.</p>
+
+		<p>Для проверки, поддерживает ли процессор SSE 4.2, можно воспользоваться следующей командой:</p>
+
+		<pre class="console">$ grep -q sse4_2 /proc/cpuinfo &amp;&amp; echo "SSE 4.2 supported" || echo "SSE 4.2 not supported"</pre>
+
+		<p>При попытке запустить сервер ClickHouse на процессоре, не поддерживающем этот набор инструкций, в журнале /var/log/messages можно будет обнаружить сообщения следующего вида:</p>
+
+		<pre class="code">Aug  9 18:33:45 buster kernel: [    7.571795] traps: clickhouse-serv[257] trap invalid opcode ip:7f89f23 sp:7ffda2789a98 error:0 in clickhouse[400000+f8a5000]</pre>
+
+		<p>Мой домашний компьютер не отличается новизной, поэтому для экспериментов дома мне пришлось пересобрать пакеты с Clickhouse. Сборочные скрипты автоматически определяют поддержку инструкций SSE 4.2 и при её отсутствии выполняют сборку так, чтобы пакеты работали без них.</p>
+
+		<p>Впишем в файл /etc/apt/sources.list дополнительные репозитории с исходными текстами:</p>
+
+		<pre class="code">deb-src http://mirror.yandex.ru/debian/ buster main contrib non-free
+deb-src http://mirror.yandex.ru/debian/ buster-updates main contrib non-free
+deb-src http://mirror.yandex.ru/debian/ buster-proposed-updates main contrib non-free
+deb-src http://mirror.yandex.ru/debian-security/ buster/updates main contrib non-free</pre>
+
+		<p>Обновим список пакетов, доступных через репозитории:</p>
+
+		<pre class="console"># apt-get update</pre>
+
+		<p>Установим пакеты, которые потребуются нам для сборки ClickHouse из исходных текстов:</p>
+
+		<pre class="console"># apt-get build-dep clickhouse</pre>
+
+		<p>И скачаем пакет с исходными текстами:</p>
+
+		<pre class="console">$ apt-get source clickhouse</pre>
+
+		<p>Переходим в каталог с распакованными исходными текстами, запускаем dch и описываем изменения.</p>
+
+		<pre class="console">$ cd clickhouse-18.16.1+ds
+$ dch -i</pre>
+
+		<p>В открывшемся редакторе дописываем к номеру версии fix1 и описываем изменения:</p>
+
+		<pre class="code">clickhouse (18.16.1+ds-4fix1) UNRELEASED; urgency=medium
+
+  * Version with no need CPU with support SSE4.2 instruction set..
+
+ -- Vladimir Stupin &lt;vladimir@stupin.su&gt;  Tue, 14 Jan 2020 11:28:11 +0500</pre>
+
+		<p>Собираем пакет:</p>
+
+		<pre class="console">$ debuild -us -uc</pre>
+
+		<p>Для сборки потребуется довольно много оперативной памяти. Я пытался собрать пакет на виртуальной машине с 2 гигабайтами оперативной памяти, потом увеличил до 3 и до 4, но этого объёма оказывалось по-прежнему недостаточно для того, чтобы собрать библиотеку libclickhouse.so из объектных файлов. Вернул виртуальной машине 2 гигабайта оперативной памяти и подключил раздел подкачки размером 8 гигабайт. Сборка шла долго, но всё-таки завершилась успешно.</p>
+
+		<p>Если сборка завершается неудачно, а в тексте ошибки имеются такие строки:</p>
+
+		<pre class="code">CMake Error: Error: generator : Unix Makefiles
+Does not match the generator used previously: Ninja
+Either remove the CMakeCache.txt file and CMakeFiles directory or choose a different binary directory.</pre>
+
+		<p>То можно попробовать удалить пакет ninja-build:</p>
+
+		<pre class="console"># apt-get purge ninja-build</pre>
+
+		<p>Затем можно попробовать запустить сборку пакета снова.</p>
+
+		<p>После успешной сборки можно будет выйти из сборочного каталога и установить появившиеся рядом с ним двоичные пакеты:</p>
+
+		<pre class="console"># dpkg -i clickhouse-server_18.16.1+ds-4fix1_amd64.deb clickhouse-client_18.16.1+ds-4fix1_amd64.deb clickhouse-common_18.16.1+ds-4fix1_amd64.deb</pre>
+
+		<p>Или можно воспользоваться утилитой <a href="../aptly/">aptly, чтобы создать собственный репозиторий</a> и поместить в него эти пакеты. В таком случае для установки пакетов в систему будет достаточно:</p>
+
+		<ol>
+			<li>подключить этот репозиторий в файле /etc/apt/sources.list,</li>
+
+			<li>обновить список пакетов, доступных через репозитории, командой apt-get update,</li>
+
+			<li>поставить пакеты, например, командой apt-get install clickhouse-server clickhouse-client</li>
+		</ol>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Пересборка ClickHouse для процессоров без поддержки SSE 4.2">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

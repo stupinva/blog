@@ -1,0 +1,422 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="ocsp,Реми ван Элст,openssl,tls,перевод,crl,ssl" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-09-03 -->
+		<title>Реми ван Элст. Командная строка OpenSSL: Корневой и промежуточный удостоверяющий центры, включая OCSP, CRL и отзыв сертификатов, 2015</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Реми ван Элст. Командная строка OpenSSL: Корневой и промежуточный удостоверяющий центры, включая OCSP, CRL и отзыв сертификатов, 2015</h1>
+
+		<p>Перевод статьи: <a href="https://raymii.org/s/tutorials/OpenSSL_command_line_Root_and_Intermediate_CA_including_OCSP_CRL%20and_revocation.html">OpenSSL command line Root and Intermediate CA including OCSP, CRL and revocation</a></p>
+
+		<p>Автор: Реми ван Элст (Remy van Elst)</p>
+
+		<p>Это короткие и неаккуратные заметки по созданию удостоверяющего центра, промежуточных удостоверяющих центров и конечных сертификатов при помощи OpenSSL. Сертификаты содержат информацию об OCSP - протоколе интерактивного статуса сертификата, CRL - списке отозванных сертификатов, информацию об удостоверяющем центре-эмитенте, назначении сертификата и сроке его годности.</p>
+
+		<p>Мы создадим наш собственный корневой удостоверяющий центр. Мы воспользуемся этим корневым удостоверяющим центром для создания промежуточного удостоверяющего центра. Мы воспользуемся этим промежуточным удостоверяющим центром, чтобы подписать сертификаты конечных пользователей.</p>
+
+		<h2>1. Корневой удостоверяющий центр</h2>
+
+		<p>Создадим и переместим в каталог корневой удостоверяющий центр:</p>
+
+		<pre class="console">mkdir ~/SSLCA/root/
+cd ~/SSLCA/root/</pre>
+
+		<p>Создадим ключ SHA-256 RSA длиной 8192 бит для нашего корневого удостоверяющего центра:</p>
+
+		<pre class="console">openssl genrsa -aes256 -out rootca.key 8192</pre>
+
+		<p>Пример вывода:</p>
+
+		<pre class="console">Generating RSA private key, 8192 bit long modulus # Создание приватного ключа, с модулем длиной 8192 бит
+.........++
+....................................................................................................................++
+e is 65537 (0x10001) # e равно 65537 (0x10001)</pre>
+
+		<p>Если хотите защитить этот ключ паролем, добавьте опцию -passout pass:пароль или -passout file:файл_с_паролем.</p>
+
+		<p>Создадим самозаверенный сертификат удостоверяющего центра ca.crt. Нужно предоставить идентификационные данные вашего корневого удостоверяющего центра:</p>
+
+		<pre class="console">openssl req -sha256 -new -x509 -days 1826 -key rootca.key -out rootca.crt</pre>
+
+		<p>Пример вывода:</p>
+
+		<pre class="console">You are about to be asked to enter information that will be incorporated     # У вас будет запрошена информация, которая будет вставлена
+into your certificate request.                                               # в ваш запрос сертификата.
+What you are about to enter is what is called a Distinguished Name or a DN.  # То, что вы введёте, называется Distinquised Name - Отличительное Имя или DN.
+There are quite a few fields but you can leave some blank                    # Далее следует несколько полей, но некоторые из них можно не заполнять
+For some fields there will be a default value,                               # У некоторых полей есть значение по умолчанию,
+If you enter '.', the field will be left blank.                              # Если ввести '.', то поле останется пустым.
+-----
+Country Name (2 letter code) [AU]:NL                                         # Название страны (двухбуквенный код) [AU]:NL
+State or Province Name (full name) [Some-State]:Zuid Holland                 # Название штата или провинции (полное название) [Некий-штат]:Южная Голландия
+Locality Name (eg, city) []:Rotterdam                                        # Название местности (например, город) []:Роттердам
+Organization Name (eg, company) [Internet Widgits Pty Ltd]:Sparkling Network # Название организации (например, компания) [ООО Интернет-виджеты]:Искрящая сеть
+Organizational Unit Name (eg, section) []:Sparkling CA                       # Название подразделения (например, отдел) []:Искрящий удостоверяющий центр
+Common Name (e.g. server FQDN or YOUR name) []:Sparkling Root CA             # Общее имя (например, полное доменное имя сервера или ваше имя) []:Искрящий корневой удостоверяющий центр
+Email Address []:                                                            # Адрес электронной почты []:</pre>
+
+		<p>Создадим несколько файлов, в которых удостоверяющий центр будет хранить серийные номера:</p>
+
+		<pre class="console">touch certindex
+echo 1000 &gt; certserial
+echo 1000 &gt; crlnumber</pre>
+
+		<p>Создадим файл конфигурации удостоверяющего центра. Этот файл содержит заглушки для конечных точек CRL - списка отозванных сертификатов и OCSP - протокола интерактивного статуса сертификата.</p>
+
+		<pre class="console"># vim ca.conf</pre>
+
+		<pre class="code">[ca]
+default_ca = myca
+
+[crl_ext]
+issuerAltName=issuer:copy
+authorityKeyIdentifier=keyid:always
+
+[myca]
+dir = ./
+new_certs_dir = $dir
+unique_subject = no
+certificate = $dir/rootca.crt
+database = $dir/certindex
+private_key = $dir/rootca.key
+serial = $dir/certserial
+default_days = 730
+default_md = sha1
+policy = myca_policy
+x509_extensions = myca_extensions
+crlnumber = $dir/crlnumber
+default_crl_days = 730
+
+[myca_policy]
+commonName = supplied
+stateOrProvinceName = supplied
+countryName = optional
+emailAddress = optional
+organizationName = supplied
+organizationalUnitName = optional
+
+[myca_extensions]
+basicConstraints = critical,CA:TRUE
+keyUsage = critical,any
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
+keyUsage = digitalSignature,keyEncipherment,cRLSign,keyCertSign
+extendedKeyUsage = serverAuth
+crlDistributionPoints = @crl_section
+subjectAltName = @alt_names
+authorityInfoAccess = @ocsp_section
+
+[v3_ca]
+basicConstraints = critical,CA:TRUE,pathlen:0
+keyUsage = critical,any
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
+keyUsage = digitalSignature,keyEncipherment,cRLSign,keyCertSign
+extendedKeyUsage = serverAuth
+crlDistributionPoints = @crl_section
+subjectAltName = @alt_names
+authorityInfoAccess = @ocsp_section
+
+[alt_names]
+DNS.0 = Sparkling Intermidiate CA 1 # DNS.0 = Искрящий промежуточный удостоверяющий центр 1
+DNS.1 = Sparkling CA Intermidiate 1 # DNS.1 = Искрящий удостоверяющий центр промежуточный 1
+
+[crl_section]
+URI.0 = http://pki.sparklingca.com/SparklingRoot.crl
+URI.1 = http://pki.backup.com/SparklingRoot.crl
+
+[ocsp_section]
+caIssuers;URI.0 = http://pki.sparklingca.com/SparklingRoot.crt
+caIssuers;URI.1 = http://pki.backup.com/SparklingRoot.crt
+OCSP;URI.0 = http://pki.sparklingca.com/ocsp/
+OCSP;URI.1 = http://pki.backup.com/ocsp/</pre>
+
+		<p>Если нужно задать определённые даты начала или завершения действия сертификата, добавьте в секцию [myca] следующие строки:</p>
+
+		<pre class="code"># формат: ГГГГММДДЧЧММСС
+default_enddate = 20191222035911
+default_startdate = 20181222035911</pre>
+
+		<h2>2. Создание промежуточного удостоверяющего центра 1</h2>
+
+		<p>Создание приватного ключа промежуточного удостоверяющего центра:</p>
+
+		<pre class="console">openssl genrsa -out intermediate1.key 4096</pre>
+
+		<p>Создание CSR - запроса на подписание сертификата промежуточного удостоверяющего центра 1:</p>
+
+		<pre class="console">openssl req -new -sha256 -key intermediate1.key -out intermediate1.csr</pre>
+
+		<p>Пример вывода:</p>
+
+		<pre class="console">You are about to be asked to enter information that will be incorporated     # У вас будет запрошена информация, которая будет вставлена
+into your certificate request.                                               # в ваш запрос сертификата.
+What you are about to enter is what is called a Distinguished Name or a DN.  # То, что вы введёте, называется Distinquised Name - Отличительное Имя или DN.
+There are quite a few fields but you can leave some blank                    # Далее следует несколько полей, но некоторые из них можно не заполнять
+For some fields there will be a default value,                               # У некоторых полей есть значение по умолчанию,
+If you enter '.', the field will be left blank.                              # Если ввести '.', то поле останется пустым.
+-----
+Country Name (2 letter code) [AU]:NL                                         # Название страны (двухбуквенный код) [AU]:NL
+State or Province Name (full name) [Some-State]:Zuid Holland                 # Название штата или провинции (полное название) [Некий-штат]:Южная Голландия
+Locality Name (eg, city) []:Rotterdam                                        # Название местности (например, город) []:Роттердам
+Organization Name (eg, company) [Internet Widgits Pty Ltd]:Sparkling Network # Название организации (например, компания) [ООО Интернет-виджеты]:Искрящая сеть
+Organizational Unit Name (eg, section) []:Sparkling CA                       # Название подразделения (например, отдел) []:Искрящий удостоверяющий центр
+Common Name (e.g. server FQDN or YOUR name) []:Sparkling Intermediate CA     # Общее имя (например, полное доменное имя сервера или ваше имя) []:Искрящий промежуточный удостоверяющий центр
+Email Address []:                                                            # Адрес электронной почты []:
+
+Please enter the following 'extra' attributes                                # Пожалуйста, введите следующие дополнительные атрибуты,
+to be sent with your certificate request                                     # которые будут отправлены в составе запроса сертификата
+A challenge password []:                                                     # Пароль вызова []:
+An optional company name []:                                                 # Не обязательное название компании []:</pre>
+
+		<p>Удостоверьтесь, что Общее Имя (Common Name - CN) промежуточного сертификата отличается от корневого.</p>
+
+		<p>Подпишем корневым удостоверяющим центром запрос на подписание сертификата промежуточного удостоверяющего центра:</p>
+
+		<pre class="console">openssl ca -batch -config ca.conf -notext -in intermediate1.csr -out intermediate1.crt</pre>
+
+		<p>Пример вывода:</p>
+
+		<pre class="console">Using configuration from ca.conf                                         # Используется конфигурация из ca.conf
+Check that the request matches the signature                             # Проверка соответствия подписи запросу
+Signature ok                                                             # Подпись в порядке
+The Subject's Distinguished Name is as follows                           # Содержимое Отличительного Имени показано ниже
+countryName :PRINTABLE:'NL'
+stateOrProvinceName :ASN.1 12:'Zuid Holland'
+localityName :ASN.1 12:'Rotterdam'
+organizationName :ASN.1 12:'Sparkling Network'
+organizationalUnitName:ASN.1 12:'Sparkling CA'
+commonName :ASN.1 12:'Sparkling Intermediate CA'
+Certificate is to be certified until Mar 30 15:07:43 2017 GMT (730 days) # Сертификат был удостоверен до 30 марта 2017 года 15:07:43 по Гринвичу (730 дней)
+
+Write out database with 1 new entries                                    # В базу данных записана 1 новая запись
+Data Base Updated                                                        # База данных обновлена</pre>
+
+		<p>Создадим CRL - список отозванных сертификатов в форматах PEM и DER:</p>
+
+		<pre class="console">openssl ca -config ca.conf -gencrl -keyfile rootca.key -cert rootca.crt -out rootca.crl.pem
+openssl crl -inform PEM -in rootca.crl.pem -outform DER -out rootca.crl</pre>
+
+		<p>Создавайте CRL - список отозванных сертификатов после каждого подписания сертификата удостоверяющим центром.</p>
+
+		<p>Если когда-нибудь понадобится отозвать этот промежуточный сертификат:</p>
+
+		<pre class="console">openssl ca -config ca.conf -revoke intermediate1.crt -keyfile rootca.key -cert rootca.crt</pre>
+
+		<h2>3. Настройка промежуточного удостоверяющего центра 1</h2>
+
+		<p>Создадим новый каталог и переместим промежуточный удостоверяющий центр:</p>
+
+		<pre class="console">mkdir ~/SSLCA/intermediate1/
+cd ~/SSLCA/intermediate1/</pre>
+
+		<p>Скопируем сертификат промежуточного удостоверяющего центра и ключ из каталога корневого удостоверяющего центра:</p>
+
+		<pre class="console">cp ~/SSLCA/root/intermediate1.key ./
+cp ~/SSLCA/root/intermediate1.crt ./</pre>
+
+		<p>Создадим файлы индекса:</p>
+
+		<pre class="console">touch certindex
+echo 1000 &gt; certserial
+echo 1000 &gt; crlnumber</pre>
+
+		<p>Создадим новый файл ca.conf:</p>
+
+		<pre class="console"># vim ca.conf</pre>
+
+		<pre class="code">[ca]
+default_ca = myca
+
+[crl_ext]
+issuerAltName=issuer:copy
+authorityKeyIdentifier=keyid:always
+
+[myca]
+dir = ./
+new_certs_dir = $dir
+unique_subject = no
+certificate = $dir/intermediate1.crt
+database = $dir/certindex
+private_key = $dir/intermediate1.key
+serial = $dir/certserial
+default_days = 365
+default_md = sha1
+policy = myca_policy
+x509_extensions = myca_extensions
+crlnumber = $dir/crlnumber
+default_crl_days = 365
+
+[myca_policy]
+commonName = supplied
+stateOrProvinceName = supplied
+countryName = optional
+emailAddress = optional
+organizationName = supplied
+organizationalUnitName = optional
+
+[myca_extensions]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,any
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
+keyUsage = digitalSignature,keyEncipherment
+extendedKeyUsage = serverAuth
+crlDistributionPoints = @crl_section
+subjectAltName = @alt_names
+authorityInfoAccess = @ocsp_section
+
+[alt_names]
+DNS.0 = example.com
+DNS.1 = example.org
+
+[crl_section]
+URI.0 = http://pki.sparklingca.com/SparklingIntermidiate1.crl
+URI.1 = http://pki.backup.com/SparklingIntermidiate1.crl
+
+[ocsp_section]
+caIssuers;URI.0 = http://pki.sparklingca.com/SparklingIntermediate1.crt
+caIssuers;URI.1 = http://pki.backup.com/SparklingIntermediate1.crt
+OCSP;URI.0 = http://pki.sparklingca.com/ocsp/
+OCSP;URI.1 = http://pki.backup.com/ocsp/</pre>
+
+		<p>Отредактируйте секцию [alt_names] так, чтобы она содержала необходимые альтернативные имена. Если альтернативные имена не нужны, то удалите эту секцию и строку subjectAltName = @alt_names.</p>
+
+		<p>Если нужно задать определённые даты начала или завершения действия сертификата, добавьте в секцию [myca] следующие строки:</p>
+
+		<pre class="code"># формат: ГГГГММДДЧЧММСС
+default_enddate = 20191222035911
+default_startdate = 20181222035911</pre>
+
+		<p>Создадим пустой CRL - список отозванных сертификатов в форматах PEM и DER:</p>
+
+		<pre class="console">openssl ca -config ca.conf -gencrl -keyfile rootca.key -cert rootca.crt -out rootca.crl.pem
+openssl crl -inform PEM -in rootca.crl.pem -outform DER -out rootca.crl</pre>
+
+		<h2>4. Создание конечных пользовательских сертификатов</h2>
+
+		<p>Воспользуемся новым промежуточным удостоверяющим центром для создания конечного пользовательского сертификата. Повторим эти шаги для каждого конечного пользовательского сертификата, который нужно подписать этим удостоверяющим центром.</p>
+
+		<pre class="console">mkdir enduser-certs</pre>
+
+		<p>Создадим приватный ключ конечного пользователя:</p>
+
+		<pre class="console">openssl genrsa -out enduser-certs/enduser-example.com.key 4096</pre>
+
+		<p>Создадим CSR - запрос на подписание сертификата конечного пользователя:</p>
+
+		<pre class="console">openssl req -new -sha256 -key enduser-certs/enduser-example.com.key -out enduser-certs/enduser-example.com.csr</pre>
+
+		<p>Пример вывода:</p>
+
+		<pre class="console">You are about to be asked to enter information that will be incorporated    # У вас будет запрошена информация, которая будет вставлена
+into your certificate request.                                              # в ваш запрос сертификата.
+What you are about to enter is what is called a Distinguished Name or a DN. # То, что вы введёте, называется Distinquised Name - Отличительное Имя или DN.
+There are quite a few fields but you can leave some blank                   # Далее следует несколько полей, но некоторые из них можно не заполнять
+For some fields there will be a default value,                              # У некоторых полей есть значение по умолчанию,
+If you enter '.', the field will be left blank.                             # Если ввести '.', то поле останется пустым.
+-----
+Country Name (2 letter code) [AU]:NL                                        # Название страны (двухбуквенный код) [AU]:NL
+State or Province Name (full name) [Some-State]:Noord Holland               # Название штата или провинции (полное название) [Некий-штат]:Северная Голландия
+Locality Name (eg, city) []:Amsterdam                                       # Название местности (например, город) []:Амстердам
+Organization Name (eg, company) [Internet Widgits Pty Ltd]:Example Inc      # Название организации (например, компания) [ООО Интернет-виджеты]:АО Пример
+Organizational Unit Name (eg, section) [например, отдел]:IT Dept            # Название подразделения (например, отдел) []:Отдел информационных технологий
+Common Name (e.g. server FQDN or YOUR name) []:example.com                  # Общее имя (например, полное доменное имя сервера или ваше имя) []:example.com
+Email Address []:                                                           # Адрес электронной почты []:
+
+Please enter the following 'extra' attributes                               # Пожалуйста, введите следующие дополнительные атрибуты,
+to be sent with your certificate request # которые будут отправлены в составе запроса сертификата
+A challenge password []: # Пароль вызова []:
+An optional company name []: # Не обязательное название компании []:</pre>
+
+		<p>Подпишем CSR - запрос на подписание сертификата конечного пользователя в промежуточном удостоверяющем центре 1:</p>
+
+		<pre class="console">openssl ca -batch -config ca.conf -notext -in enduser-certs/enduser-example.com.csr -out enduser-certs/enduser-example.com.crt</pre>
+
+		<p>Пример вывода:</p>
+
+		<pre class="console">Using configuration from ca.conf                                         # Используется конфигурация из ca.conf
+Check that the request matches the signature                             # Проверка соответствия подписи запросу
+Signature ok                                                             # Подпись в порядке
+The Subject's Distinguished Name is as follows                           # Содержимое Отличительного Имени показано ниже
+countryName :PRINTABLE:'NL'
+stateOrProvinceName :ASN.1 12:'Noord Holland'
+localityName :ASN.1 12:'Amsterdam'
+organizationName :ASN.1 12:'Example Inc'
+organizationalUnitName:ASN.1 12:'IT Dept'
+commonName :ASN.1 12:'example.com'
+Certificate is to be certified until Mar 30 15:18:26 2016 GMT (730 days) # Сертификат был удостоверен до 30 марта 2016 года 15:18:26 по Гринвичу (365 дней)
+
+Write out database with 1 new entries                                    # В базу данных записана 1 новая запись
+Data Base Updated                                                        # База данных обновлена</pre>
+
+		<p>Создадим CRL - список отозванных сертификатов в форматах PEM и DER:</p>
+
+		<pre class="console">openssl ca -config ca.conf -gencrl -keyfile intermediate1.key -cert intermediate1.crt -out intermediate1.crl.pem
+openssl crl -inform PEM -in intermediate1.crl.pem -outform DER -out intermediate1.crl</pre>
+
+		<p>Создавайте CRL - список отозванных сертификатов после каждого подписания сертификата удостоверяющим центром.</p>
+
+		<p>Если когда-то понадобится отозвать этот сертификат конечного пользователя:</p>
+
+		<pre class="console">openssl ca -config ca.conf -revoke enduser-certs/enduser-example.com.crt -keyfile intermediate1.key -cert intermediate1.crt</pre>
+
+		<p>Пример вывода:</p>
+
+		<pre class="console">Using configuration from ca.conf # Используется конфигурация из ca.conf
+Revoking Certificate 1000.       # Отзыв сертификата 1000.
+Data Base Updated                # База данных обновлена</pre>
+
+		<p>Создадим файл с цепочкой сертификатов, соединив вместе сертификаты корневого и промежуточного удостоверяющего центра 1.</p>
+
+		<pre class="console">cat ../root/rootca.crt intermediate1.crt &gt; enduser-certs/enduser-example.com.chain</pre>
+
+		<p>Отправим следующие файлы конечному пользователю:</p>
+
+		<ul>
+			<li>enduser-example.com.crt</li>
+
+			<li>enduser-example.com.key</li>
+
+			<li>enduser-example.com.chain</li>
+		</ul>
+
+		<p>Вы также можете дать конечному пользователю возможность предоставить его собственный CSR - запрос на подписание сертификата и просто отправить ему файл .crt. Не удаляйте сертификат с сервера, в противном случае его нельзя будет отозвать.</p>
+
+		<h2>5. Проверка сертификата</h2>
+
+		<p>Вы можете проверить сертификат конечного пользователя по цепочке при помощи следующей команды:</p>
+
+		<pre class="console">openssl verify -CAfile enduser-certs/enduser-example.com.chain enduser-certs/enduser-example.com.crt
+enduser-certs/enduser-example.com.crt: OK</pre>
+
+		<p>Вы также можете проверить его по CRL - списку отозванных сертификатов. Сначала соедините вместе CRL в формате PEM и цепочку:</p>
+
+		<pre class="console">cat ../root/rootca.crt intermediate1.crt intermediate1.crl.pem &gt; enduser-certs/enduser-example.com.crl.chain</pre>
+
+		<p>Проверим сертификат:</p>
+
+		<pre class="console">openssl verify -crl_check -CAfile enduser-certs/enduser-example.com.crl.chain enduser-certs/enduser-example.com.crt</pre>
+
+		<p>Если не отозван, будет выведено:</p>
+
+		<pre class="console">enduser-certs/enduser-example.com.crt: OK</pre>
+
+		<p>Если отозван, будет выведено:</p>
+
+		<pre class="console">enduser-certs/enduser-example.com.crt: CN = example.com, ST = Noord Holland, C = NL, O = Example Inc, OU = IT Dept
+error 23 at 0 depth lookup:certificate revoked                                                                     # ошибка 23 на глубине просмотра 0:сертификат отозван</pre>
+
+		<img src="3sep.jpg" />
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Реми ван Элст. Командная строка OpenSSL: Корневой и промежуточный удостоверяющий центры, включая OCSP, CRL и отзыв сертификатов, 2015">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

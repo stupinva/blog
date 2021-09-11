@@ -1,0 +1,1169 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="clamav,greylistd,linux,debian,exim,dovecot,wheezy" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2014-05-25 -->
+		<title>Exim и Dovecot без SQL</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Exim и Dovecot без SQL</h1>
+
+		<p>Среди системных администраторов и инженеров распространено мнение, что чем система проще, тем она надёжнее. Конечно, не стоит воспринимать это утверждение буквально. Но, как говорится, умному - достаточно. Чем меньше компонентов в системе, чем проще взаимосвязи между компонентами, тем меньше вероятность того, что она сломается и тем выше вероятность того, что её будет просто починить.</p>
+
+		<p>Именно поэтому большинство системных администраторов Unix любят использовать текстовые файлы, которые легко редактируются при помощи любого текстового редактора (файлы XML к таковым обычно не относятся). Здесь я опишу настройку почтовой системы на основе Dovecot и Exim без использования базы данных. Вместо этого все данные будут помещаться в текстовых файлах.</p>
+
+		<p>Описание настройки основано на моих предыдущих заметках <a href="../dovecot/">Установка и настройка Dovecot</a> и <a href="../exim/">Настройка Exim</a>, практически повторяя их. Прошу прощения за самоплагиат - я считаю, что так будет удобнее.</p>
+
+		<h2>1. Dovecot</h2>
+
+		<p>Начнём с настройки Dovecot, поскольку для настройки Exim необходимо иметь уже настроенный Dovecot.</p>
+
+		<h3>1.1. Установка Dovecot</h3>
+
+		<p>Установим пакеты Dovecot, содержащие поддержку серверов POP3 и IMAP:</p>
+
+		<pre class="console"># apt-get install dovecot-core dovecot-imapd dovecot-pop3d</pre>
+
+		<h3>1.2. Подготовка системы</h3>
+
+		<p>Создадим группу и пользователя vmail, от имени которого будет работать Dovecot и дадим этому пользователю доступ к каталогу, в котором будет храниться почта пользователей почтовой системы. На серверах для размещения почтовых ящиков, как и другой часто меняющейся информации, обычно используется раздел /var, который заранее делается достаточно большим. На настраиваемой мной системе больше всего свободного места на разделе home, поэтому я размещу почтовые ящики пользователей на нём:</p>
+
+		<pre class="console"># groupadd -g 120 -r vmail
+# useradd -g 120 -r -u 120 vmail
+# mkdir /home/vmail
+# chown vmail:vmail /home/vmail
+# chmod u=rwx,g=rx,o= /home/vmail</pre>
+
+		<h3>1.3. Базовая настройка Dovecot</h3>
+
+		<p>Я буду использовать защищённые версии протоколов IMAP и POP3, поэтому настрою в файле /etc/dovecot/conf.d/10-auth.conf механизмы PLAIN и LOGIN, чтобы хранить пароли в базе данных в хэшированном виде:</p>
+
+		<pre class="code">disable_plaintext_auth = no
+auth_default_realm = domain.tld
+auth_mechanisms = plain login
+!include auth-passwdfile.conf.ext</pre>
+
+		<p>Настроим использование учётных данных из файла, подобного /etc/passwd, прописав в файле /etc/dovecot/conf.d/auth-passwdfile.conf.ext следующие секции:</p>
+
+		<pre class="code">passdb {
+  driver = passwd-file
+  args = scheme=CRYPT username_format=%u /etc/dovecot/passwd
+}
+
+userdb {
+  driver = passwd-file
+  args = username_format=%u /etc/dovecot/passwd
+
+  # Поля по умолчанию, которые могут быть заменены значениями из файла passwd
+  default_fields = uid=vmail gid=vmail userdb_home=/home/vmail/%Ld/%Ln userdb_location=maildir:/home/vmail/%Ld/%Ln userdb_quota_rule=*:storage=1G 
+
+  # Поля, значения которых заменяют значения из файла passwd
+  #override_fields = home=/home/vmail/%Ld/%Ln
+}</pre>
+
+		<p>Создадим в каталоге /etc/dovecot файл passwd и проставим права доступа:</p>
+
+		<pre class="console"># cd /etc/dovecot
+# touch passwd
+# chown root:dovecot passwd
+# chmod u=rw,g=r,o= passwd</pre>
+
+		<p>В файле /etc/dovecot/passwd могут быть следующие поля:</p>
+
+		<pre class="code">user:{plain}password:uid:gid:gecos:home:shell:extra_fields</pre>
+
+		<p>Назначение полей:</p>
+
+		<ul>
+			<li>user - почтовый ящик (в данном случае - вместе с доменом),</li>
+
+			<li>password - пароль (можно явным образом указывать алгоритм хэширования пароля),</li>
+
+			<li>uid - системный идентификатор владельца файлов почты,</li>
+
+			<li>gid - системный идентификатор группы владельца файлов почты,</li>
+
+			<li>gecos - справочная информация о почтовом ящике (игнорируется),</li>
+
+			<li>home - путь к каталогу почты,</li>
+
+			<li>shell - интерпретатор (игнорируется),</li>
+
+			<li>extra_fields - дополнительные настройки (квота, например).</li>
+		</ul>
+
+		<p>Любое из полей может быть не определено в файле, если в настройках Dovecot указаны значения этих полей по умолчанию. При указании дополнительных полей, используемых в секции userdb необходимо перед именем поля указывать префикс «userdb_», как в примере выше, в настройках default_fields. Имеется возможность зафиксировать часть настроек почтового ящика при помощи настройки override_fields, так что значения из файла будут игнорироваться.</p>
+
+		<p>Подробнее о формате файла и других настройках можно прочитать на официальной wiki-странице Dovecot: <a href="http://wiki2.dovecot.org/AuthDatabase/PasswdFile">Passwd-file</a></p>
+
+		<p>Изменим форматирование отметок времени, вписав в файл /etc/dovecot/conf.d/10-logging.conf следующую настройку:</p>
+
+		<pre class="code">log_timestamp = "%Y-%m-%d %H:%M:%S "</pre>
+
+		<p>На время отладки также можно включить другие опции из этого файла:</p>
+
+		<pre class="code">auth_verbose = yes
+auth_verbose_passwords = yes
+auth_debug = yes
+mail_debug = yes</pre>
+
+		<p>В файле /etc/dovecot/conf.d/10-mail.conf настроим путь к почтовым ящикам и пользователя, от имени которого dovecot будет работать с ящиками:</p>
+
+		<pre class="code">mail_home = /home/vmail/%Ld/%Ln
+mail_location = maildir:/home/vmail/%Ld/%Ln
+mail_uid = vmail
+mail_gid = vmail
+first_valid_uid = 120
+last_valid_uid = 120
+first_valid_gid = 120
+last_valid_gid = 120</pre>
+
+		<p>Сейчас настроим сервис, при помощи которого Exim будет проверять учётные данные почтовых клиентов. Для этого отредактируем файл /etc/dovecot/conf.d/10-master.conf и впишем в него настройки сервиса:</p>
+
+		<pre class="code">service auth {
+  unix_listener auth-client {
+    mode = 0660
+    user = Debian-exim
+    #group = 
+  }
+}</pre>
+
+		<p>Зададим в файле /etc/dovecot/conf.d/15-lda.conf адрес, с которого Dovecot будет отправлять сообщения об ошибках:</p>
+
+		<pre class="code">postmaster_address = postmaster@domain.tld</pre>
+
+		<p>Осталось отредактировать файл /etc/dovecot/dovecot.conf, указав в нём адрес, на котором сервер будет ожидать подключений:</p>
+
+		<pre class="code">!include_try /usr/share/dovecot/protocols.d/*.protocol
+listen = *
+!include conf.d/*.conf
+!include_try local.conf</pre>
+
+		<p>Начальная настройка сервера окончена. Осталось перезапустить Dovecot, чтобы настройки вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/dovecot restart</pre>
+
+		<h3>1.4. Настройка плагина acl</h3>
+
+		<p>Плагин acl позволяет пользователям предоставлять друг другу доступ к папкам в своих почтовых ящиках. Это может быть полезно для корпоративных пользователей. Например, для директора и его заместителя. Или для директора и его секретаря. Или для сотрудников из одного отдела, которые подменяют друг друга на время обеда или отпуска. Эта возможность, естественно, доступна только при использовании протокола IMAP.</p>
+
+		<p>В файле /etc/dovecot/conf.d/10-mail.conf включаем использование плагина:</p>
+
+		<pre class="code">mail_plugins = acl</pre>
+
+		<p>В файле /etc/dovecot/conf.d/20-imap.conf включаем использование плагина в IMAP-сервере:</p>
+
+		<pre class="code">protocol imap {
+  mail_plugins = $mail_plugins imap_acl
+}</pre>
+
+		<p>В файле /etc/dovecot/conf.d/10-mail.conf прописываем следующие настройки:</p>
+
+		<pre class="code">namespace inbox {
+  type = private
+  separator = /
+  prefix =
+  inbox = yes
+}
+
+namespace {
+  type = shared
+  separator = /
+  prefix = shared/%%u/
+  location = maildir:%%h:INDEX=%h/shared/%%u
+  subscriptions = yes
+  list = children
+}</pre>
+
+		<p>Эти настройки описывают два пространства имён: в первом хранится личная почта пользователя, а во втором будут отображаться каталоги других пользователей, к которым этот пользователь имеет доступ.</p>
+
+		<p>Поясню смысл настроек location для пространства имён общих каталогов:</p>
+
+		<ul>
+			<li>maildir:%%h - означает место расположения чужого почтового ящика в формате Maildir,</li>
+
+			<li>%%h - полный путь к Maildir-каталогу чужого ящика,</li>
+
+			<li>INDEX=%h/shared/%%u - задаёт каталог, в который как бы монтируются каталоги чужой почты, к которым её владелец дал нам доступ,</li>
+
+			<li>%h - путь к Maildir-каталогу нашего ящика,</li>
+
+			<li>%%u - имя другого пользователя в виде box@domain.tld.</li>
+		</ul>
+
+		<p>В файл /etc/dovecot/conf.d/90-acl.conf прописываем настройки плагина:</p>
+
+		<pre class="code">plugin {
+  acl = vfile
+  acl_shared_dict = file:/home/vmail/%Ld/shared-mailboxes.db
+}</pre>
+
+		<p>Значение vfile предписывает создавать внутри почтового ящика файл dovecot-acl, в котором и будут прописываться права доступа к нему со стороны других пользователей.</p>
+
+		<p>Значение acl_shared_dict указывает путь к файлу словаря, который позволит пользователям узнавать, к каким каталогам в чужих почтовых ящиках у них имеется доступ. В данном случае для каждого домена будет создан отдельный файл словаря, расположенный в каталоге домена, на одном уровне с ящиками.</p>
+
+		<p>Заодно опишем в файле /etc/dovecot/conf.d/15-mailboxes.conf назначение различных каталогов внутри пространства имён, в котором хранится личная почта пользователя:</p>
+
+		<pre class="code">namespace inbox {
+  mailbox Drafts {
+    special_use = \Drafts
+  }
+  mailbox Junk {
+    special_use = \Junk
+  }
+  mailbox Trash {
+    special_use = \Trash
+  }
+  mailbox Sent {
+    special_use = \Sent
+  }
+}</pre>
+
+		<p>Назначение каталогов:</p>
+
+		<ul>
+			<li>Drafts - каталог черновиков,</li>
+
+			<li>Junk - каталог для спама,</li>
+
+			<li>Trash - каталог для удалённых писем,</li>
+
+			<li>Sent - каталог для отправленных писем.</li>
+		</ul>
+
+		<p>Современные почтовые программы смогут прямо по протоколу IMAP узнать назначение каждого из специальных каталогов, вне зависимости от их названия. Это бывает полезно, если каталог имеет нестандартное название или название на языке пользователя ящика, например "Входящие" или "Спам".</p>
+
+		<p>Чтобы настройки плагина acl вступили в силу, нужно перезапустить Dovecot:</p>
+
+		<pre class="console"># /etc/init.d/dovecot restart</pre>
+
+		<h3>1.5. Настройка плагина quota</h3>
+
+		<p>Плагин quota позволяет назначить для почтового ящика ограничения на объём хранящихся в нём писем или даже на их общее количество. На мой взгляд, ограничение на общее количество писем имеет довольно мало смысла. Единственная польза, которая мне приходит на ум - это возможность защититься от исчерпания inode'ов в файловой системе, если кто-то намеренно решит отправить огромное количество мелких писем в ящики пользователей, с целью нарушить работу почтовой системы.</p>
+
+		<p>Мы настроим плагин так, чтобы он использовал значения квот, указанные в интерфейсе Postfixadmin. Эти квоты ограничивают только максимальный объём писем в ящике.</p>
+
+		<p>Включим использование плагина в файле /etc/dovecot/conf.d/10-mail.conf:</p>
+
+		<pre class="code">mail_plugins = acl quota</pre>
+
+		<p>Жирным шрифтом показан добавленный текст, а курсивом - текст, добавленный нами при включении плагина acl. Если вы не включали плагин acl, то вписывать этот текст не нужно.</p>
+
+		<p>В файл /etc/dovecot/conf.d/15-lda.conf впишем, что в случае превышения квоты Dovecot должен сообщать о временной ошибке, но не отклонять письмо окончательно. Почтовый сервер отправителя (или наш MTA) будет периодически предпринимать повторные попытки в надежде на то, что адресат почистит свой ящик от ненужных писем.</p>
+
+		<pre class="code">quota_full_tempfail = yes</pre>
+
+		<p>В файл /etc/dovecot/conf.d/20-imap.conf добавим поддержку квот в IMAP-сервере:</p>
+
+		<pre class="code">protocol imap {
+  mail_plugins = $mail_plugins imap_acl imap_quota
+}</pre>
+
+		<p>Этот плагин позволит почтовым клиентам, работающим по протоколу IMAP, узнавать квоту почтового ящика и её текущее использование.</p>
+
+		<p>Укажем в файле /etc/dovecot/conf.d/90-quota.conf, что значения квот берутся из словаря и зададим пустое правило по умолчанию:</p>
+
+		<pre class="code">plugin {
+  quota = dict:user::file:%h/dovecot-quota
+  quota_rule = *:
+}</pre>
+
+		<p>Осталось перезапустить Dovecot, чтобы настроенный плагин начал работать:</p>
+
+		<pre class="console"># /etc/init.d/dovecot restart</pre>
+
+		<p>В каталоге каждого почтового ящика будет создаваться файл dovecot-data, внутри которого будет вестись учёт текущего количества сообщений в ящике и их объёма. Чтобы принудительно пересчитать квоты всех почтовых ящиков, можно воспользоваться следующей командой:</p>
+
+		<pre class="console"># doveadm quota recalc -A</pre>
+
+		<h3>1.6. Настройка плагина expire</h3>
+
+		<p>Этот плагин не поддерживает работу со словарями, хранящимися не в базах данных, поэтому здесь его настройка не описывается.</p>
+
+		<p>Для периодической очистки почтовых ящиков от устаревших сообщений можно добавить в планировщик задач выполнение, например, такой команды:</p>
+
+		<pre class="code">doveadm expunge -A mailbox Spam savedbefore 2w</pre>
+
+		<p>Эта команда найдёт в почтовых ящиках пользователей каталоги Spam и удалит из них те сообщения, которые были сохранены в ящик более двух недель назад. Подобным образом можно очищать и другие каталоги, например - Trash.</p>
+
+		<h3>1.7. Настройка SSL</h3>
+
+		<p>Настройка SSL будет подробнее рассмотрена в одной из следующих заметок. Там будет описана настройка отдельных сертификатов SSL для разных доменов, а также будет освещён вопрос подготовки самих сертификатов - самоподписанных или подписанных центром сертификации.</p>
+
+		<p>Если у вас имеются готовый подписанный сертификат, можно включить поддержку SSL в файле /etc/dovecot/conf.d/10-ssl.conf и указать в нём пути к файлам сертификата:</p>
+
+		<pre class="code">ssl = yes
+ssl_cert = &lt;/etc/ssl/mail_public.pem
+ssl_key = &lt;/etc/ssl/mail_private.pem</pre>
+
+		<p>После настройки сертификатов нужно перезапустить Dovecot, чтобы изменения вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/dovecot restart</pre>
+
+		<h3>1.8. Настройка плагина sieve</h3>
+
+		<p>Sieve - это скрипты фильтрации почты, которые выполняются агентом локальной доставки (LDA) в момент получения письма от почтового сервера (MTA). Скрипты позволяют раскладывать письма в разные папки, ориентируясь на их содержимое - тему письма, получателей, отправителей и т.п. Можно удалить письмо, переслать его на другой ящик или отправить уведомление отправителю, причём использовать можно любое поле заголовка или содержимое тела письма.</p>
+
+		<p>Главное преимущество Sieve заключается в том, что пользователю не нужно настраивать правила фильтрации в каждом из используемых им почтовых клиентов - правила едины для всех почтовых клиентов сразу. Кроме того, фильтрация происходит вообще без участия клиента. Клиент, подключившись к почтовому ящику, имеет возможность работать уже с отсортированной почтой. Кроме того, отправка уведомлений о получении или пересылка писем на другой ящик вообще может происходить без участия почтового клиента.</p>
+
+		<p>Конечно, в наши времена больших почтовых сервисов типа Gmail или Яндекс-почты, этим никого не удивишь. Но тут плюс заключается в том, что перед нами не стоит дилемма "удобство" - "безопасность". Мы можем хранить почту у себя, не делясь ею с посторонними компаниями, имея над ней полный контроль, и в то же время можем пользоваться удобствами, характерными для больших почтовых сервисов.</p>
+
+		<p>Установим пакет с плагином Sieve:</p>
+
+		<pre class="console"># apt-get install dovecot-sieve</pre>
+
+		<p>Включим использование плагина в файле /etc/dovecot/conf.d/15-lda.conf:</p>
+
+		<pre class="code">protocol lda {
+  mail_plugins = $mail_plugins sieve
+}</pre>
+
+		<p>Укажем настройки плагина в файле /etc/dovecot/conf.d/90-sieve.conf:</p>
+
+		<pre class="code">plugin {
+  sieve = /home/vmail/%Ld/%n/active.sieve # Расположение активного скрипта
+  sieve_dir = /home/vmail/%Ld/%n/sieve    # Каталог для скриптов
+  sieve_max_script_size = 1M              # Максимальный размер одного скрипта
+  sieve_quota_max_scripts = 50            # Максимальное количество скриптов
+  sieve_quota_max_storage = 1M            # Максимальный общий объём скриптов
+}</pre>
+
+		<p>Каждый пользователь может обладать собственным набором Sieve-скриптов, из которых в любой момент времени активным может быть только один. Каталог для скриптов указывается в настройке sieve_dir, а в настройке sieve указывается имя символической ссылки, которая будет указывать на активный скрипт.</p>
+
+		<p>После настройки плагина нужно перезапустить Dovecot, чтобы изменения вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/dovecot restart</pre>
+
+		<p>Подробнее о скриптах Sieve можно почитать на Википедии, в статье <a href="http://ru.wikipedia.org/wiki/Sieve">Sieve</a>.</p>
+
+		<h3>1.9. Настройка сервиса managesieve</h3>
+
+		<p>Плагин sieve не был бы столь полезным, если бы Sieve-скриптами нельзя было бы управлять прямо из почтового клиента. Именно эту функцию и реализует сервис ManageSieve. Он ожидает подключений клиентов на отдельном TCP-порту 4190. Для управления скриптами клиент использует учётные данные своего почтового ящика.</p>
+
+		<p>Для включения сервиса достаточно лишь установить дополнительный пакет:</p>
+
+		<pre class="console"># apt-get install dovecot-managesieve</pre>
+
+		<p>В следующих заметках фильтрация писем при помощи Sieve будет рассмотрена подробнее - я покажу, как им пользоваться в почтовых клиентах.</p>
+
+		<h3>1.10. Результирующий файл конфигурации</h3>
+
+		<p>Поскольку настроек очень много, проверить их можно при помощи следующей команды:</p>
+
+		<pre class="console">$ doveconf -n</pre>
+
+		<p>Опция n предписывает показывать только те настройки, которые отличаются от настроек по умолчанию. У меня со всеми плагинами, настройка которых была тут описана, команда выдаёт следующий результат:</p>
+
+		<pre class="code"># 2.1.7: /etc/dovecot/dovecot.conf
+# OS: Linux 3.2.0-4-amd64 x86_64 Debian 7.5 ext4
+auth_default_realm = domain.tld
+auth_mechanisms = plain login
+disable_plaintext_auth = no
+first_valid_gid = 120
+first_valid_uid = 120
+last_valid_gid = 120
+last_valid_uid = 120
+listen = *
+log_timestamp = "%Y-%m-%d %H:%M:%S "
+mail_gid = vmail
+mail_home = /home/vmail/%Ld/%Ln
+mail_location = maildir:/home/vmail/%Ld/%Ln
+mail_plugins = quota acl
+mail_uid = vmail
+managesieve_notify_capability = mailto
+managesieve_sieve_capability = fileinto reject envelope encoded-character vacation subaddress comparator-i;ascii-numeric relational regex imap4flags copy include variables body enotify environment mailbox date ihave
+namespace {
+  list = children
+  location = maildir:%%h:INDEX=%h/shared/%%u
+  prefix = shared/%%u/
+  separator = /
+  subscriptions = yes
+  type = shared
+}
+namespace inbox {
+  inbox = yes
+  location = 
+  mailbox Drafts {
+    special_use = \Drafts
+  }
+  mailbox Junk {
+    special_use = \Junk
+  }
+  mailbox Sent {
+    special_use = \Sent
+  }
+  mailbox Trash {
+    special_use = \Trash
+  }
+  prefix = 
+  separator = /
+  type = private
+}
+passdb {
+  args = scheme=CRYPT username_format=%u /etc/dovecot/passwd
+  driver = passwd-file
+}
+plugin {
+  acl = vfile
+  acl_shared_dict = file:/home/vmail/%Ld/shared-mailboxes.db
+  quota = dict:user::file:%h/dovecot-quota
+  quota_rule = *:
+  sieve = /home/vmail/%Ld/%Ln/active.sieve
+  sieve_dir = /home/vmail/%Ld/%Ln/sieve
+  sieve_max_script_size = 1M
+  sieve_quota_max_scripts = 50
+  sieve_quota_max_storage = 1M
+}
+postmaster_address = postmaster@domain.tld
+protocols = " imap sieve pop3"
+service auth {
+  unix_listener auth-client {
+    group = Debian-exim
+    mode = 0660
+  }
+}
+ssl_cert = &lt;/etc/ssl/mail.domain.tld.public.pem
+ssl_key = &lt;/etc/ssl/mail.domain.tld.private.pem
+userdb {
+  args = username_format=%u /etc/dovecot/passwd
+  default_fields = uid=vmail gid=vmail userdb_home=/home/vmail/%Ld/%Ln userdb_location=maildir:/home/vmail/%Ld/%Ln userdb_quota_rule=*:storage=1G
+  driver = passwd-file
+}
+protocol lda {
+  mail_plugins = quota acl sieve
+}
+protocol imap {
+  mail_plugins = quota acl imap_quota imap_acl
+}</pre>
+
+		<h2>2. Настройка Exim</h2>
+
+		<p>Настройка Exim, как уже было сказано, зависит от настроенного Dovecot. Exim использует сервис Dovecot для SMTP-аутентификации и список почтовых ящиков из файла /etc/dovecot/passwd.</p>
+
+		<h3>2.1. Установка</h3>
+
+		<p>Установим SMTP-сервер Exim:</p>
+
+		<pre class="console"># apt-get install exim4-daemon-heavy</pre>
+
+		<p>Создаём файл конфигурации /etc/exim4/exim4.conf со следующим начальным содержимым:</p>
+
+		<pre class="code"># Имя нашей почтовой системы
+primary_hostname = mail.domain.tld
+
+# Список доменов нашей почтовой системы
+domainlist local_domains = /etc/exim4/local_domains
+
+# Список доменов, для которых наша почтовая система является резервной
+domainlist relay_domains = /etc/exim4/relay_domains
+
+# Список узлов, почту от которых будем принимать без проверок
+hostlist relay_from_hosts = 
+
+# Правила для проверок
+acl_not_smtp = acl_check_not_smtp
+acl_smtp_rcpt = acl_check_rcpt
+acl_smtp_data = acl_check_data
+
+# Сокет-файл антивируса ClamAV
+av_scanner = clamd:/var/run/clamav/clamd.ctl
+# Сокет-файл SpamAssassin
+# spamd_address =
+
+# Отключаем IPv6, слушаем порты 25 и 587
+disable_ipv6
+daemon_smtp_ports = 25 : 587
+
+# Дописываем домены отправителя и получателя, если они не указаны
+qualify_domain = domain.tld
+qualify_recipient = domain.tld
+
+# Exim никогда не должен запускать процессы от имени пользователя root
+never_users = root
+
+# Проверять прямую и обратную записи узла отправителя по DNS
+host_lookup = *
+
+# Отключаем проверку пользователей узла отправителя по протоколу ident
+rfc1413_hosts = *
+rfc1413_query_timeout = 0s
+
+# Только эти узлы могут не указывать домен отправителя или получателя
+sender_unqualified_hosts = +relay_from_hosts
+recipient_unqualified_hosts = +relay_from_hosts
+
+# Лимит размера сообщения, 30 мегабайт
+message_size_limit = 30M
+
+# Запрещаем использовать знак % для явной маршрутизации почты
+percent_hack_domains =
+
+# Настройки обработки ошибок доставки, используются значения по умолчанию
+ignore_bounce_errors_after = 2d
+timeout_frozen_after = 7d
+
+begin acl
+
+  # Проверки для локальных отправителей
+  acl_check_not_smtp:
+     accept
+
+  # Проверки на этапе RCPT
+  acl_check_rcpt:
+    accept hosts = :
+
+    # Отклоняем неправильные адреса почтовых ящиков  
+    deny message = Restricted characters in address
+         domains = +local_domains
+         local_parts = ^[.] : ^.*[@%!/|]
+
+    # Отклоняем неправильные адреса почтовых ящиков  
+    deny message = Restricted characters in address
+         domains = !+local_domains
+         local_parts = ^[./|] : ^.*[@%!] : ^.*/\\.\\./
+
+    # В локальные ящики postmaster и abuse принимает почту всегда
+    accept local_parts = postmaster : abuse
+           domains = +local_domains
+
+    # Проверяем существование домена отправителя
+    require verify = sender
+
+    # Принимаем почту от доверенных узлов, попутно исправляя заголовки письма
+    accept hosts = +relay_from_hosts
+           control = submission
+
+    # Принимаем почту от аутентифицированных узлов, попутно исправляя заголовки письма
+    accept authenticated = *
+           control = submission/domain=
+
+    # Для не доверенных и не аутентифицированных требуется, чтобы получатель был в домене,
+    # ящик которого находится у нас или для которого мы являемся резервным почтовым сервером
+    require message = Relay not permitted
+            domains = +local_domains : +relay_domains
+
+    # Если домен правильный, то проверяем получателя
+    require verify = recipient
+
+    accept
+ 
+begin routers
+
+  # Поиск транспорта для удалённых получателей
+  dnslookup:
+    driver = dnslookup
+    domains = ! +local_domains
+    transport = remote_smtp
+    ignore_target_hosts = 0.0.0.0 : 127.0.0.0/8
+    no_more
+
+  # Пересылки для локальных получателей из файла /etc/aliases
+  system_aliases:
+    driver = redirect
+    allow_fail
+    allow_defer
+    domains = domain.tld
+    data = ${lookup{$local_part}lsearch{/etc/aliases}}
+
+  # Пересылки для получателей в разных доменах
+  aliases:
+    driver = redirect
+    allow_fail
+    allow_defer
+    data = ${lookup{$local_part@$domain}lsearch{/etc/exim4/aliases}}  
+
+  # Получение почты на локальный ящик
+  mailbox:
+    driver = accept
+    condition = ${lookup{$local_part@$domain}lsearch{/etc/dovecot/passwd}{yes}{no}}
+    user = dovecot
+    transport = dovecot_virtual_delivery
+    cannot_route_message = Unknown user
+
+begin transports
+
+  # Транспорт для удалённых получателей
+  remote_smtp:
+    driver = smtp
+
+  # Транспорт для локальных получателей из Dovecot
+  dovecot_virtual_delivery:
+    driver = pipe
+    command = /usr/lib/dovecot/dovecot-lda -d $local_part@$domain -f $sender_address
+    message_prefix =
+    message_suffix =
+    delivery_date_add
+    envelope_to_add
+    return_path_add
+    log_output
+    user = vmail
+    temp_errors = 64 : 69 : 70: 71 : 72 : 73 : 74 : 75 : 78
+
+  begin retry
+
+  *   *   F,2h,15m; G,16h,1h,1.5; F,4d,6h
+
+  begin rewrite
+
+begin authenticators
+
+  # Использование LOGIN-аутентификации из Dovecot
+  dovecot_login:
+    driver = dovecot
+    public_name = LOGIN
+    server_socket = /var/run/dovecot/auth-client
+    server_set_id = $auth1
+
+  # Использование PLAIN-аутентификации из Dovecot  
+  dovecot_plain:
+    driver = dovecot
+    public_name = PLAIN
+    server_socket = /var/run/dovecot/auth-client
+    server_set_id = $auth1</pre>
+
+		<p>Сразу поменяем права доступа к файлу конфигурации:</p>
+
+		<pre class="console"># chmod u=rw,g=r,o= /ect/exim4/exim4.conf
+# chown root:Debian-exim /etc/exim4/exim4.conf</pre>
+
+		<p>В этом случае можно дать остальным пользователям доступ на чтение, т.к. никакой особо секретной информации в файле конфигурации нет. С другой стороны - нужды давать такой доступ тоже нет.</p>
+
+		<p>Чтобы Exim мог читать файл /etc/dovecot/passwd, включим пользователя Debian-exim в группу dovecot:</p>
+
+		<pre class="console"># usermod -aG dovecot Debian-exim</pre>
+
+		<p>Осталось запустить Exim, чтобы он начал работать в минимальной конфигурации:</p>
+
+		<pre class="console"># /etc/init.d/exim4 start</pre>
+
+		<h3>2.2. Настройка антивируса</h3>
+
+		<p>Устанавливаем демон ClamAV для проверки файлов на вирусы:</p>
+
+		<pre class="console"># apt-get install clamav-daemon</pre>
+
+		<p>Сразу же обновляем антивирусную базу:</p>
+
+		<pre class="console"># freshclam</pre>
+
+		<p>Включим clamav в группу Debian-exim, чтобы он мог сканировать файлы, созданные Exim'ом:</p>
+
+		<pre class="console"># usermod -aG Debian-exim clamav</pre>
+
+		<p>Добавим в главную секцию файла /etc/exim4/exim4.conf путь к сокет-файлу ClamAV и ACL для этапа DATA:</p>
+
+		<pre class="code">av_scanner = clamd:/var/run/clamav/clamd.ctl
+acl_smtp_data = acl_check_data</pre>
+
+		<p>В секцию acl файла /etc/exim4/exim4.conf добавим правило, запрещающее приём писем, содержащих вирусы:</p>
+
+		<pre class="code">acl_check_data:
+
+  deny message = message contains a virus ($malware_name)
+       malware = *
+
+  accept</pre>
+
+		<p>Перезагрузим Exim, чтобы настройки вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/exim4 reload</pre>
+
+		<p>Осталось проверить, что антивирусная система используется. Для этого создадим специально предназначенный для таких целей тестовый файл EICAR:</p>
+
+		<pre class="console">$ echo -n 'X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' &gt; eicar.txt</pre>
+
+		<p>И попробуем его отправить во вложении с какого-нибудь почтового ящика почтовой системы на тот же ящик. Если письмо не пришло, значит антивирусная система работает. Для полной уверенности можно ещё заглянуть в журнал почтовой системы /var/log/exim4/mainlog, где должна появиться строчка вида:</p>
+
+		<p>2014-04-12 22:06:06 1WZ0RR-0007TO-RM H=localhost (domain.tld) [127.0.0.1] F= A=dovecot_plain:box@domain.tld rejected after DATA: message contains a virus (Eicar-Test-Signature)</p>
+
+		<h3>2.3. Проверка квот</h3>
+
+		<p>В этом варианте настройки Exim проверкой квот не занимается. Если для одного из получателей письма будет превышена квота, письмо всё равно будет принято к доставке и лишь потом отправителю вернётся рикошет с сообщением об ошибке.</p>
+
+		<p>Можно было бы написать небольшой скрипт для проверки квот, но делать этого я не стал. Если вы считаете, что без проверки квот на этапе RCPT протокола ESMTP обойтись ну никак нельзя, попробуйте написать этот скрипт самостоятельно. Я не думаю, что он займёт больше пары десятков строчек. Не забудьте только, что стоит использовать действие discard вместо deny, чтобы в случае нескольких получателей письмо было доставлено в те ящики, квота которых не превышена.</p>
+
+		<h3>2.4. Настройка SSL/TLS</h3>
+
+		<p>Изменим настройки прослушиваемых портов в главной секции файла /etc/exim4/exim4.conf, добавив в список порт 465:</p>
+
+		<pre class="code">daemon_smtp_ports = 25 : 465 : 587</pre>
+
+		<p>Добавим настройки TLS в главную секцию файла /etc/exim4/exim4.conf:</p>
+
+		<pre class="code">tls_on_connect_ports = 465
+tls_advertise_hosts = *
+tls_certificate = /etc/ssl/mail.domain.tld.public.pem
+tls_privatekey = /etc/ssl/mail.domain.tld.private.pem</pre>
+
+		<p>Порт 465 используется для подключения сразу по защищённому каналу SSL, без явного согласования перехода на защищённый обмен данными. Порт 587 обычно используется для подключений со стороны почтовых клиентов, как правило, с обязательным использованием аутентификации. В рассматриваемой конфигурации порты 25 и 587 никак не различаются, поведение сервера одинаково на обоих портах.</p>
+
+		<p>Для задействования добавленных настроек TLS, перезапустим почтовый сервер:</p>
+
+		<pre class="console"># /etc/init.d/exim4 restart</pre>
+
+		<h3>2.5. Настройка DKIM-подписей</h3>
+
+		<p>Для удобного создания ключей DKIM-подписей можно установить пакет opendkim-tools:</p>
+
+		<pre class="console"># apt-get install opendkim-tools</pre>
+
+		<p>На самом деле необходимые ключи можно генерировать и при помощи openssl, т.к. пакет opendkim-tools содержит набор shell-скриптов, являющихся обёрткой над утилитой openssl.</p>
+
+		<p>Теперь создадим каталог для ключей и сгенерируем пару ключей для домена domain.tld:</p>
+
+		<pre class="console"># mkdir /etc/exim4/dkim
+# cd /etc/exim4/dkim
+# opendkim-genkey -D /etc/exim4/dkim/ -d domain.tld -s mail
+# mv mail.private mail.domain.tld.private
+# mv mail.txt mail.domain.tld.public</pre>
+
+		<p>Далее можно сгенерировать ключи для других доменов, обслуживаемых нашей почтовой системой.</p>
+
+		<p>Выставим права доступа к файлам приватных ключей:</p>
+
+		<pre class="console"># cd /etc/exim4/dkim
+# chmod u=rw,g=r,o= *
+# chown root:Debian-exim *</pre>
+
+		<p>Добавляем в секцию транспортов файла /etc/exim4/exim4.conf, в транспорт remote_smtp, настройки для добавления DKIM-подписей к письмам:</p>
+
+		<pre class="code">remote_smtp:
+  driver = smtp
+  dkim_domain = ${lc:${domain:$h_from:}}
+  dkim_selector = mail
+  dkim_private_key = ${if exists{/etc/exim4/dkim/$dkim_selector.$dkim_domain.private} \
+                                {/etc/exim4/dkim/$dkim_selector.$dkim_domain.private}{}}</pre>
+
+		<p>Достаточно перезагрузить конфигурацию, чтобы письма во внешние домены начали подписываться DKIM-ключами:</p>
+
+		<pre class="console"># /etc/init.d/exim4 reload</pre>
+
+		<h3>2.6. Проверка DKIM-подписей</h3>
+
+		<p>Воспользуемся встроенной в Exim возможностью проверки DKIM-подписей входящих писем. Я буду проверять подписи у тех писем, в которых они есть. Плюс к тому, будем требовать наличия правильной DKIM-подписи для доменов публичных почтовых сервисов, о которых заведомо известно, что они добавляют DKIM-подписи к своим письмам. Это позволит защититься от поддельных писем, якобы исходящих из доменов этих почтовых сервисов.</p>
+
+		<p>Зададим в главной секции файла /etc/exim4/exim4.conf домены, для которых требуется правильная DKIM-подпись:</p>
+
+		<pre class="code">domainlist dkim_required_domains = gmail.com : yandex.ru : rambler.ru : \
+                                   mail.ru : bk.ru : list.ru : inbox.ru</pre>
+
+		<p>В эту же главную секцию файла /etc/exim4/exim4.conf добавим имя списка управления доступом, который будет проверять DKIM-подпись:</p>
+
+		<pre class="code">acl_smtp_dkim = acl_check_dkim</pre>
+
+		<p>В секцию acl файла /etc/exim4/exim4.conf добавим описание самого списка управления доступом:</p>
+
+		<pre class="code">acl_check_dkim:
+
+  # Отклоняем письма с неправильной DKIM-подписью
+  deny message = Wrong DKIM signature 
+       dkim_status = fail
+
+  # Для выбранных доменов требуем наличия DKIM-подписи
+  deny message = Valid DKIM signature needed for mail from $sender_domain
+       sender_domains = +dkim_required_domains
+       dkim_status = none
+
+  accept</pre>
+
+		<p>Перезагрузим файл конфигурации Exim, чтобы настройки вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/exim4 reload</pre>
+
+		<h3>2.7. Настройка грейлистинга</h3>
+
+		<p>Для грейлистинга воспользуемся демоном greylistd, написанном на Python. Этот демон не настолько сложен, как milter-greylist, которым я воспользовался для настройки грейлистинга в Postfix, однако его простота с лихвой компенсируется возможностями Exim. Установим пакет greylistd:</p>
+
+		<pre class="console"># apt-get install greylistd</pre>
+
+		<p>greylistd предоставляет механизм, а политику можно определить в конфигурации Exim. Я придерживаюсь политики подвергать грейлистингу те узлы, которые оказались в чёрном списке. Для того, чтобы включить грейлистинг, нужно в самый конец списка управления доступом acl_check_rcpt до финального правила accept добавить следующую проверку:</p>
+
+		<pre class="code">defer message = Greylisting in action, try later
+      !senders = :
+      !hosts = ${if exists{/etc/greylistd/whitelist-hosts}\
+                          {/etc/greylistd/whitelist-hosts}{}} : \
+               ${if exists{/var/lib/greylistd/whitelist-hosts}\
+                          {/var/lib/greylistd/whitelist-hosts}{}}
+      dnslists = zen.spamhaus.org
+      condition = ${readsocket{/var/run/greylistd/socket}\
+                              {--grey $sender_host_address $sender_address $local_part@$domain}\
+                              {5s}{}{false}}</pre>
+
+		<p>В поле !senders можно прописать адреса тех отправителей, которые не должны подвергаться грейлистингу. Соответственно, чтобы узел с определённым IP-адресом не подвергался грейлистингу, его можно добавить в файл /etc/greylistd/whitelist-hosts.</p>
+
+		<p>Включим Debian-exim в группу greylist, чтобы Exim имел доступ к сокету и файлам greylistd:</p>
+
+		<pre class="console"># usermod -aG greylist Debian-exim</pre>
+
+		<p>Осталось попросить Exim перезагрузить файл конфигурации, чтобы новые настройки вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/exim4 reload</pre>
+
+		<h3>2.8. Настройка SPF-записи</h3>
+
+		<p>SPF-запись - это TXT-запись следующего вида:</p>
+
+		<pre class="code">domain.tld. IN TXT "v=spf1 +mx ~all"</pre>
+
+		<p>Если указанный домен обслуживает <a href="http://www.openspf.org/">Sender Policy Framework</a>, описывающему синтаксис SFP-записи - SPF Record Syntax. Стоит также прочесть о наиболее частых ошибках, допускаемых при создании SFP-записи - <a href="http://www.openspf.org/FAQ/Common_mistakes">Common mistakes</a>.</p>
+
+		<h3>2.9. Проверка SPF-записей</h3>
+
+		<p>Имеются разные способы проверки SPF-записей почтовой системой Exim. Сейчас в официальном дитрибутиве Debian поставляются конфигурационные файлы, проверяющие SPF-записи при помощи Perl-программы из пакета libmail-spf-perl. При этом каждая проверка инициирует новый запуск программы. На мой взгляд это довольно расточительно. Ранее существовал пакет libmail-spf-query-perl, в составе которого имелся демон, к которому можно было обратиться через Unix-сокет. Этот способ уже гораздо лучше и по сути ничем не отличается от грейлистинга при помощи демона greylistd на Python'е. Однако сейчас этот пакет не поставляется в репозитории Debian и, похоже, вообще не поддерживается авторами.</p>
+
+		<p>Имеется ещё один способ проверки SPF-записей - при помощи самого Exim. Однако эта опция считается экспериментальной и поэтому отключена по умолчанию. Пакеты в Debian собраны тоже без нативной поддержки проверки SPF-записей. Поддержка эта имеется в Exim уже многие годы и многие годы носит статус экспериментальной. Я решил попробовать собрать пакет, в котором поддержка проверки SPF-записей включена.</p>
+
+		<p>Для начала скачиваем необходимое для сборки Exim:</p>
+
+		<pre class="console"># apt-get build-dep exim4
+# apt-get source exim4
+# cd exim4-4.80</pre>
+
+		<p>Открываем файл src/EDITME в текстовом редакторе и раскомментируем строчки, включающие поддержку SPF:</p>
+
+		<pre class="code">EXPERIMENTAL_SPF=yes
+CFLAGS  += -I/usr/local/include
+LDFLAGS += -lspf2</pre>
+
+		<p>Вызываем команду редактирования журнала изменений пакета:</p>
+
+		<pre class="console"># dch -i</pre>
+
+		<p>Отмечаем изменения, которые внесли в пакет:</p>
+
+		<pre class="code">exim4 (4.80-7.1) UNRELEASED; urgency=low
+
+  * Non-maintainer upload.
+  * Enabled experimental SPF support.
+
+ -- Vladimir Stupin &lt;vladimir@stupin.su&gt;  Sat, 12 Apr 2014 19:45:04 +0600</pre>
+
+		<p>Установим библиотеку и заголовочные файлы:</p>
+
+		<pre class="console"># apt-get intall libspf2-2 libspf2-dev</pre>
+
+		<p>Собираем пакет:</p>
+
+		<pre class="console"># dpkg-buildpackage -us -uc -b -rfakeroot</pre>
+
+		<p>Создаём файл /etc/apt/preferences.d/exim4 в текстовом редакторе и вносим настройки, фиксирующие пакет в системе:</p>
+
+		<pre class="code">Package: exim4-daemon-heavy
+Pin: version 4.80-7.1
+Pin-Priority: 1003</pre>
+
+		<p>Зафиксировать пакет нужно для того, чтобы пакет из дистрибутива не заменил собранный нами вручную. Поскольку дистрибутивный пакет собран без поддержки SPF, он не сможет понять правило проверки SPF в файле конфигурации и не запустится. В результате почтовая система не будет работать. Если в дистрибутиве появится обновление пакета, пакет придётся пересобрать и установить самостоятельно.</p>
+
+		<p>Теперь установим пакет с поддержкой SPF:</p>
+
+		<pre class="console"># cd ..
+# dpkg -i exim4-daemon-heavy_4.80-7.1_amd64.deb</pre>
+
+		<p>SPF-записи могут классифицировать IP-адрес одним из следующих образов:</p>
+
+		<ul>
+			<li>pass (+) - рекомендуется принять почту,</li>
+
+			<li>fail (-) - рекомендуется отклонить почту,</li>
+
+			<li>softfail (~) - рекомендуется принять почту, но пометить её как подозрительную,</li>
+
+			<li>neutral (?) - рекомендуется обрабатывать почту таким образом, как будто SPF-записи не существует.</li>
+		</ul>
+
+		<p>Дополнительно, есть ещё два статуса, которые сообщают о постоянной или временной ошибке проверки IP-адреса.</p>
+
+		<p>Когда SPF-записи были только придуманы, некоторые системные администраторы слишком буквально воспринимали их рекомендации. Случались ситуации, когда первичный почтовый сервер не принимал почту от своего резервного сервера лишь потому, что его IP-адресу соответствовала SPF-запись, предписывающая не принимать письмо. Поэтому сложилась практика не указывать политику fail, а использовать вместо неё политики softfail или neutral. На мой взгляд, если бы не было таких прямолинейных системных администраторов, не было бы никакого смысла в политиках, отличных от pass и fail.</p>
+
+		<p>Нормальная почта может исходить только от серверов отправителя и должна приходить на серверы получателя без каких-либо посторонних промежуточных серверов. Сервер получателя должен проверять соответствие отправителя SPF-политике на основных и резервных серверах, а при приёме писем с резервного сервера на основной уже не обращать внимания на то, что его резервный сервер не удовлетворяет политике SPF. Именно поэтому я воспринимаю политики softfail и neutral точно так же, как воспринимаю политику fail. Я в любом случае приму почту от резервного сервера, не смотря на рекомендации SPF-записи, но на резервном сервере я обязательно их проверю.</p>
+
+		<p>Перед правилами проверки квот почтовых ящиков в списке управления доступом acl_check_rcpt в секции acl файла /etc/exim4/exim4.conf добавим следующее правило, соответствующее описанным выше соображениям:</p>
+
+		<pre class="code">deny message = Reject due SPF policy
+     spf = fail : softfail : neutral</pre>
+
+		<p>Осталось лишь перезапустить Exim, чтобы заработал демон из собранного нами пакета и вступили в силу новые настройки:</p>
+
+		<pre class="console"># /etc/init.d/exim4 stop
+# /etc/init.d/exim4 start</pre>
+
+		<h3>2.10. Требование аутентификации</h3>
+
+		<p>Чтобы запретить локальным пользователям отправлять почту без аутентификации, добавим в конфигурацию такое правило:</p>
+
+		<pre class="code">deny message = Local sender must be authenticated
+     sender_domains = +local_domains
+     !authenticated = *</pre>
+
+		<p>Чтобы аутентифицированный пользователь не пытался подставить чужой адрес отправителя, добавим в конфигурацию такое правило:</p>
+
+		<pre class="code">deny message = Send your own mail from yourself
+     condition = ${if eq{$authenticated_id}{$sender_address}{no}{yes}}
+     authenticated = *</pre>
+
+		<p>Оба правила нужно добавить в секцию acl файла /etc/exim4/exim4.conf, в правило acl_check_rcpt перед принятием почты от аутентифицированных пользователей.</p>
+
+		<p>Осталось перезагрузить файл конфигурации, чтобы она вступила в силу:</p>
+
+		<pre class="console"># /etc/init.d/exim4 reload</pre>
+
+		<h3>2.11. Итоговый файл конфигурации</h3>
+
+		<p>В конечном итоге у меня получился такой файл конфигурации /etc/exim4/exim4.conf:</p>
+
+		<pre class="code"># Имя нашей почтовой системы
+primary_hostname = mail.domain.tld
+
+# Список доменов нашей почтовой системы
+domainlist local_domains = /etc/exim4/local_domains
+
+# Список доменов, для которых наша почтовая система является резервной
+domainlist relay_domains = /etc/exim4/relay_domains
+
+# Список узлов, почту от которых будем принимать без проверок
+hostlist relay_from_hosts = 
+
+# Домены, для которых требуется наличие правильной DKIM-подписи
+domainlist dkim_required_domains = gmail.com : yandex.ru : rambler.ru : \
+                                   mail.ru : bk.ru : list.ru : inbox.ru
+
+# Правила для проверок
+acl_not_smtp = acl_check_not_smtp
+acl_smtp_rcpt = acl_check_rcpt
+acl_smtp_data = acl_check_data
+acl_smtp_dkim = acl_check_dkim
+
+# Сокет-файл антивируса ClamAV
+av_scanner = clamd:/var/run/clamav/clamd.ctl
+
+# Сокет-файл SpamAssassin
+# spamd_address =
+
+# Отключаем IPv6, слушаем порты 25, 465 и 587
+disable_ipv6
+daemon_smtp_ports = 25 : 465 : 587
+tls_on_connect_ports = 465
+
+# Настройки сертификатов SSL/TLS
+tls_advertise_hosts = *
+tls_certificate = /etc/ssl/mail.domain.tld.public.pem
+tls_privatekey = /etc/ssl/mail.domain.tld.private.pem
+
+# Дописываем домены отправителя и получателя, если они не указаны
+qualify_domain = domain.tld
+qualify_recipient = domain.tld
+
+# Exim никогда не должен запускать процессы от имени пользователя root
+never_users = root
+
+# Проверять прямую и обратную записи узла отправителя по DNS
+host_lookup = *
+
+# Отключаем проверку пользователей узла отправителя по протоколу ident
+rfc1413_hosts = *
+rfc1413_query_timeout = 0s
+
+# Только эти узлы могут не указывать домен отправителя или получателя
+sender_unqualified_hosts = +relay_from_hosts
+recipient_unqualified_hosts = +relay_from_hosts
+
+# Лимит размера сообщения, 30 мегабайт
+message_size_limit = 30M
+
+# Запрещаем использовать знак % для явной маршрутизации почты
+percent_hack_domains =
+
+# Настройки обработки ошибок доставки, используются значения по умолчанию
+ignore_bounce_errors_after = 2d
+timeout_frozen_after = 7d
+
+begin acl
+
+  acl_check_not_smtp:
+
+    accept
+
+  # Проверки на этапе RCPT
+  acl_check_rcpt:
+
+    accept hosts = :
+
+    # Отклоняем неправильные адреса почтовых ящиков
+    deny message = Restricted characters in address
+         domains = +local_domains
+         local_parts = ^[.] : ^.*[@%!/|]
+
+    # Отклоняем неправильные адреса почтовых ящиков
+    deny message = Restricted characters in address
+         domains = !+local_domains
+         local_parts = ^[./|] : ^.*[@%!] : ^.*/\\.\\./
+
+    # В локальные ящики postmaster и abuse принимает почту всегда
+    accept local_parts = postmaster : abuse
+           domains = +local_domains
+
+    # Проверяем существование домена отправителя
+    require verify = sender
+
+    # Принимаем почту от доверенных узлов, попутно исправляя заголовки письма
+    accept hosts = +relay_from_hosts
+           control = submission
+
+    # Не даём локальным отправителям слать почту без аутентификации
+    deny message = Local sender must be authenticated
+         sender_domains = +local_domains
+         !authenticated = *
+
+    # Не даём локальным отправителям представляться чужим именем
+    deny message = Send your own mail from yourself
+         condition = ${if eq{$authenticated_id}{$sender_address}{no}{yes}}
+         authenticated = *
+  
+    # Принимаем почту от аутентифицированных узлов, попутно исправляя заголовки письма
+    accept authenticated = *
+           control = submission/domain=
+
+    # Для не доверенных и не аутентифицированных требуется, чтобы получатель был в домене,
+    # ящик которого находится у нас или для которого мы являемся резервным почтовым сервером
+    require message = Relay not permitted
+            domains = +local_domains : +relay_domains
+
+    # Проверяем домена удалённого получателя или адрес локального получателя
+    require verify = recipient
+
+    # Отклоняем письма, не соответствующие политике домена отправителя
+    deny message = Reject due SPF policy
+         spf = fail : softfail : neutral
+
+    # Если отправитель попал в чёрный список, отправляем его в грейлистинг
+    defer message = Greylisting in action, try later
+          !senders = :
+          !hosts = ${if exists{/etc/greylistd/whitelist-hosts}\
+                              {/etc/greylistd/whitelist-hosts}{}} : \
+                   ${if exists{/var/lib/greylistd/whitelist-hosts}\
+                              {/var/lib/greylistd/whitelist-hosts}{}}
+          dnslists = zen.spamhaus.org
+          condition = ${readsocket{/var/run/greylistd/socket}\
+                                  {--grey $sender_host_address $sender_address $local_part@$domain}\
+                                  {5s}{}{false}}
+
+    accept
+
+  acl_check_data:
+
+    # Отклоняем письма, содержащие вирусы
+    deny message = Message contains a virus ($malware_name)
+         malware = *
+
+    accept
+
+  acl_check_dkim:
+
+    # Отклоняем письма, содержащие DKIM-подпись, если она не правильная
+    deny message = Wrong DKIM signature
+         dkim_status = fail
+
+    # Отклоняем письма, не содержащие DKIM-подпись, предотвращая подделку писем
+    # из крупных почтовых систем, которые всегда добавляют DKIM-подпись
+    deny message = Valid DKIM signature needed for mail from $sender_domain
+         sender_domains = +dkim_required_domains
+         dkim_status = none
+
+    accept
+
+begin routers
+
+  # Поиск транспорта для удалённых получателей
+  dnslookup:
+    driver = dnslookup
+    domains = ! +local_domains
+    transport = remote_smtp
+    ignore_target_hosts = 0.0.0.0 : 127.0.0.0/8
+    no_more
+
+  # Пересылки для получателей в домене domain.tld
+  system_aliases:
+    driver = redirect
+    allow_fail
+    allow_defer
+    domains = domain.tld
+    data = ${lookup{$local_part}lsearch{/etc/aliases}}
+
+  # Пересылки для получателей в разных доменах
+  aliases:
+    driver = redirect
+    allow_fail
+    allow_defer
+    data = ${lookup{$local_part@$domain}lsearch{/etc/exim4/aliases}}
+  
+  # Получение почты на локальный ящик
+  mailbox:
+    driver = accept
+    condition = ${lookup{$local_part@$domain}lsearch{/etc/dovecot/passwd}{yes}{no}}
+    user = dovecot
+    transport = dovecot_virtual_delivery
+    cannot_route_message = Unknown user
+
+begin transports
+
+  # Транспорт для удалённых получателей
+  # Добавляем к исходящим письмам DKIM-подпись
+  remote_smtp:
+    driver = smtp
+    dkim_domain = ${lc:${domain:$h_from:}}
+    dkim_selector = mail
+    dkim_private_key = ${if exists{/etc/exim4/dkim/$dkim_selector.$dkim_domain.private} \
+                                  {/etc/exim4/dkim/$dkim_selector.$dkim_domain.private}{}}
+
+  # Транспорт для локальных получателей из Dovecot
+  dovecot_virtual_delivery:
+    driver = pipe
+    command = /usr/lib/dovecot/dovecot-lda -d $local_part@$domain -f $sender_address
+    message_prefix =
+    message_suffix =
+    delivery_date_add
+    envelope_to_add
+    return_path_add
+    log_output
+    user = vmail
+    temp_errors = 64 : 69 : 70: 71 : 72 : 73 : 74 : 75 : 78
+
+begin retry
+
+  *   *   F,2h,15m; G,16h,1h,1.5; F,4d,6h
+
+begin rewrite
+
+begin authenticators
+
+  # Использование LOGIN-аутентификации из Dovecot
+  dovecot_login:
+    driver = dovecot
+    public_name = LOGIN
+    server_socket = /var/run/dovecot/auth-client
+    server_set_id = $auth1
+
+  # Использование PLAIN-аутентификации из Dovecot
+  dovecot_plain:
+    driver = dovecot
+    public_name = PLAIN
+    server_socket = /var/run/dovecot/auth-client
+    server_set_id = $auth1</pre>
+
+		<h2>3. Заключение</h2>
+
+		<p>В описанном варианте настройки мне не нравится то, что файлы с настройками не удалось передать в собственность отдельной группы пользователей. Это позволило бы предоставлять определённым системным пользователям доступ на редактирование этих файлов. Кроме того, можно было бы написать даже веб-приложение для управления доменами, почтовыми ящиками и пересылками. Не удалось это сделать по той простой причине, что Dovecot наотрез отказывается использовать вторичные группы при доступе к файлам. Возможно это недоработка самого Dovecot, а может быть - предусмотренное поведение. Сейчас у меня нет острой необходимости разобраться в этом, поэтому я оставил всё как получилось: пользователь Debian-exim состоит в группах dovecot и greylist, а в группе Debian-exim состоит пользователь clamav.</p>
+
+		<p>Для проверки квот на этапе RCPT сеанса ESMTP можно было бы воспользоваться не только самописным скриптом, но и сервисом проверки квот quota-status, который появился в Dovecot 2.2 (в Debian Wheezy поставляется Dovecot версии 2.1.7), благо Exim позволяет отправлять запросы в юникс-сокеты и читать из них ответ.</p>
+
+		<p>Как обычно, готов выслушать полезные замечания, предложения, советы.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Exim и Dovecot без SQL">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

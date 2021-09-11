@@ -1,0 +1,74 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="jessie,debfoster,linux,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2015-08-23 -->
+		<title>Чистка системы от устаревших и ненужных пакетов</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Чистка системы от устаревших и ненужных пакетов</h1>
+
+		<p>Установим пакет, специально предназначенный для удаления ненужных пакетов:</p>
+
+		<pre class="console"># apt-get install debfoster</pre>
+
+		<p>Удаляем пакеты, которые по нашему мнению не нужны. Предлагаются к выбору только те пакеты, от которых не зависят другие:</p>
+
+		<pre class="console"># debfoster</pre>
+
+		<p>Создадим скрипт с именем no_repo.sh, который выведет список установленных пакетов, отсутствующих в текущих репозиториях:</p>
+
+		<pre class="code">#!/bin/sh
+
+dpkg -l | awk '/^ii/ { print $2; }' \
+  | while read pkg;
+    do
+      apt-cache policy $pkg \
+        | awk -v pkg=$pkg 'BEGIN { local = 0;
+                                   repo = 0; }
+
+                           /^[ ]+[0-9]+ .*status$/ { local = 1; }
+
+                           /^[ ]+[0-9]+ / &amp;&amp; !/status$/ { repo = 1; }
+
+                           END { if ((local == 1) &amp;&amp; (repo == 0))
+                                   print pkg; }'
+    done</pre>
+
+		<p>Дадим скрипту право быть запущенным:</p>
+
+		<pre class="console">$ chmod +x not_repo.sh</pre>
+
+		<p>Составляем список пакетов, отсутствующих в текущих репозиториях:</p>
+
+		<pre class="console">$ ./not_repo.sh &gt; not_repo</pre>
+
+		<p>Редактируем полученный список, удаляя из него пакеты, которые нам нужны или которые были установлены вручную. Затем удаляем оставшиеся:</p>
+
+		<pre class="console"># apt-get purge `cat not_repo`</pre>
+
+		<p>Составляем список удалённых пакетов, от которых остались какие-либо файлы:</p>
+
+		<pre class="console">$ dpkg -l | awk '$1 !~ /^ii/ { print $2; }' &gt; removed</pre>
+
+		<p>Редактируем полученный список, удаляя из него пакеты, файлы конфигурации и файлы данных которых нужно оставить нетронутыми. Далее удаляем оставшиеся:</p>
+
+		<pre class="console"># apt-get purge `cat removed`</pre>
+
+		<p>Теперь осталось удалить пакеты, установленные автоматически и больше не нужные:</p>
+
+		<pre class="console"># apt-get autoremove</pre>
+
+		<p>Результат - удалось высвободить почти гигабайт места:</p>
+
+		<img src="zabbix_freespace.png" />
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Чистка системы от устаревших и ненужных пакетов">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

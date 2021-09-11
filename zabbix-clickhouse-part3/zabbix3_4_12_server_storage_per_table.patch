@@ -1,0 +1,275 @@
+Index: zabbix-3.4.12-1+buster/src/zabbix_server/server.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/zabbix_server/server.c
++++ zabbix-3.4.12-1+buster/src/zabbix_server/server.c
+@@ -258,8 +258,11 @@ char	*CONFIG_TLS_PSK_FILE		= NULL;
+ #endif
+ 
+ char	*CONFIG_SOCKET_PATH		= NULL;
+-char	*CONFIG_HISTORY_STORAGE_URL	= NULL;
+-char	*CONFIG_HISTORY_STORAGE_OPTS	= NULL;
++char	*CONFIG_HISTORY_STORAGE		= NULL;
++char	*CONFIG_HISTORY_UINT_STORAGE	= NULL;
++char	*CONFIG_HISTORY_STR_STORAGE	= NULL;
++char	*CONFIG_HISTORY_TEXT_STORAGE	= NULL;
++char	*CONFIG_HISTORY_LOG_STORAGE	= NULL;
+ 
+ int	get_process_info_by_thread(int local_server_num, unsigned char *local_process_type, int *local_process_num);
+ 
+@@ -438,9 +441,6 @@ static void	zbx_set_defaults(void)
+ 
+ 	if (NULL == CONFIG_SSL_KEY_LOCATION)
+ 		CONFIG_SSL_KEY_LOCATION = zbx_strdup(CONFIG_SSL_KEY_LOCATION, DATADIR "/zabbix/ssl/keys");
+-
+-	if (NULL == CONFIG_HISTORY_STORAGE_OPTS)
+-		CONFIG_HISTORY_STORAGE_OPTS = zbx_strdup(CONFIG_HISTORY_STORAGE_OPTS, "uint,dbl,str,log,text");
+ #endif
+ 
+ #ifdef HAVE_SQLITE3
+@@ -499,8 +499,11 @@ static void	zbx_validate_config(ZBX_TASK
+ 	err |= (FAIL == check_cfg_feature_str("SSLCALocation", CONFIG_SSL_CA_LOCATION, "cURL library"));
+ 	err |= (FAIL == check_cfg_feature_str("SSLCertLocation", CONFIG_SSL_CERT_LOCATION, "cURL library"));
+ 	err |= (FAIL == check_cfg_feature_str("SSLKeyLocation", CONFIG_SSL_KEY_LOCATION, "cURL library"));
+-	err |= (FAIL == check_cfg_feature_str("HistoryStorageURL", CONFIG_HISTORY_STORAGE_URL, "cURL library"));
+-	err |= (FAIL == check_cfg_feature_str("HistoryStorageTypes", CONFIG_HISTORY_STORAGE_OPTS, "cURL library"));
++	err |= (FAIL == check_cfg_feature_str("HistoryStorage", CONFIG_HISTORY_STORAGE, "cURL library"));
++	err |= (FAIL == check_cfg_feature_str("HistoryUintStorage", CONFIG_HISTORY_UINT_STORAGE, "cURL library"));
++	err |= (FAIL == check_cfg_feature_str("HistoryStrStorage", CONFIG_HISTORY_STR_STORAGE, "cURL library"));
++	err |= (FAIL == check_cfg_feature_str("HistoryTextStorage", CONFIG_HISTORY_TEXT_STORAGE, "cURL library"));
++	err |= (FAIL == check_cfg_feature_str("HistoryLogStorage", CONFIG_HISTORY_LOG_STORAGE, "cURL library"));
+ #endif
+ 
+ #if !defined(HAVE_LIBXML2) || !defined(HAVE_LIBCURL)
+@@ -696,9 +699,15 @@ static void	zbx_load_config(ZBX_TASK_EX
+ 			PARM_OPT,	1,			100},
+ 		{"StartPreprocessors",		&CONFIG_PREPROCESSOR_FORKS,		TYPE_INT,
+ 			PARM_OPT,	1,			1000},
+-		{"HistoryStorageURL",		&CONFIG_HISTORY_STORAGE_URL,		TYPE_STRING,
++		{"HistoryStorage",		&CONFIG_HISTORY_STORAGE,		TYPE_STRING,
++			PARM_OPT,	0,			0},
++		{"HistoryUintStorage",		&CONFIG_HISTORY_UINT_STORAGE,		TYPE_STRING,
++			PARM_OPT,	0,			0},
++		{"HistoryStrStorage",		&CONFIG_HISTORY_STR_STORAGE,		TYPE_STRING,
++			PARM_OPT,	0,			0},
++		{"HistoryTextStorage",		&CONFIG_HISTORY_TEXT_STORAGE,		TYPE_STRING,
+ 			PARM_OPT,	0,			0},
+-		{"HistoryStorageTypes",		&CONFIG_HISTORY_STORAGE_OPTS,		TYPE_STRING_LIST,
++		{"HistoryLogStorage",		&CONFIG_HISTORY_LOG_STORAGE,		TYPE_STRING,
+ 			PARM_OPT,	0,			0},
+ 		{NULL}
+ 	};
+Index: zabbix-3.4.12-1+buster/src/zabbix_proxy/proxy.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/zabbix_proxy/proxy.c
++++ zabbix-3.4.12-1+buster/src/zabbix_proxy/proxy.c
+@@ -251,8 +251,11 @@ char	*CONFIG_TLS_PSK_FILE		= NULL;
+ 
+ char	*CONFIG_SOCKET_PATH		= NULL;
+ 
+-char	*CONFIG_HISTORY_STORAGE_URL	= NULL;
+-char	*CONFIG_HISTORY_STORAGE_OPTS	= NULL;
++char	*CONFIG_HISTORY_STORAGE		= NULL;
++char	*CONFIG_HISTORY_UINT_STORAGE	= NULL;
++char	*CONFIG_HISTORY_STR_STORAGE	= NULL;
++char	*CONFIG_HISTORY_TEXT_STORAGE	= NULL;
++char	*CONFIG_HISTORY_LOG_STORAGE	= NULL;
+ 
+ int	get_process_info_by_thread(int local_server_num, unsigned char *local_process_type, int *local_process_num);
+ 
+Index: zabbix-3.4.12-1+buster/include/common.h
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/include/common.h
++++ zabbix-3.4.12-1+buster/include/common.h
+@@ -1114,6 +1114,7 @@ char	*zbx_time2str(time_t time);
+ #define ZBX_NULL2STR(str)	(NULL != str ? str : "(null)")
+ #define ZBX_NULL2EMPTY_STR(str)	(NULL != (str) ? (str) : "")
+ 
++char    *zbx_strstartswith(const char *str, const char *prefix);
+ char	*zbx_strcasestr(const char *haystack, const char *needle);
+ int	cmp_key_id(const char *key_1, const char *key_2);
+ int	zbx_strncasecmp(const char *s1, const char *s2, size_t n);
+Index: zabbix-3.4.12-1+buster/src/libs/zbxcommon/str.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxcommon/str.c
++++ zabbix-3.4.12-1+buster/src/libs/zbxcommon/str.c
+@@ -1827,6 +1827,38 @@ char	*zbx_time2str(time_t time)
+ 	return buffer;
+ }
+ 
++/******************************************************************************
++ *                                                                            *
++ * Function: zbx_startswith                                                   *
++ *                                                                            *
++ * Purpose: compare start of string str with string prefix                    *
++ *                                                                            *
++ * Parameters: str - [IN] null terminated source string                       *
++ *             prefix - [IN] null terminated prefix string                    *
++ *                                                                            *
++ * Return value: pointer to rest of str or NULL, if prefix not found          *
++ *                                                                            *
++ * Author: Vladimir Stupin                                                    *
++ *                                                                            *
++ ******************************************************************************/
++char	*zbx_strstartswith(const char *str, const char *prefix)
++{
++	if (NULL == prefix)
++		return (char *)str;
++
++	if (NULL == str)
++		return NULL;
++
++	while ('\0' != *prefix)
++	{
++		if ('\0' == *str || *str != *prefix)
++			return NULL;
++		str++;
++		prefix++;
++	}
++	return (char *)str;
++}
++
+ int	zbx_strncasecmp(const char *s1, const char *s2, size_t n)
+ {
+ 	if (NULL == s1 && NULL == s2)
+Index: zabbix-3.4.12-1+buster/src/libs/zbxhistory/history.h
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxhistory/history.h
++++ zabbix-3.4.12-1+buster/src/libs/zbxhistory/history.h
+@@ -47,6 +47,6 @@ struct zbx_history_iface
+ int	zbx_history_sql_init(zbx_history_iface_t *hist, unsigned char value_type, char **error);
+ 
+ /* elastic hist */
+-int	zbx_history_elastic_init(zbx_history_iface_t *hist, unsigned char value_type, char **error);
++int	zbx_history_elastic_init(zbx_history_iface_t *hist, unsigned char value_type, const char *url, char **error);
+ 
+ #endif
+Index: zabbix-3.4.12-1+buster/src/libs/zbxhistory/history.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxhistory/history.c
++++ zabbix-3.4.12-1+buster/src/libs/zbxhistory/history.c
+@@ -27,8 +27,11 @@
+ 
+ ZBX_VECTOR_IMPL(history_record, zbx_history_record_t);
+ 
+-extern char	*CONFIG_HISTORY_STORAGE_URL;
+-extern char	*CONFIG_HISTORY_STORAGE_OPTS;
++extern char	*CONFIG_HISTORY_STORAGE;
++extern char	*CONFIG_HISTORY_UINT_STORAGE;
++extern char	*CONFIG_HISTORY_STR_STORAGE;
++extern char	*CONFIG_HISTORY_TEXT_STORAGE;
++extern char	*CONFIG_HISTORY_LOG_STORAGE;
+ 
+ zbx_history_iface_t	history_ifaces[ITEM_VALUE_TYPE_MAX];
+ 
+@@ -46,16 +49,23 @@ zbx_history_iface_t	history_ifaces[ITEM_
+ int	zbx_history_init(char **error)
+ {
+ 	int		i, ret;
+-	/* TODO: support per value type specific configuration */
+-
+-	const char	*opts[] = {"dbl", "str", "log", "uint", "text"};
++	char		*elastic_url;
++	const char	*opts[] = {
++				CONFIG_HISTORY_STORAGE,
++				CONFIG_HISTORY_STR_STORAGE,
++				CONFIG_HISTORY_LOG_STORAGE,
++				CONFIG_HISTORY_UINT_STORAGE,
++				CONFIG_HISTORY_TEXT_STORAGE
++			};
+ 
+ 	for (i = 0; i < ITEM_VALUE_TYPE_MAX; i++)
+ 	{
+-		if (NULL == CONFIG_HISTORY_STORAGE_URL || NULL == strstr(CONFIG_HISTORY_STORAGE_OPTS, opts[i]))
+-			ret = zbx_history_sql_init(&history_ifaces[i], i, error);
++		if (elastic_url = zbx_strstartswith(opts[i], "elastic,"))
++			ret = zbx_history_elastic_init(&history_ifaces[i], i, elastic_url, error);
++		/*else if (clickhouse_url = zbx_strstartswith(opts[i], "clickhouse,"))
++			ret = zbx_history_clickhouse_init(&history_ifaces[i], i, clickhouse_url, error);*/
+ 		else
+-			ret = zbx_history_elastic_init(&history_ifaces[i], i, error);
++			ret = zbx_history_sql_init(&history_ifaces[i], i, error);
+ 
+ 		if (FAIL == ret)
+ 			return FAIL;
+Index: zabbix-3.4.12-1+buster/src/libs/zbxhistory/history_elastic.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxhistory/history_elastic.c
++++ zabbix-3.4.12-1+buster/src/libs/zbxhistory/history_elastic.c
+@@ -37,8 +37,6 @@
+ 
+ const char	*value_type_str[] = {"dbl", "str", "log", "uint", "text"};
+ 
+-extern char	*CONFIG_HISTORY_STORAGE_URL;
+-
+ typedef struct
+ {
+ 	char	*base_url;
+@@ -912,7 +910,7 @@ static void	elastic_flush(zbx_history_if
+  *               FAIL    - otherwise                                                *
+  *                                                                                  *
+  ************************************************************************************/
+-int	zbx_history_elastic_init(zbx_history_iface_t *hist, unsigned char value_type, char **error)
++int	zbx_history_elastic_init(zbx_history_iface_t *hist, unsigned char value_type, const char *url, char **error)
+ {
+ 	zbx_elastic_data_t	*data;
+ 
+@@ -924,7 +922,7 @@ int	zbx_history_elastic_init(zbx_history
+ 
+ 	data = zbx_malloc(NULL, sizeof(zbx_elastic_data_t));
+ 	memset(data, 0, sizeof(zbx_elastic_data_t));
+-	data->base_url = zbx_strdup(NULL, CONFIG_HISTORY_STORAGE_URL);
++	data->base_url = zbx_strdup(NULL, url);
+ 	zbx_rtrim(data->base_url, "/");
+ 	data->buf = NULL;
+ 	data->post_url = NULL;
+Index: zabbix-3.4.12-1+buster/conf/zabbix_server.conf
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/conf/zabbix_server.conf
++++ zabbix-3.4.12-1+buster/conf/zabbix_server.conf
+@@ -133,19 +133,40 @@ DBUser=zabbix
+ # Default (for MySQL):
+ # DBPort=3306
+ 
+-### Option: HistoryStorageURL
+-#	History storage HTTP[S] URL.
++### Option: HistoryStorage
++#	Storage type and HTTP[S] URL for double type values history.
+ #
+ # Mandatory: no
+ # Default:
+-# HistoryStorageURL=
++# HistoryStorage=
+ 
+-### Option: HistoryStorageTypes
+-#	Comma separated list of value types to be sent to the history storage.
++### Option: HistoryUintStorage
++#	Storage type and HTTP[S] URL for unsigned integer type values history.
+ #
+ # Mandatory: no
+ # Default:
+-# HistoryStorageTypes=uint,dbl,str,log,text
++# HistoryUintStorage=
++
++### Option: HistoryStrStorage
++#	Storage type and HTTP[S] URL for string type values history.
++#
++# Mandatory: no
++# Default:
++# HistoryStrStorage=
++
++### Option: HistoryTextStorage
++#	Storage type and HTTP[S] URL for text type values history.
++#
++# Mandatory: no
++# Default:
++# HistoryTextStorage=
++
++### Option: HistoryLogStorage
++#	Storage type and HTTP[S] URL for log type values history.
++#
++# Mandatory: no
++# Default:
++# HistoryLogStorage=
+ 
+ ############ ADVANCED PARAMETERS ################
+ 

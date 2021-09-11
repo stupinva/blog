@@ -1,0 +1,142 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="pptp,debian,linux,ufanet" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2008-10-04 -->
+		<title>Настраиваем VPN-соединение с Уфанетом в Debian</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настраиваем VPN-соединение с Уфанетом в Debian</h1>
+
+		<p>Дома у меня есть интернет от уфимского провайдера "Уфанет", пользуюсь системой Debian GNU/Linux. Для того, чтобы получить доступ в интернет, нужно установить VPN-соединение, а точнее - PPTP.</p>
+
+		<p>Первый этап предполагает настройку Ethernet-соединения, а точнее настройку интерфейса на получение настроек по DHCP.</p>
+
+		<p>Делается это элементарно. В файле /etc/network/interfaces нужно добавить пару строчек:</p>
+
+		<pre class="code">auto eth0
+iface eth0 inet dhcp</pre>
+
+		<p>eth0 - это имя сетевого интерфейса, подключенного к сети Уфанет. Узнать список доступных интерфейсов можно с помощью команды:</p>
+
+		<pre class="console">$ ifconfig -a</pre>
+
+		<p>Далее установим pptp-клиент и пакет resolvconf:</p>
+
+		<pre class="console"># aptitude install pptp-linux resolvconf</pre>
+
+		<p>Пакет resolvconf добавляет к клиентам dhcp и pptp специальные сценарии, которые перехватывают информацию о DNS-серверах, полученную от dhcp- и pptp-серверов соответственно. Основываясь на перехваченной информации сценарии выполняют корректное обновление списка DNS-серверов в файле /etc/resolv.conf</p>
+
+		<p>Процесс настройки состоял из серии проб и ошибок, но в конце концов получилось удачно скомпилировать информацию из разных источников. В результате появился работоспособный набор конфигурационных файлов и скриптов.</p>
+
+		<p>Краткие пояснения по файлам конфигурации:</p>
+
+		<ul>
+			<li><b>login</b> - логин на соединение (именно логин, а не номер договора)</li>
+
+			<li><b>password</b> - пароль на соединения (пароль на соединение, а не на просмотр баланса)</li>
+
+			<li><b>vpn.ufanet.ru</b> - доменное имя VPN-сервера Уфанет</li>
+		</ul>
+
+		<p>Теперь сами файлы: </p>
+
+		<p>/etc/ppp/peers/ufanet:</p>
+
+		<pre class="code">pty "pptp vpn.ufanet.ru --nolaunchpppd"
+name login
+remotename vpn.ufanet.ru
+file /etc/ppp/options.pptp
+ipparam ufanet   # Этот параметр передаётся в скрипты настройки
+                 # маршрутизации, о которых ниже</pre>
+
+		<p>/etc/ppp/chap-secrets:</p>
+
+		<pre class="code"># Secrets for authentication using CHAP
+# client    server           secret      IP addresses
+login       vpn.ufanet.ru    password    *</pre>
+
+		<p>/etc/ppp/options:</p>
+
+		<pre class="code">asyncmap 0
+auth
+crtscts
+lock
+hide-password
+modem
+proxyarp
+lcp-echo-interval 30
+lcp-echo-failure 4
+noipx</pre>
+
+		<p>/etc/ppp/options.pptp:</p>
+
+		<pre class="code">lock
+noauth
+nobsdcomp
+nodeflate
+persist    # Восстанавливать соединение при обрыве</pre>
+
+		<p>Теперь собственно скрипты для прописывания маршрутов при поднятии линка и для удаления маршрутов при падении линка. Скрипты были почерпнуты в одной из Интернет-конференций и доработаны под наш случай (в исходном виде скрипты, увы не работали).</p>
+
+		<p>/etc/ppp/ip-up.d/route:</p>
+
+		<pre class="code">#!/bin/sh
+
+case "$PPP_IPPARAM" in
+  ufanet)
+    SERVER=vpn.ufanet.ru
+    GW=`route -n | grep ^0\.0\.0\.0 | awk '{print $2}'`
+    route del $PPP_REMOTE dev $PPP_IFACE
+    route add -host $SERVER gw $GW
+    route add default dev $PPP_IFACE
+    ;;
+  *)
+    echo "No PPP_IPPARAM defined"
+    ;;
+esac</pre>
+
+		<p>/etc/ppp/ip-down.d/route:</p>
+
+		<pre class="code">#!/bin/sh
+
+case "$PPP_IPPARAM" in
+  ufanet)
+    SERVER=vpn.ufanet.ru
+    route del -host $SERVER
+    route del default dev $PPP_IFACE
+    ;;
+  *)
+    echo "No PPP_IPPARAM defined"
+    ;;
+esac</pre>
+
+		<p>Для того, чтобы сценарии заработали, нужно добавить им бит исполняемости:</p>
+
+		<pre class="console"># chmod +x /etc/ppp/ip-up.d/route /etc/ppp/ip-down.d/route</pre>
+
+		<p>Подключение осуществляется с помощью команды:</p>
+
+		<pre class="console"># pon ufanet</pre>
+
+		<p>Отключение осуществляется с помощью команды:</p>
+
+		<pre class="console"># poff ufanet</pre>
+
+		<p>Команды pon и poff нужно выполнять от пользователя root.</p>
+
+		<p>Чтобы соединение устанавливалось при старте системы, можно прописать в файл /etc/network/interfaces следующие строки:</p>
+
+		<pre class="code">auto ufanet
+iface ufanet inet ppp
+  provider ufanet</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настраиваем VPN-соединение с Уфанетом в Debian">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

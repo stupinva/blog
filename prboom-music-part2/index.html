@@ -1,0 +1,55 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="midi,timidity,doom,debian,sf2,prboom" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2009-10-25 -->
+		<title>Музыка MIDI - улучшаем звук</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Музыка MIDI - улучшаем звук</h1>
+
+		<p>У меня есть вся музыка из Doom, Doom 2, Doom Final: Plutonia Experiment, Doom Final: TNT в формате MIDI. При проигрывании музыки с помощью timidity, запущенной из консоли я обнаружил, что timidity ругается на отсутствие сэмплов некоторых музыкальных инструментов:</p>
+
+		<pre class="console">$ timidity BUNNY.MID
+Requested buffer size 32768, fragment size 8192
+ALSA pcm 'default' set buffer size 30104, period size 3760 bytes
+Playing /home/stupin/music/Doom/Doom/BUNNY.MID
+MIDI file: /home/stupin/music/Doom/Doom/BUNNY.MID
+Format: 1  Tracks: 13  Divisions: 120
+No instrument mapped to tone bank 0, program 31 - this instrument will not be heard
+No instrument mapped to tone bank 0, program 123 - this instrument will not be heard
+((c) 1994 by &lt;IRC:#doom:just_joe&gt; Productions.)(MUS2MIDI v0.9 - joakim.erdfelt@swsbbs.com)(prelim DEU Music/Sound project for 'DOOM')(DEU (c) 1993,1994 by Raphael Quinet)(DOOM (c) 1993,1994 by id software)Playing time: ~65 seconds
+Notes cut: 0
+Notes lost totally: 0</pre>
+
+		<p>При этом, соответственно, слышны не все инструменты, что портит восприятие музыки. Например в первом эпизоде на третьем уровне вместо музыки фактически слышно один только монотонно повторяющийся синт-бас. Я стал искать музыкальные сэмплы для недостающих инструментов.</p>
+
+		<p>Выяснилось, что в Debian есть MIDI-секвенсор fluidsynth, в комплекте с которым идут два банка музыкальных инструментов формате Sound Font 2. Эти банки находятся в пакетах с именами fluid-soundfont-gm и fluid-soundfont-gs. Сам секвенсор мне запустить так и не удалось. Честно говоря мне этого и не особо-то хотелось, моей задачей было услышать полноценную музыку из Doom. Но зато я нашёл каким образом можно прикрутить эти банки к секвенсору timidity. Итак, пройдём весь процесс по шагам.</p>
+
+		<p>Сначала установим банки:</p>
+
+		<pre class="console"># aptitude install fluid-soundfont-gm fluid-soundfont-gs</pre>
+
+		<p>Вносим исправления в настройки freepats - программы, предоставляющей timidity сэмплы инструментов. В файле /etc/timidity/freepats.cfg добавляем следующие строчки (я добавил в начало):</p>
+
+		<pre class="code">dir /usr/share/sounds/sf2/
+soundfont FluidR3_GM.sf2 order=0
+soundfont FluidR3_GS.sf2 order=1</pre>
+
+		<p>И перезапускаем секвенсор:</p>
+
+		<pre class="console"># /etc/init.d/timidity restart</pre>
+
+		<p>Теперь можно запускать timidity для прослушивания музыки из Doom. Кроме появления недостающих инструментов улучшилось общее качество воспроизведения: исчезли щелчки и искажения звука. Единственным недостатком секвенсора можно считать то, что он требует для своей работы изрядной вычислительной мощности процессора. Загрузка моего 2-гигагерцового Athlon доходила до 30-40%.</p>
+
+		<p>Кстати, с помощью timidity можно слушать не только MIDI-файлы. timidity хорошо воспроизводит IT-, STM- и XM-файлы. В таком формате была музыка в недрах Unreal и Unreal Tournament, которую я когда-то из них извлёк. Теперь я могу слушать эту музыку и в Linux!</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Музыка MIDI - улучшаем звук">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

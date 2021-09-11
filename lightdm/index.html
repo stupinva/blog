@@ -1,0 +1,46 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="debian,lightdm" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2012-01-31 -->
+		<title>Дисплейный менеджер LightDM</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Дисплейный менеджер LightDM</h1>
+
+		<p>LightDM - это относительно новый Display Manager. До сих пор я пользовался XDM, но теперь (хотя на самом деле уже полгода) пользуюсь LightDM. Установил его из репозитория Debian Wheezy, вместе с XFCE 4.8, когда пытался в очередной раз разобраться с монтированием сменных устройств.</p>
+
+		<p>К слову сказать, теперь это стало довольно просто - всеми настройками разрешений управляет демон polkit-1, дисками - демон udisks, питанием - upower, сеансами и включением-выключением компьютера - демон consolekit. Последние три демона обращаются за проверкой доступности запрашиваемого действия для данного пользователя к первому. Всё это хозяйство работает через dbus и интегрируется с любым DE. Но - об этом лучше отдельно.</p>
+
+		<p>До XDM я уже пробовал различные DM, но большинство из них мне не понравились по одной из трёх причин: тяжёлые (тянут тяжёлый тулкит и dbus), некрасивые (некоторые из них), не поддерживают XDMCP (тоже некоторые). Тогда я остановился на XDM как на лёгком, поддерживающем XDMCP и поддающемся обработке напильником до терпимого состояния. Кроме XDM пробовал я тогда KDM, GDM, WDM и SLiM.</p>
+
+		<p>Для настройки запуска двух X-серверов я откорректировал файл /etc/lightdm/lightdm.conf, так что в нём теперь есть (кроме всего прочего) пара таких строчек:</p>
+
+		<pre class="code">[Seat:0]
+xserver-command=/usr/bin/X :0 vt7 -nolisten tcp
+
+[Seat:1]
+xserver-command=/usr/bin/X :1 vt8 -nolisten tcp</pre>
+
+		<p>Между обоими X-серверами можно переключаться точно так же, как и в XDM - нажатием Ctrl-Alt-F7 и Ctrl-Alt-F8.</p>
+
+		<p>В файле /etc/lightdm/lightdm-gtk-greeter.conf я настроил фоновую картинку и используемый по умолчанию шрифт, так что конфиг в целом принял следующий вид:</p>
+
+		<pre class="code">[greeter]
+background=/root/wallpapers/canyon.jpg
+font-name=Liberation Sans 12
+xft-hintstyle=hintfull</pre>
+
+		<p>Выглядит всё это вот так:</p>
+
+		<img src="lightdm.jpg" />
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Дисплейный менеджер LightDM">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

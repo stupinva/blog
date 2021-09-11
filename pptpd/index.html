@@ -1,0 +1,123 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="pppd,pptpd,linux,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2009-09-10 -->
+		<title>Настройка PPTP-сервера</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка PPTP-сервера</h1>
+
+		<p>На работе возникла необходимость под Linux настроить PPTP-сервер для Windows-клиентов. На всякий случай решил описать пример настройки.</p>
+
+		<p>Ставим ppp и pptpd:</p>
+
+		<pre class="console"># aptitude install ppp pptpd</pre>
+
+		<p>Настраиваем сам сервер pptpd, прописывая в его конфигурационном файле /etc/pptpd.conf:</p>
+
+		<pre class="code">option /etc/ppp/pptpd-options
+logwtmp
+localip 10.3.17.1
+remoteip 10.3.17.2-254</pre>
+
+		<p>Опция localip задаёт IP-адрес на локальной стороне создаваемых туннелей, опция remoteip - задаёт соответственно диапазон IP-адресов, которые будут выдаваться клиентам, в качестве адресов с их стороны.</p>
+
+		<p>Настроим pppd для туннелей, поднимаемых сервером pptpd. Зададим настройки в файле /etc/ppp/pptpd-options:</p>
+
+		<pre class="code">10.3.17.1:
+name pptpd
+refuse-pap
+refuse-chap
+refuse-mschap
+require-mschap-v2
+require-mppe-128
+ms-dns 10.3.1.3
+ms-dns 10.3.1.4
+ms-wins 10.3.1.4
+ms-wins 10.3.1.5
+nodefaultroute
+lock
+nobsdcomp
+idle 900</pre>
+
+		<p>Первая опция задаёт IP-адрес локальной стороны туннеля (почему-то настройка, указанная в /etc/pptpd.conf не действует).</p>
+
+		<p>Опция name pptpd задаёт имя сервера. Оно будет использоваться для поиска записей в файле паролей (см. ниже).</p>
+
+		<p>Опции refuse-pap, refuse-chap, refuse-mschap, require-mschap-v2 отклоняют различные способы аутентификации, требуя использовать только аутентификацию по MS-CHAPv2.</p>
+
+		<p>Опция require-mppe-128 указывает на необходимость шифрования передаваемых по туннелю данных с помощью протокола MPPE с длиной ключа 128 бит.</p>
+
+		<p>Опции ms-dns 10.3.1.3 и ms-dns 10.3.1.4 задают адреса DNS-серверов, которые будут сообщены подключившемуся клиенту.</p>
+
+		<p>Опции ms-wins 10.3.1.4 и ms-wins 10.3.1.5 задают адреса WINS-серверов, которые будут сообщены подключившемуся клиенту.</p>
+
+		<p>Опция nodefaultroute заставляет pppd не устанавливать маршрут по умолчанию через подключившегося клиента.</p>
+
+		<p>Опция lock создаёт файл блокировки интерфейса, который позволяет избежать попыток использовать этот интерфейс другими соединениями, пока он используется.</p>
+
+		<p>Опция nobsdcomp отключает сжатие потока данных по алгоритму BSD.</p>
+
+		<p>Опция idle задаёт количество секунд простоя, по истечении которых простаивающее соединение будет отключено.</p>
+
+		<p>Теперь нужно прописать клиентов в файле паролей /etc/ppp/chap-secrets:</p>
+
+		<pre class="code">elvira          pptpd   "111111"                10.3.17.23
+#kon_sv         pptpd   "passwd"                *
+igor            pptpd   "paroli"                10.3.17.28</pre>
+
+		<p>Символ решётки говорит о том, что данная запись отключена (закомментирована).</p>
+
+		<p>Символ звёздочки говорит о том, что этому клиенту будет выдан любой свободный адрес из диапазона 10.3.17.2-254, который указан в настройках pptpd.</p>
+
+		<p>Клиентам, для которых указан IP-адрес в последней колонке, всегда будут выдаваться этот IP-адрес.</p>
+
+		<p>Теперь перезапускаем PPTP-сервер, чтобы настройки вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/pptpd restart</pre>
+
+		<p>Если хочется выполнять какие-то специфические для PPTP-клиента команды, то можно создать сценарии /etc/ppp/ip-up.d/pptp-clients и /etc/ppp/ip-down.d/pptp-clients, шаблон для которых представлен ниже:</p>
+
+		<pre class="code">#!/bin/sh
+
+case "$PPP_IPPARAM" in
+  "pptp-clients")
+    # ваши команды
+  ;;
+  *)
+    echo "No PPP_IPPARAM defined"
+  ;;
+esac</pre>
+
+		<p>Теперь в файле /etc/pptpd.conf нужно прописать опцию noipparam, которая заставит pptp-сервер не передавать в качестве ipparam IP-адрес, с которого было установлено подключение.</p>
+
+		<p>Чтобы отличать pptp-клиентов от других PPP-подключений, добавим опцию ipparam в файл /etc/ppp/pptpd-options:</p>
+
+		<pre class="code">ipparam "pptp-clients"</pre>
+
+		<p>В случае если ipparam будет равен pptp-clients, выполнятся указанные для этого случая команды. Например таким образом можно настраивать разрешающие правила в фаерволле. В том числе можно делать дополнительные проверки, идентифицируя клиента по IP-адресу внутри тоннеля или по логину, с которым клиент подключился.</p>
+
+		<p>Другие источники информации по этой теме:</p>
+
+		<ol>
+			<li><a href="http://ylsoftware.com/view/407">Настройка PPTP-сервера в Debian/Ubuntu</a></li>
+
+			<li>Русский перевод <a href="http://manpages.ylsoftware.com/ru/pppd.8.html">man pppd(8)</a> - демон протокола точка-точка (Point-to-Point Protocol Daemon)</li>
+
+			<li>Русский перевод <a href="http://manpages.ylsoftware.com/ru/pptpd.8.html">man pptpd(8)</a> - PPTP VPN-демон</li>
+
+			<li>Русский перевод <a href="http://manpages.ylsoftware.com/ru/pptpd.conf.5.html">man pptpd.conf(5)</a> - конфигурация PPTP VPN демона</li>
+		</ol>
+
+		<p>Последняя правка: 22-09-2009</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка PPTP-сервера">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

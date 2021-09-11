@@ -1,0 +1,52 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="zabbix,3.4" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2020-10-04 -->
+		<title>Ошибки аутентификации SNMPv3 в Zabbix 3.4</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Ошибки аутентификации SNMPv3 в Zabbix 3.4</h1>
+
+		<p>Для контроля доступности устройства по SNMP обычно я использую элементы данных типа «Внутренний Zabbix» с ключом «zabbix[host,snmp,available]», который описан на странице документации <a href="https://www.zabbix.com/documentation/3.4/ru/manual/config/items/itemtypes/internal">8 Внутренние проверки</a>. Подробнее о недоступности узлов можно прочитать здесь: <a hfre="https://www.zabbix.com/documentation/3.4/ru/manual/appendix/items/unreachability">12 Настройки недостижимости/недоступности хостов</a>. Итак, когда сервер Zabbix решает, что узел больше не доступен по SNMP, значение элемента данных с ключом «zabbix[host,snmp,available]» становится равным нулю. Можно настроить триггер, который будет срабатывать при нулевом значении этого ключа.</p>
+
+		<p>После того, как в сети появились узлы, опрашиваемые по SNMPv3, отсутствие срабатываний этого триггера перестало быть надёжным критерием доступности узла по SNMP. Все элементы данных SNMPv3 на узле могут быть в неподдерживаемом состоянии, однако Zabbix при этом считает узел доступным по SNMP и триггер не срабатывает. Как выяснилось, Zabbix не считает проблемой, если узел ответил ошибкой аутентификации. Формально устройство действительно отвечает по протоколу SNMP, но фактически данные с него не снимаются.</p>
+
+
+		<p>Я решил испрвить эту ситуацию, в очередной раз внеся правку в исходный текст Zabbix. К счастью, сделать это оказалось совсем не сложно. Интересующий нас фрагмент кода находится в файле src/zabbix_server/poller/checks_snmp.c в функции zbx_get_snmp_response_error. Удалим специальную обработку ошибок аутентификации SNMPv3, интерпретируя эти ошибки как недоступность элемента данных:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/src/zabbix_server/poller/checks_snmp.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/zabbix_server/poller/checks_snmp.c
++++ zabbix-3.4.12-1+buster/src/zabbix_server/poller/checks_snmp.c
+@@ -391,17 +391,7 @@ static int zbx_get_snmp_response_error(c
+        {
+                zbx_snprintf(error, max_error_len, "Cannot connect to \"%s:%hu\": %s.",
+                                interface-&gt;addr, interface-&gt;port, snmp_api_errstring(ss-&gt;s_snmp_errno));
+-
+-               switch (ss-&gt;s_snmp_errno)
+-               {
+-                       case SNMPERR_UNKNOWN_USER_NAME:
+-                       case SNMPERR_UNSUPPORTED_SEC_LEVEL:
+-                       case SNMPERR_AUTHENTICATION_FAILURE:
+-                               ret = NOTSUPPORTED;
+-                               break;
+-                       default:
+-                               ret = NETWORK_ERROR;
+-               }
++               ret = NETWORK_ERROR;
+        }
+        else if (STAT_TIMEOUT == status)
+        {</pre>
+
+		<p>Эту тривиальную заплатку можно взять по ссылке <a href="zabbix3_4_12_snmpv3_auth_errors.patch">zabbix3_4_12_snmpv3_auth_errors.patch</a>.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Ошибки аутентификации SNMPv3 в Zabbix 3.4">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

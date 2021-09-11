@@ -1,0 +1,145 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="перевод,ssl,openssl" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2016-10-16 -->
+		<title>Наиболее часто используемые команды OpenSSL (перевод)</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Наиболее часто используемые команды OpenSSL (перевод)</h1>
+
+		<p>Перевод: <a href="https://www.sslshopper.com/article-most-common-openssl-commands.html">The Most Common OpenSSL Commands</a></p>
+
+		<p>Одна из наиболее многофункциональных утилит SSL - это <a href="http://www.openssl.org/">OpenSSL</a>, которая является реализацией протокола SSL с открытым исходным кодом. Существуют версии OpenSSL почти для каждой платформы, включая <a href="http://www.slproweb.com/products/Win32OpenSSL.html">Windows</a>, Linux и Mac OS X. OpenSSL чаще всего используется для создания <a href="https://www.sslshopper.com/what-is-a-csr-certificate-signing-request.html">запросов на подпись сертификата</a> и приватных ключей для множества различных платформ, включая Apache. Однако, есть ещё сотни различных функций, которые позволяют увидеть информацию из запроса на сертификат или из сертификата, сравнить хэш MD5 сертификата и приватного ключа (чтобы убедиться в том, что они соответствуют друг другу), проверить, что сертификат веб-сайта установлен правильно, преобразовать сертификат в другой формат. Скомпилированную версию <a href="http://www.slproweb.com/products/Win32OpenSSL.html">OpenSSL для Windows можно найти здесь</a>.</p>
+
+		<p>Если вам не хочется разбираться с OpenSSL, то многое из этого можно сделать при помощи <a href="https://www.sslshopper.com/ssl-certificate-tools.html">наших инструментов для сертификатов SSL</a>. Ниже мы привели наиболее часто используемые команды OpenSSL:</p>
+
+		<h2>1. Общие команды OpenSSL</h2>
+
+		<p>Эти команды позволят вам сгенерировать запрос на подпись сертификата, сертификат, приватный ключ и решить другие задачи.</p>
+
+		<ul>
+			<li>
+				<p>Создание нового приватного ключа и запроса на подпись сертификата:</p>
+
+				<pre class="console">openssl req -out <u>CSR.csr</u> -new -newkey rsa:2048 -nodes -keyout <u>privateKey.key</u></pre>
+			</li>
+
+			<li>
+				<p>Создание самозаверяющего сертификата (за дополнительной информацией обратитесь к статье <a href="https://www.sslshopper.com/article-how-to-create-and-install-an-apache-self-signed-certificate.html">Как создать и установить самозаверяющий сертификат в Apache</a>):</p>
+
+				<pre class="console">openssl req -x509 -sha256 -nodes -days 365 -newkey rsa:2048 -keyout <u>privateKey.key</u> -out <u>certificate.crt</u></pre>
+			</li>
+
+			<li>
+				<p>Создание запроса на подпись сертификата для существующего приватного ключа:</p>
+
+				<pre class="console">openssl req -out <u>CSR.csr</u> -key <u>privateKey.key</u> -new</pre>
+			</li>
+
+			<li>
+				<p>Создание запроса на подпись сертификата на основе имеющегося сертификата:</p>
+
+				<pre class="console">openssl x509 -x509toreq -in <u>certificate.crt</u> -out <u>CSR.csr</u> -signkey <u>privateKey.key</u></pre>
+			</li>
+
+			<li>
+				<p>Удаление ключевой фразы из приватного ключа:</p>
+
+				<pre class="console">openssl rsa -in <u>privateKey.pem</u> -out <u>newPrivateKey.pem</u></pre>
+			</li>
+		</ul>
+
+		<h2>2. Проверка при помощи OpenSSL</h2>
+
+		<p>Если нужно проверить информацию в сертификате, в запросе на подпись сертификата или в приватном ключе, воспользуйтесь следующими командами. Также можно <a href="https://www.sslshopper.com/csr-decoder.html">проверить запрос на подпись сертификата</a> и <a href="https://www.sslshopper.com/certificate-decoder.html">проверить сертификат</a> с помощью наших интерактивных инструментов.</p>
+
+		<ul>
+			<li>
+				<p>Проверка запроса на подпись сертификата:</p>
+
+				<pre class="console">openssl req -text -noout -verify -in <u>CSR.csr</u></pre>
+			</li>
+
+			<li>
+				<p>Проверка приватного ключа:</p>
+
+				<pre class="console">openssl rsa -in <u>privateKey.key</u> -check</pre>
+			</li>
+
+			<li>
+				<p>Проверка сертификата:</p>
+
+				<pre class="console">openssl x509 -in <u>certificate.crt</u> -text -noout</pre>
+			</li>
+
+			<li>
+				<p>Проверка файла PKCS#12 (.pfx или .p12):</p>
+
+				<pre class="console">openssl pkcs12 -info -in <u>keyStore.p12</u></pre>
+			</li>
+		</ul>
+
+		<h2>3. Отладка с помощью OpenSSL</h2>
+
+		<p>При получении сообщения об ошибке, что приватный ключ не соответствует сертификату или что сертификат, установленный на веб-сайт, не заслуживает доверия, попробуйте одну из следующих команд. Если нужно проверить, правильно ли установлен этот сертификат SSL, попробуйте также наш инструмент для проверки SSL.</p>
+
+		<ul>
+			<li>
+				<p>Проверить, что хэш MD5 публичного ключа соответствует указанному в запросе на подпись сертификата или в приватном ключе:</p>
+
+				<pre class="console">openssl x509 -noout -modulus -in <u>certificate.crt</u> | openssl md5</pre>
+
+				<pre class="console">openssl rsa -noout -modulus -in <u>privateKey.key</u> | openssl md5</pre>
+
+				<pre class="console">openssl req -noout -modulus -in <u>CSR.csr</u> | openssl md5</pre>
+			</li>
+
+			<li>
+				<p>Проверить подключение SSL. Должны отобразиться все сертификаты (включая промежуточные):</p>
+
+				<pre class="console">openssl s_client -connect <u>www.paypal.com</u>:443</pre>
+			</li>
+		</ul>
+
+		<h2>4. Преобразование с помощью OpenSSL</h2>
+
+		<p>Эти команды позволяют преобразовать сертификаты и ключи в различные форматы, совместимые с определёнными типами серверов и программного обеспечения. Например, можно преобразовать обычный файл PEM, который используется с Apache, в файл PFX (PKCS#12) и использовать его с Tomcat или IIS. Воспользуйтесь нашим <a href="https://www.sslshopper.com/ssl-converter.html">инструментом для преобразования SSL, чтобы преобразовать сертификаты</a> без помощи OpenSSL.</p>
+
+		<ul>
+			<li>
+				<p>Преобразование файла DER (.crt .cer .der) в PEM:</p>
+
+				<pre class="console">openssl x509 -inform der -in <u>certificate.cer</u> -out <u>certificate.pem</u></pre>
+			</li>
+
+			<li>
+				<p>Преобразование файлов PEM в DER:</p>
+
+				<pre class="console">openssl x509 -outform der -in <u>certificate.pem</u> -out <u>certificate.der</u></pre>
+			</li>
+
+			<li>
+				<p>Преобразование файла PKCS#12 (.pfx .p12), содержащего приватный ключ и сертификат, в PEM:</p>
+
+				<pre class="console">openssl pkcs12 -in <u>keyStore.pfx</u> -out <u>keyStore.pem</u> -nodes</pre>
+
+				<p>Можно добавить опцию -nocerts, чтобы вывести только приватный ключ, или опцию -nokeys, чтобы вывести только сертификат.</p>
+			</li>
+
+			<li>
+				<p>Преобразование файла сертификата и приватного ключа PEM в PKCS#12 (.pfx .p12):</p>
+
+				<pre class="console">openssl pkcs12 -export -out <u>certificate.pfx</u> -inkey <u>privateKey.key</u> -in <u>certificate.crt</u> -certfile <u>CACert.crt</u></pre>
+			</li>
+		</ul>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Наиболее часто используемые команды OpenSSL (перевод)">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

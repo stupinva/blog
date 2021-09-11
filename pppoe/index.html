@@ -1,0 +1,177 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="pppoe,pppoe-relay,debian,rp-pppoe" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2009-06-07 -->
+		<title>Настройка PPPoE-релея в Debian</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка PPPoE-релея в Debian</h1>
+
+		<p>Хочется наконец закрыть тему с настройкой RP-PPPoE и описать описать настройку PPPoE-релея. Одной из нерассмотренных плюшек останется настройка PPPoE-сервера в связке с RADIUS-сервером, но это уже не относится напрямую к пакету RP-PPPoE, а скорее относится именно к RADIUS-серверу.</p>
+
+		<p>Напоминаю, что PPPoE-релей является своего рода шлюзом между PPPoE-сервером и PPPoE-клиентом, находящихся в разных Ethernet-сетях. PPPoE-релей устанавливается на компьютер, подключенный к обеим Ethernet-сетям. Для Ethernet-сети с клиентами он выглядит как сервер, а для Ethernet-сети с серверами выглядит как клиент.</p>
+
+		<p>И так, одной из проблем, которая мне мешала попытаться настроить PPPoE-релей было отсутствие третьего компьютера. Эту проблему я тогда наметил обойти с помощью эмуляции необходимого количества компьютеров с помощью какой-нибудь виртуальной машины. В одной из прошлых заметок я остановился на эмуляторе QEmu.</p>
+
+		<p>Для начала настроим PPPoE-сервер в соответствии с прошлыми статьями: <a href="../pppoe-server/">Настройка PPPoE-сервера в Debian</a> и <a href="../deb-pppoe/">deb-пакет и сценарии для запуска PPPoE сервера</a>.</p>
+
+		<p>С настройкой PPPoE-клиента на этот раз я решил соригинальничать. У меня есть готовый образ диска QEmu, с установленной на него NetBSD 5.0. В NetBSD имеется PPPoE-клиент, работающий на уровне ядра. Его и настроим. В файл /etc/ifconfig.pppoe0 пропишем следующее:</p>
+
+		<pre class="code">create
+!/sbin/ifconfig ne2 up
+!/sbin/pppoectl -e ne2 $int
+!/sbin/pppoectl $int myauthproto=chap 'myauthname=test' 'myauthsecret=testpasswd' hisauthproto=none max-auth-failure=1
+0.0.0.0 0.0.0.1 up</pre>
+
+		<p>Более подробно настройка QEmu и сети в QEmu описаны в двух моих статьях: <a href="../virtualbox-qemu/">Эмуляторы VirtualBox и QEmu в Debian</a> и <a href="../qemu-network/">QEmu и настройка сети</a>. О начальной настройке NetBSD можно почитать вот тут: <a href="../netbsd/">Раскручиваем свежеустановленную NetBSD</a></p>
+
+		<p>Теперь нужно заняться настройкой PPPoE-релея. Во-первых, создадим на компьютере, выполняющем роль релея, tap-интерфейс, который будет использоваться для связи с виртуальной машиной-клиентом в QEmu. Для этого в файл /etc/network/interfaces добавляем следующие строчки:</p>
+
+		<pre class="code">auto tap1
+iface tap1 inet manual
+  up ifconfig tap1 up
+  down ifconfig tap1 down
+  tunctl_user stupin</pre>
+
+		<p>Где stupin - это тот пользователь, под которым вы работаете и от имени которого запускаете QEmu.</p>
+
+		<p>Теперь, устанавливаем пакет <a href="pppoe_3.8-3_i386.deb">pppoe_3.8-3_i386.deb</a>, сборка которого рассмотрена мной в статье <a href="../deb-pppoe/">deb-пакет и сценарии для запуска PPPoE сервера</a>:</p>
+
+		<pre class="console"># wget <a href="pppoe_3.8-3_i386.deb">pppoe_3.8-3_i386.deb</a>
+# dpkg -i pppoe_3.8-3_i386.deb</pre>
+
+		<p>И зафиксируем установленный пакет, чтобы он не был замещён версией из репозитория при следующем обновлении:</p>
+
+		<pre class="console"># aptitude hold pppoe</pre>
+
+		<p>Создадим сценарий для запуска PPPoE-релея, создав файл /etc/init.d/pppoe-relay:</p>
+
+		<pre class="code">#!/bin/sh
+
+### BEGIN INIT INFO
+# Provides:          pppoe-relay
+# Required-Start:    $network $syslog
+# Required-Stop:     $network $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Roaring Peguin PPPoE relay
+# Description:       Roaring Peguin PPPoE relay
+### END INIT INFO
+
+CONFIG=/etc/default/pppoe-relay
+
+if test -f $CONFIG
+then
+  . $CONFIG
+else
+  echo "PPPoE relay: No config-file!"
+fi
+
+if test x$RUN = xno
+then
+  echo "PPPoE relay: disabled."
+  exit
+fi
+
+if test x"$OPTIONS" = x
+then
+  echo "PPPoE relay: no options defined!"
+  exit
+fi
+
+if test x$PIDFILE = x
+then
+  PIDFILE=/var/run/pppoe-relay.pid
+fi
+
+case $1 in
+  start)
+    echo -n "Starting PPPoE relay: "
+    /usr/sbin/pppoe-relay -F $OPTIONS &amp;
+    echo $! &gt; $PIDFILE
+    echo "pppoe-relay."
+    ;;
+  stop)
+    echo -n "Stopping PPPoE relay: "
+    kill `cat $PIDFILE`
+    rm $PIDFILE
+    echo "pppoe-relay."
+    ;;
+  restart)
+    $0 stop
+    $0 start
+    ;;
+  *)
+    echo "Usage: $0 start|stop|restart"
+    ;;
+esac</pre>
+
+		<p>Сделаем его исполняемым:</p>
+
+		<pre class="console"># chmod +x /etc/init.d/pppoe-relay</pre>
+
+		<p>И добавим на уровни запуска по умолчанию:</p>
+
+		<pre class="console"># update-rc.d pppoe-relay defaults</pre>
+
+		<p>Теперь создадим файл настроек PPPoE-релея /etc/default/pppoe-relay:</p>
+
+		<pre class="code"># Run pppoe-relay at startup
+RUN="yes"
+
+# Options, that provided to pppoe-relay
+OPTIONS="-S br0 -C tap1"
+
+# File with PID of pppoe-relay
+PIDFILE="/var/run/pppoe-relay.pid"</pre>
+
+		<p>Как видно из файла настроек, сеть с PPPoE-сервером подключена к интерфейсу br0, а сеть с PPPoE-клиентом - к интерфейсу tap1.</p>
+
+		<p>Запускаем pppoe-relay:</p>
+
+		<pre class="console"># invoke-rc.d pppoe-relay start</pre>
+
+		<p>Или по-старинке:</p>
+
+		<pre class="console"># /etc/init.d/pppoe-relay start</pre>
+
+		<p>Теперь пришло время запустить настроенную QEmu. Запускать её нужно с помощью следующей командной строки (она у меня прописана в сценарии netbsd.sh):</p>
+
+		<pre class="console">$ qemu -M pc -m 128 -no-kqemu -no-acpi -hda /home/stupin/netbsd-disk.bin -net nic,vlan=0 -net tap,vlan=0,ifname=tap1 -boot c</pre>
+
+		<p>Смотрим на клиенте (в NetBSD под QEmu) список интерфейсов:</p>
+
+		<pre class="console">$ ifconfig -a</pre>
+
+		<p>Если в списке появился интерфейс pppoe0 с адресами 192.168.0.2 и 192.168.0.1, значит PPPoE-подключение установлено. Если не появился - пробуем перезапустить сетевую подсистему:</p>
+
+		<pre class="console"># /etc/rc.d/network restart</pre>
+
+		<p>На сервере проверить установку связи можно по появившемуся интерфейсу с именем ppp0 (или ppp1 или ppp2) с адресами 192.168.0.1 и 192.168.0.2.</p>
+
+		<p>Для более-менее окончательного завершения разбора RP-PPPoE в Debain осталось:</p>
+
+		<ol>
+			<li>переписать сценарии запуска на использование start-stop-daemon,</li>
+
+			<li>добавить в deb-пакет сценарии pppoe-server и pppoe-relay,</li>
+
+			<li>добавить в deb-пакет post-install-сценарии вызывающие update-rc.d для добавления в систему сценариев pppoe-server и pppoe-relay,</li>
+
+			<li>добавить в deb-пакет файлы настроек pppoe-server, pppoe-relay, pppoe-server-options,</li>
+
+			<li>отправить мэнтейнеру пакета pppoe все эти скрипты и файлы настроек,</li>
+
+			<li>написать на основе этой и предыдущих статей подробное руководство по настройке PPPoE-клиента, сервера и релея.</li>
+		</ol>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка PPPoE-релея в Debian">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

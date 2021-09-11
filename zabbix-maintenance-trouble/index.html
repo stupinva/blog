@@ -1,0 +1,122 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="zabbix" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2020-09-20 -->
+		<title>Исправление доступа к периодам обслуживания в Zabbix 3.4</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Исправление доступа к периодам обслуживания в Zabbix 3.4</h1>
+
+		<p>В статье <a href="../zabbix-manual-close-troubles/">Исправление ручного закрытия проблем в Zabbix 3.4</a> я уже описывал, как дать права на ручное закрытие проблем пользователям, не имеющим прав редактирования узла. Похожая ситуация возникла и с редактированием периодов обслуживания. Для того, чтобы предоставить пользователю права редактировать периоды обслуживания, нужно дать ему права на редактирование самого узла. Пользователь, имеющий доступ к редактированию узла в Zabbix, может злоупотребить своими правами и просто снять с контроля узел на время его обслуживания. Ещё хуже, если этот пользователь по окончании обслуживания забудет вернуть узел на контроль.</p>
+
+		<p>Чтобы избежать подобных злоупотреблений, может быть лучше выдать права создавать и редактировать периоды обслуживания всем пользователям, имеющим права на просмотр соответствующей группы узлов. Именно такое изменение внёс в исходный код веб-интерфейса Zabbix мой коллега Кирилл. Изменил он два файла: frontends/php/include/classes/api/services/CMaintenance.php и frontends/php/maintenance.php. Первый файл исправляет права доступа в методах <a href="https://www.zabbix.com/documentation/3.4/manual/api/reference/maintenance">API maintenance</a>, причём права удалять периоды обслуживания при помощи метода delete пользователю, не имеющему доступа к группе узлов, не предоставляется. Второй файл исправляет права доступа к периодам обслуживания непосредственно через сам веб-интерфейс Zabbix. Получившаяся заплатка выглядит следующим образом:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/frontends/php/include/classes/api/services/CMaintenance.php
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/frontends/php/include/classes/api/services/CMaintenance.php
++++ zabbix-3.4.12-1+buster/frontends/php/include/classes/api/services/CMaintenance.php
+@@ -276,7 +276,6 @@ class CMaintenance extends CApiService {
+                // hosts permissions
+                $options = [
+                        'hostids' =&gt; $hostids,
+-                       'editable' =&gt; true,
+                        'output' =&gt; ['hostid'],
+                        'preservekeys' =&gt; true
+                ];
+@@ -289,7 +288,6 @@ class CMaintenance extends CApiService {
+                // groups permissions
+                $options = [
+                        'groupids' =&gt; $groupids,
+-                       'editable' =&gt; true,
+                        'output' =&gt; ['groupid'],
+                        'preservekeys' =&gt; true
+                ];
+@@ -458,7 +456,6 @@ class CMaintenance extends CApiService {
+                        'selectGroups' =&gt; ['groupid'],
+                        'selectHosts' =&gt; ['hostid'],
+                        'selectTimeperiods' =&gt; API_OUTPUT_EXTEND,
+-                       'editable' =&gt; true,
+                        'preservekeys' =&gt; true
+                ]);
+ 
+@@ -580,7 +577,6 @@ class CMaintenance extends CApiService {
+                        $db_hosts = API::Host()-&gt;get([
+                                'output' =&gt; [],
+                                'hostids' =&gt; $hostids,
+-                               'editable' =&gt; true,
+                                'preservekeys' =&gt; true
+                        ]);
+ 
+@@ -598,7 +594,6 @@ class CMaintenance extends CApiService {
+                        $db_groups = API::HostGroup()-&gt;get([
+                                'output' =&gt; [],
+                                'groupids' =&gt; $groupids,
+-                               'editable' =&gt; true,
+                                'preservekeys' =&gt; true
+                        ]);
+ 
+Index: zabbix-3.4.12-1+buster/frontends/php/maintenance.php
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/frontends/php/maintenance.php
++++ zabbix-3.4.12-1+buster/frontends/php/maintenance.php
+@@ -105,7 +105,6 @@ if (isset($_REQUEST['maintenanceid'])) {
+        $dbMaintenance = API::Maintenance()-&gt;get([
+                'output' =&gt; API_OUTPUT_EXTEND,
+                'selectTimeperiods' =&gt; API_OUTPUT_EXTEND,
+-               'editable' =&gt; true,
+                'maintenanceids' =&gt; getRequest('maintenanceid'),
+        ]);
+        if (empty($dbMaintenance)) {
+@@ -412,7 +411,6 @@ if (!empty($data['form'])) {
+                        'maintenanceids' =&gt; $data['maintenanceid'],
+                        'real_hosts' =&gt; true,
+                        'output' =&gt; ['hostid'],
+-                       'editable' =&gt; true
+                ]);
+                $data['hostids'] = zbx_objectValues($data['hostids'], 'hostid');
+ 
+@@ -458,7 +456,6 @@ if (!empty($data['form'])) {
+ 
+        // get groups
+        $data['all_groups'] = API::HostGroup()-&gt;get([
+-               'editable' =&gt; true,
+                'output' =&gt; ['groupid', 'name'],
+                'real_hosts' =&gt; true,
+                'preservekeys' =&gt; true
+@@ -475,7 +472,6 @@ if (!empty($data['form'])) {
+        $data['hosts'] = API::Host()-&gt;get([
+                'output' =&gt; ['hostid', 'name'],
+                'real_hosts' =&gt; true,
+-               'editable' =&gt; true,
+                'groupids' =&gt; $data['twb_groupid']
+        ]);
+ 
+@@ -483,7 +479,6 @@ if (!empty($data['form'])) {
+        $hostsSelected = API::Host()-&gt;get([
+                'output' =&gt; ['hostid', 'name'],
+                'real_hosts' =&gt; true,
+-               'editable' =&gt; true,
+                'hostids' =&gt; $data['hostids']
+        ]);
+        $data['hosts'] = array_merge($data['hosts'], $hostsSelected);
+@@ -532,7 +527,6 @@ else {
+                'search' =&gt; [
+                        'name' =&gt; ($filter['name'] === '') ? null : $filter['name']
+                ],
+-               'editable' =&gt; true,
+                'sortfield' =&gt; $sortField,
+                'sortorder' =&gt; $sortOrder,
+                'limit' =&gt; $config['search_limit'] + 1</pre>
+
+		<p>Эту заплатку можно взять по ссылке <a href="zabbix3_4_12_permit_edit_maintenances.patch">zabbix3_4_12_permit_edit_maintenances.patch</a>.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Исправление доступа к периодам обслуживания в Zabbix 3.4">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

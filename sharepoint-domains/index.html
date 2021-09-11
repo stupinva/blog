@@ -1,0 +1,31 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="windows,sharepoint" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2010-10-08 -->
+		<title>Добавление альтернативных имён портала SharePoint Services</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Добавление альтернативных имён портала SharePoint Services</h1>
+
+		<p>Пишу себе на память. Вот по этой ссылке можно найти всю интересующую информацию по сабжу: <a href="http://www.toddklindt.com/blog/Lists/Posts/Post.aspx?ID=39">Update to using External URLs with WSS v3</a></p>
+
+		<p>Можно воспользоваться "Центром администрирования", меню "Операции", пунктом "Сопоставления для альтернативного доступа" и прописать там альтернативное имя портала.</p>
+
+		<p>Я воспользовался командой следующего вида:</p>
+
+		<pre class="console">STSADM.EXE -o addalternatedomain -url http://portal -incomingurl http://anothername -urlzone intranet</pre>
+
+		<p>Затем добавил новое имя на DNS-сервере и портал стал доступен под двумя именами одновременно.</p>
+
+		<p>Делается это с целью последующего переименования сервера в имя, соответствующее корпоративному стандарту. Затем сервер будет переведён из домена филиала в общекорпоративный домен по уже обкатанной мной технологии: <a href="../sharepoint/">Миграция портала SharePoint Services в домен Active Directory</a>.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Добавление альтернативных имён портала SharePoint Services">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

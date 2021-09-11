@@ -1,0 +1,62 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="stretch,debian,linux,xfce" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2019-03-24 -->
+		<title>Проблема с XFCE</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Проблема с XFCE</h1>
+
+		<p>Столкнулся на одном из компьютеров со странной проблемой - не удаётся выключить компьютер через меню XFCE:</p>
+
+		<img src="exit0.png" />
+
+		<p>В открывшемся диалоговом окне выбираем "Выключить":</p>
+
+		<img src="exit1.png" />
+
+		<p>Кнопка нажимается успешно, но вот дальше ничего не происходит.</p>
+
+		<p>Последующие попытки повторить те же действия приводят к ошибке. После нажатия пункта "Выйти" в меню XFCE появляется сообщение об ошибке:</p>
+
+		<img src="exit2.png" />
+
+		<p>Процитирую надпись с картинки: "Получена ошибка при попытке завершения сеанса. Менеджер сеансов ожидает завершение работы системы. Пожалуйста подождите". Не буду сейчас придираться к грамотности сообщения (Ошибка не получена, а произошла. Ожидает чего? Завершени<b>я</b>. "Пожалуйста<b>,</b> подождите").</p>
+
+		<p>На всякий случай, приведу также сообщения на английском языке: "Received error while trying to log out. Session manager must be in idle state when requesting a shutdown"</p>
+
+		<p>Сколько ни искал в интернете решения проблемы, ничего годного найти не смог. В итоге помогло... Чтение журналов! В домашнем каталоге пользователя есть журнал .xsession-error, в котором моё внимание привлекли две подозрительные строчки:</p>
+
+		<pre class="code">/etc/xdg/xfce4/xinitrc: 85: /etc/xdg/xfce4/xinitrc: <b>xrdb: not found</b>
+
+** (xfce4-session:4149): CRITICAL **: polkit_unix_process_set_property: assertion 'val != -1' failed
+sh: 1: <b>/usr/bin/iceauth: not found</b></pre>
+
+		<p>Я поискал, в каких пакетах находятся недостающие файлы xrdb и iceauth:</p>
+
+		<pre class="console">$ apt-file search xrdb | grep /xrdb$
+bash-completion: /usr/share/bash-completion/completions/xrdb
+x11-xserver-utils: /usr/bin/xrdb
+$ apt-file search iceauth | grep /iceauth$
+x11-xserver-utils: /usr/bin/iceauth</pre>
+
+		<p>Как видно из результатов поиска, оба файла находятся в пакете x11-xserver-utils. Установим недостающий пакет:</p>
+
+		<pre class="console"># apt-get install x11-xserver-utils</pre>
+
+		<p>Принудительно перезапустим дисплейный менеджер:</p>
+
+		<pre class="console"># systemctl restart lightdm</pre>
+
+		<p>Пробуем выключить компьютер снова - теперь всё получается!</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Проблема с XFCE">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

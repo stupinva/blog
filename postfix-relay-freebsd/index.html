@@ -1,0 +1,145 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="postfix,8.2,freebsd" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2016-03-06 -->
+		<title>Postfix как локальный SMTP-ретранслятор во FreeBSD</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Postfix как локальный SMTP-ретранслятор во FreeBSD</h1>
+
+		<p>Ранее я уже настраивал Postfix в Debian: <a href="../postfix-relay/">Postfix как локальный SMTP-ретранслятор</a>. Здесь я выложу ту же заметку, адаптированную применительно к FreeBSD.</p>
+
+		<p>Установим Postfix из портов:</p>
+
+		<pre class="console"># cd /usr/ports/mail/postfix</pre>
+
+		<p>В процессе установки этого порта оставим отмеченными только опции SASL2 и TLS. Как зависимость опции SASL2 будет установлен также порт security/cyrus-sasl2. У этого порта я оставил отмеченными только опции CRAM, DIGEST, LOGIN и PLAIN.</p>
+
+		<p>Настроим Postfix для отправки почты с подменой отправителя и аутентификацией на сервере провайдера. Настроим в файле /usr/local/etc/postfix/main.cf следующую конфигурацию:</p>
+
+		<pre class="code"># Имя сервера и его почтового домена
+myhostname = server.domain.tld
+mydomain = domain.tld
+
+# Откуда и для кого принимать почту к доставке
+inet_protocols = ipv4
+inet_interfaces = 127.0.0.1
+mydestination = $myhostname, localhost.$mydomain, localhost
+mynetworks = 127.0.0.0/8
+
+# К адресам локальных отправителей добавлять этот домен
+masquerade_domains = domain.tld
+
+# Карта соответствия локальных получателей адресам на почтовом сервере ISP  
+alias_maps = hash:/etc/mail/aliases
+alias_database = hash:/etc/mail/aliases
+
+# Карта соответствия локальных отправителей ящикам на почтовом сервере ISP  
+sender_canonical_maps = hash:/usr/local/etc/postfix/sender_maps
+
+# Включаем использование аутентификации на сервере провайдера
+smtp_sasl_auth_enable = yes
+smtp_sasl_password_maps = hash:/usr/local/etc/postfix/passwords
+
+# Включаем выбор учётных данных на сервере провайдера в зависимости от отправителя
+smtp_sender_dependent_authentication = yes
+sender_dependent_relayhost_maps = hash:/usr/local/etc/postfix/sender_relays
+
+# Если в таблице отправителей нет соответствия, использовать этот почтовый сервер ISP
+relayhost = [mailserver.domain.tld]:587
+
+# Устанавливаем не более одного исходящего подключения на каждый домен
+default_destination_concurrency_limit = 1
+
+# Разрешаем использовать механизмы аутентификации PLAIN и LOGIN
+smtp_sasl_security_options = noanonymous
+smtp_sasl_tls_security_options = noanonymous
+smtp_sasl_mechanism_filter = plain, login</pre>
+
+		<p>Теперь создадим необходимые карты. Укажем в файле /etc/mail/aliases, на какие ящики на сервере провайдера перенаправлять почту для локальных пользователей:</p>
+
+		<pre class="code">postmaster root
+root recipient@domain.tld</pre>
+
+		<p>Почта для пользователя root будет перенаправляться в ящик recipient@domain.tld.</p>
+
+		<p>Укажем в файле /usr/local/etc/postfix/sender_maps, какой ящик на сервере провайдера использовать для отправки почты от локального отправителя:</p>
+
+		<pre class="code">root sender@domain.tld</pre>
+
+		<p>Когда пользователь root попытается отправить письмо, то на сервер провайдера оно уйдёт от отправителя sender@domain.tld.</p>
+
+		<p>Укажем в файле /usr/local/etc/postfix/sender_relays, какой сервер следует использовать для отправки писем от определённого отправителя:</p>
+
+		<pre class="code">sender@domain.tld [mailserver.domain.tld]:587</pre>
+
+		<p>Когда пользователь root попытается отправить почту, письмо, в соответствии с настройками в файле /usr/local/etc/postfix/sender_maps, будет отправлено с адреса sender@domain.tld. Письмо от этого отправителя нужно отправить через порт 587 сервера mailserver.domain.tld.</p>
+
+		<p>Укажем в файле /usr/local/etc/postfix/passwords учётные данные каждого из ящиков на сервере провайдера:</p>
+
+		<pre class="code">sender@domain.tld sender:password</pre>
+
+		<p>Когда пользователь root попытается отправить почту, письмо, в соответствии с настройками в файле /usr/local/etc/postfix/sender_maps, будет отправлено с адреса sender@domain.tld. Письмо от этого отправителя, в соответствии с настройками в файле /usr/local/etc/postfix/sender_relays, нужно отправить через порт 587 сервера mailserver.domain.tld. В соответствии с настройками в этом файле для аутентификации на сервере провайдера нужно будет использовать имя пользователя sender и пароль password.</p>
+
+		<p>Для файла /usr/local/etc/postfix/passwords стоит задать разрешения, ограничивающие возможность подсмотреть пароли локальными пользователями системы:</p>
+
+		<pre class="console"># chown root:root /usr/local/etc/postfix/passwords
+# chmod u=rw,g=r,o= /usr/local/etc/postfix/passwords</pre>
+
+		<p>При каждом обновлении файлов карт нужно не забывать обновлять их двоичные копии одной из следующих команд:</p>
+
+		<pre class="console"># postalias /etc/mail/aliases
+# postmap /usr/local/etc/postfix/sender_maps
+# postmap /usr/local/etc/postfix/sender_relays
+# postmap /usr/local/etc/postfix/passwords</pre>
+
+		<p>Двоичные копиии имеют то же имя, но с расширением .db. Права доступа к оригинальному файлу полностью переносятся и на его двоичную копию.</p>
+
+		<p>Теперь нужно отключить использование sendmail и включить postfix. Для этого отредатируем файл /etc/rc.conf, вписав в него следующие опции:</p>
+
+		<pre class="code">postfix_enable="YES"
+sendmail_enable="NO"
+sendmail_submit_enable="NO"
+sendmail_outbound_enable="NO"
+sendmail_msp_queue_enable="NO"</pre>
+
+		<p>Для отключения служебных периодически запускаемых скриптов sendmail впишем в файл /etc/periodic.conf следующие опции:</p>
+
+		<pre class="code">daily_clean_hoststat_enable="NO"
+daily_status_mail_rejects_enable="NO"
+daily_status_include_submit_mailq="NO"
+daily_submit_queuerun="NO"</pre>
+
+		<p>В процессе установки порта postfix предлагается заменить содержимое файла /etc/mail/mailer.conf. Если вы отказались, можно исправить упущение, вписав в него следующие настройки:</p>
+
+		<pre class="code">#
+# Execute the Postfix sendmail program, named /usr/local/sbin/sendmail
+#
+sendmail        /usr/local/sbin/sendmail
+send-mail       /usr/local/sbin/sendmail
+mailq           /usr/local/sbin/sendmail
+newaliases      /usr/local/sbin/sendmail</pre>
+
+		<p>Теперь, когда с настройкой покончено, настало время остановить sendmail и запустить вместо него postfix. Для этого выполним следующие команды:</p>
+
+		<pre class="console"># /etc/rc.d/sendmail stop
+# /usr/local/etc/rc.d/postfix start</pre>
+
+		<p>Осталось проверить правильность работы системы. Попробуем отправить тестовое письмо от имени пользователя root пользователю root:</p>
+
+		<pre class="console"># mail -s test root
+test
+.</pre>
+
+		<p>На ящик recipient@domain.tld должно прийти письмо от ящика sender@domain.tld.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Postfix как локальный SMTP-ретранслятор во FreeBSD">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

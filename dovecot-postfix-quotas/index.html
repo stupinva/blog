@@ -1,0 +1,186 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="dovecot,postfix,quotas" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2011-11-24 -->
+		<title>Настройка квот в Dovecot и Postfix с хранением счётчиков и правил в словаре MySQL</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка квот в Dovecot и Postfix с хранением счётчиков и правил в словаре MySQL</h1>
+
+		<p>Уже третий день подряд мучился с настройкой квот в Dovecot прямо на работающем сервере. Мучился очень аккуратно и имея в запасе бэкапы рабочих конфигураций на начало каждого дня.</p>
+
+		<p>Хранение счётчиков квот в MySQL настроил быстро, формирование правил квот по данным из MySQL тоже настроил быстро. Однако после настройки текущие значения счётчиков квот становились отрицательными и со временем только уменьшались. Я сразу подумал, что POP3-сервер обновляет счётчики квот, т.к. его задача лишь забирать почту из ящика, а вот LDA (агент локальной доставки) - не обновляет, т.к. именно он кладёт почту в ящики и должен увеличивать значения счётчиков.</p>
+
+		<p>В конечном итоге оказалось, что вместо LDA delivery из Dovecot по-прежнему используется LDA virtual из Postfix. Произошло это потому что действие настройки virtual_transport = dovecot перекрывается настройкой transport_maps = mysql:/etc/postfix/sql/transport.cf, где для тестируемого домена был настроен транспорт virtual. Здесь можно поблагодарить Вьетце Венема за отличную документацию - это я прочитал прямо в man 5 postconf. Dovecot практически не документирован, а вики-страницы с Howto по настройке различных фишек Dovecot за документацию я не считаю.</p>
+
+		<p>После исправления значения транспорта в базе данных возникло ещё несколько проблем:</p>
+
+		<ol>
+			<li>В настройках LDA Dovecot не был указан параметр postmaster_address,</li>
+
+			<li>Не был настроен сокет /var/run/dovecot/auth-master,</li>
+
+			<li>Имена каталогов, в которые LDA delivery из Dovecot складывал почту, были строчными, а имена существующих каталогов почтовых ящиков, в которые складывал почту LDA virtual из Postfix, содержали символы в разном регистре.</li>
+		</ol>
+
+		<p>Проблемы решались следующим образом:</p>
+
+		<ol>
+			<li>Указан параметр postmaster_address,</li>
+
+			<li>Прописана секция master в секции socket listen из секции auth default,</li>
+
+			<li>
+				<ol>
+					<li>Добавлены буквы L в настройке mail_location, которые указывают принудительно использовать нижний регистр для каталогов почтовых ящиков.</li>
+
+					<li>3.2. Использована команда rename 'y/A-Z/a-z/' * для того, чтобы переименовать каталоги почтовых ящиков. Некоторые каталоги, из которых уже успели попробовать забрать почту, пришлось обрабатывать вручную - нужно было перенести письма из старых каталогов в новые, а старые затем удалить.</li>
+				</ol>
+			</li>
+		</ol>
+
+		<p>Итоговые конфигурационные файлы Dovecot помещаю сюда, чтобы в следующий раз не наступать на те же грабли:</p>
+
+		<pre class="code">protocols = pop3
+disable_plaintext_auth = no
+log_timestamp = "%Y-%m-%d %H:%M:%S "
+mail_location = maildir:/var/mail/virtual/%Ld/%Ln
+first_valid_uid = 999
+first_valid_gid = 999
+
+dict {
+  quotadict = mysql:/etc/dovecot/dovecot-dict-mysql.conf
+}
+plugin {
+  quota = dict:user::proxy::quotadict
+  # Квота по умолчанию - объём ящика 1 гигабайт,
+  # не более 1000 писем в ящике
+  # Эта квота заменяется квотой, найденной в БД
+  quota_rule = *:storage=1G:messages=1000
+}
+protocol pop3 {
+  mail_plugins = quota
+  mail_executable = /etc/dovecot/pop-update-lastlog.sh
+}
+protocol lda {
+  # Ящик администратора почтовой системы
+  postmaster_address = postadmin@domain.tld
+  mail_plugins = quota
+}
+
+# Домен по умолчанию для пользователей, пытающихся
+# аутентифицироваться в Dovecot без указания домена
+auth_default_realm = domain.tld
+
+auth default {
+  mechanisms = plain login
+  passdb sql {
+    args = /etc/dovecot/dovecot-mysql.conf
+  }
+  userdb sql {
+    args = /etc/dovecot/dovecot-mysql.conf
+  }
+  socket listen {
+    client {
+      path = /var/spool/postfix/private/auth
+      mode = 0660
+      user = postfix
+      group = postfix
+    }
+    master {
+      path = /var/run/dovecot/auth-master
+      mode = 0660
+      user = vmail
+      group = vmail
+    }
+  }
+}</pre>
+
+		<p>Уже знакомый скрипт /etc/dovecot/pop-before-smtp.sh для аутентификации POP before SMTP:</p>
+
+		<pre class="code">#!/bin/sh
+
+mysql -u<b>user</b> -p<b>password</b> -h127.0.0.1 mail &lt;&lt;END
+UPDATE users SET lasttime = NOW(), lastip='$IP' WHERE login = '$USER';
+END
+exec <b>/usr/lib/dovecot/pop3</b> "$@"</pre>
+
+		<p>Файл настроек для хранения счётчиков квот в БД MySQL /etc/dovecot/dovecot-dict-mysq.conf:</p>
+
+		<pre class="code">connect = host=127.0.0.1 dbname=mail user=<b>user</b> password=<b>password</b>
+map {
+  pattern = priv/quota/storage
+  table = users
+  username_field = login
+  value_field = bytes
+}
+map {
+  pattern = priv/quota/messages
+  table = users
+  username_field = login
+  value_field = messages
+}</pre>
+
+		<p>Файл настроек для проверки учётных данных пользователя и его квот по таблице в БД MySQL /etc/dovecot/dovecot-mysql.conf:</p>
+
+		<pre class="code">driver = mysql
+connect = host=127.0.0.1 dbname=mail user=<b>user</b> password=<b>password</b>
+default_pass_scheme = CRYPT
+password_query = SELECT password \
+                 FROM users \
+                 WHERE login = '%u'
+user_query = SELECT CONCAT(SUBSTRING_INDEX(login, '@', -1), '/', SUBSTRING_INDEX(login, '@', 1), '/'), \
+                    999 AS uid, \
+                    999 AS gid, \
+                    CONCAT('*:bytes=', max_bytes, ':messages=', max_messages) AS quota_rule \
+             FROM users \
+             WHERE login = '%u'</pre>
+
+		<p>В настройки postfix добавлен LDA delivery из Dovecot, в файл /etc/postfix/master.cf добавлены две строчки:</p>
+
+		<pre class="code">dovecot unix - n n - - pipe
+flags=DRhu user=vmail:vmail argv=/usr/lib/dovecot/deliver -f ${sender} -d ${recipient}</pre>
+
+		<p>Столбцы со счётчиками и со значениями квот для пользователей добавлены с помощью четырёх SQL-запросов:</p>
+
+		<pre class="code">ALTER TABLE users ADD COLUMN bytes bigint default 0;
+ALTER TABLE users ADD COLUMN messages integer default 0;
+ALTER TABLE users ADD COLUMN max_bytes bigint default 1073741824;
+ALTER TABLE users ADD COLUMN max_messages bigint default 1000;</pre>
+
+		<p>Значения квот по умолчанию можете поменять на свои. Я поставил ограничения в 1 гигабайт на общий объём ящика и не более 1000 писем в одном почтовом ящике.</p>
+
+		<p>В таком виде Dovecot не будет принимать от Postfix письма для адресатов, превысивших квоту. Но такие письма будут просто попадать в очередь отложенных писем Postfix. Нужно же, чтобы письмо не занимало дисковое пространство ни в почтовом ящике получателя, ни в очереди отложенных писем, а отклонялось сразу же с соответствующим сообщением отправителю о том, что адресат превысил квоту.</p>
+
+		<p>Для этого нужно настроить проверку квот при приёме почты самим Postfix'ом. Для этого воспользуемся правилом check_recipient_access mysql:/etc/postfix/sql/quotas.cf, которое нужно поместить в том числе до правил permit_mynetworks и permit_sasl_authenticated. Если поместить его после этих двух проверок, то квоты получателя просто не будут проверяться, если отправитель аутентифицировался на почтовом сервере или он отправляет почту из доверенной сети.</p>
+
+		<p>Файл /etc/postfix/sql/quotas.cf для проверки квоты получателя:</p>
+
+		<pre class="code">user = <b>user</b>
+password = <b>password</b>
+dbname = mail
+hosts = 127.0.0.1
+query = SELECT '452 Mailbox is over quota'
+        FROM users
+        WHERE login = '%s'
+          AND ((bytes &gt;= max_bytes AND max_bytes &gt; 0)
+            OR (messages &gt;= max_messages AND max_messages &gt; 0))</pre>
+
+		<p>О расширенных статусах REJECT я прочитал в man 5 access, а подходящий код статуса подобрал в RFC2821 на этой странице: <a href="http://tools.ietf.org/html/rfc2821">http://tools.ietf.org/html/rfc2821</a>.</p>
+
+		<p>В случае если квота по объёму или по количеству сообщений равна нулю, то этот SQL-запрос такую квоту не проверяет. Таким образом значения 0 в полях max_bytes или max_messages означают, что ограничение по этому параметру не действует.</p>
+
+		<p>При попытке отправить письмо на ящик, превысивший квоту, Outlook Express сообщает следующее:</p>
+
+		<pre class="code">Не удается отправить сообщение, поскольку сервер отказался принять адрес одного из получателей. В письме был указан адрес: 'user@domain.tld'. Тема 'test1', Учетная запись: 'mail', Сервер: 'domain.tld', Протокол: SMTP, Ответ сервера: '452 4.7.1 &lt;user@domain.tld&gt;: Recipient address rejected: Mailbox is over quota', Порт: 25, Защита (SSL): Нет, Ошибка сервера: 452, Код ошибки: 0x800CCC79</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка квот в Dovecot и Postfix с хранением счётчиков и правил в словаре MySQL">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

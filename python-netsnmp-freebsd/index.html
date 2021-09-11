@@ -1,0 +1,106 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="patch,python,freebsd,troubleshooting,snmp,8.2" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2016-02-14 -->
+		<title>Исправление Python-прослойки библиотеки Net-SNMP во FreeBSD</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Исправление Python-прослойки библиотеки Net-SNMP во FreeBSD</h1>
+
+		<p>Ещё одна заметка, ссылка на которую мне может в дальнейшем понадобиться. В целом заметка повторяет предыдущую, но адаптирована на этот раз применительно к FreeBSD.</p>
+
+		<p>Ниже описано, как я исправил отправку параметров типа IPADDR в запросах SNMP SET в пакете net-snmp-5.7.2_2 во FreeBSD 8.2 своим патчем.</p>
+
+		<p>Перейдём в каталог порта:</p>
+
+		<pre class="console"># cd /usr/ports/net-mgmt/net-snmp</pre>
+
+		<p>Создадим в каталоге порта files файл патча под именем patch-python__netsnmp__client_intf.c со следующим содержимым:</p>
+
+		<pre class="code">--- python/netsnmp/client_intf.c        2010-02-10 15:04:31.000000000 +0500
++++ python.new/netsnmp/client_intf.c    2014-12-21 18:10:26.677816256 +0500
+@@ -979,14 +979,20 @@
+
+       case TYPE_IPADDR:
+         vars-&gt;type = ASN_IPADDRESS;
+-        vars-&gt;val.integer = (long *)malloc(sizeof(long));
++        in_addr_t addr = 0;
+         if (val)
+-            *(vars-&gt;val.integer) = inet_addr(val);
++            addr = inet_addr(val);
++
++        if (addr &amp;&amp; (addr != -1)) {
++            vars-&gt;val.string = malloc(sizeof(in_addr_t));
++            vars-&gt;val_len = sizeof(in_addr_t);
++            memcpy(vars-&gt;val.string, &amp;addr, sizeof(in_addr_t));
++        }
+         else {
+             ret = FAILURE;
+-            *(vars-&gt;val.integer) = 0;
++            vars-&gt;val.string = (u_char*)strdup("");
++            vars-&gt;val_len = 0;
+         }
+-        vars-&gt;val_len = sizeof(long);
+         break;
+
+       case TYPE_OBJID:
+@@ -2426,6 +2432,7 @@
+          goto done;
+        }
+        memcpy(tmp_val_str, val, tmplen);
++        tmp_val_str[tmplen] = '\0';
+        if (type==TYPE_INTEGER &amp;&amp; use_enums &amp;&amp; tp &amp;&amp; tp-&gt;enums) {
+          for(ep = tp-&gt;enums; ep; ep = ep-&gt;next) {
+            if (val &amp;&amp; !strcmp(ep-&gt;label, val)) {</pre>
+
+		<p>Теперь очистим порт и распакуем исходники, не накладывая никаких патчей:</p>
+
+		<pre class="console"># make clean
+# make extract</pre>
+
+		<p>Перейдём в каталог с распакованными исходными текстами:</p>
+
+		<pre class="console"># cd work/net-snmp-5.7.2/</pre>
+
+		<p>Наложим имеющийся патч, игнорируя пробелы и несовпадение номеров строк, указанных в патче:</p>
+
+		<pre class="console"># patch -Np0 --ignore-whitespace &lt; ../../files/patch-python__netsnmp__client_intf.c</pre>
+
+		<p>Перейдём в каталог порта и пересоздадим файл патча files/patch-python__netsnmp__client_intf.c, в котором теперь пробелы и номера строк выставятся так, чтобы соответствовать исходникам из порта:</p>
+
+		<pre class="console"># cd ../..
+# make makepatch</pre>
+
+		<p>Очистим теперь файлы, созданные портом:</p>
+
+		<pre class="console"># make clean</pre>
+
+		<p>Распакуем и наложим на исходники все патчи, включая наш:</p>
+
+		<pre class="console"># make patch</pre>
+
+		<p>Если ошибок не было, можно собрать порт:</p>
+
+		<pre class="console"># make</pre>
+
+		<p>Если порт собрался успешно, его можно установить:</p>
+
+		<pre class="console"># make install</pre>
+
+		<p>Если порт ранее уже был установлен из той же версии портов, с которой мы только что работали, то можно безболезненно заменить файлы порта:</p>
+
+		<pre class="console"># make deinstall
+# make install</pre>
+
+		<p>Если же имеющийся в системе пакет был установлен из другой версии портов, тогда для обновления этого порта и всех зависящих от него рекомендую воспользоваться инструментом portupgrade. Рассмотрение этого инструмента я оставлю за рамками этой заметки.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Исправление Python-прослойки библиотеки Net-SNMP во FreeBSD">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

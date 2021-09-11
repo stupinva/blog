@@ -1,0 +1,160 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="lighttpd,wordpress,linux,debian,php,wheezy,mysql" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2014-03-02 -->
+		<title>Установка и настройка Wordpress</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Установка и настройка Wordpress</h1>
+
+		<p>Пока не о чем писать, достану из закромов немного тривиальщины.</p>
+
+		<h2>1. Установка</h2>
+
+		<p>Wordpress будет работать под управлением веб-сервера Lighttpd и будет использовать базу данных в MySQL. Сам Wordpress написан на PHP. Перед тем как устанавливать сам Wordpress, установим необходимые пакеты, если они ещё не были установлены:</p>
+
+		<pre class="console"># apt-get install mysql-server mysql-client lighttpd php5-cgi</pre>
+
+		<p>Ставим пакет с wordpress и пакет с локализациями:</p>
+
+		<pre class="console"># apt-get install wordpress wordpress-l10n</pre>
+
+		<p>Смотрим, что есть полезного в пакете wordpress, что может помочь в настройке сервера:</p>
+
+		<pre class="console">$ dpkg -L wordpress</pre>
+
+		<p>Я отметил три момента:</p>
+
+		<ul>
+			<li>Файлы Wordpress располагаются в каталоге /usr/share/wordpress</li>
+
+			<li>Есть пример настройки Apache в файле /usr/share/doc/wordpress/examples/apache.conf</li>
+
+			<li>Есть пример настройки самого Wordpress в файле /usr/share/wordpress/wp-config-sample.php</li>
+		</ul>
+
+		<h2>2. Настройка Lighttpd</h2>
+
+		<p>Меня заинтересовал вариант настройки "defined Virtual host" и я подготовил файл /etc/lighttpd/conf-enabled/50-wordpress.conf с таким содержанием:</p>
+
+		<pre class="code">$HTTP["host"] == "blog.domain.tld" {
+  server.document-root = "/usr/share/wordpress"
+  alias.url += ( "/wp-content" =&gt; "/var/lib/wordpress/wp-content" )
+  $HTTP["url"] =~ "^/" {
+    server.follow-symlink = "enable"
+  }
+}</pre>
+
+		<p>Осталось включить модули fastcgi, fastcgi-php, новоиспечённый нами "модуль" wordpress и перезапустить веб-сервер:</p>
+
+		<pre class="console"># lighty-enable-mod fastcgi fastcgi-php wordpress
+# /etc/init.d/lighttpd restart</pre>
+
+		<p>На данный момент уже можно зайти в блог, однако будет выведено сообщение, что он ещё не настроен.</p>
+
+		<h2>3. Настройка Wordpress</h2>
+
+		<p>Для настройки блога скопируем заготовку настроек в файл /etc/wordpress/config-blog.domain.tld.php:</p>
+
+		<pre class="console"># cp /usr/share/wordpress/wp-config-sample.php /etc/wordpress/config-blog.domain.tld.php</pre>
+
+		<p>Зададим настройки подключения к базе данных:</p>
+
+		<pre class="code">define('DB_NAME', 'database');
+define('DB_USER', 'user');
+define('DB_PASSWORD', 'blog_password');</pre>
+
+		<p>Обычно для пользователей, которые не будут вводить пароль вручную, я генерирую случайный пароль длиной 16 символов при помощи программы pwgen, которую можно установить из одноимённого пакета:</p>
+
+		<pre class="console">$ pwgen 16</pre>
+
+		<p>Сгенерированный пароль можно использовать вместо blog_password в примере выше.</p>
+
+		<p>Укажем, что таблицы блога blog.domain.tld должны иметь префикс blog_:</p>
+
+		<pre class="code">$table_prefix  = 'blog_';</pre>
+
+		<p>Пропишем русский язык в настройки блога:</p>
+
+		<pre class="code">define('WPLANG', 'ru_RU');</pre>
+
+		<p>Посмотреть, какие языки поддерживаются можно в пакете wordpress-l10n такой командой:</p>
+
+		<pre class="console">$ dpkg -L wordpress-l10n</pre>
+
+		<p>Если там есть файл с расширением mo, то его имя можно прописать в настройки.</p>
+
+		<h2>4. Настройка базы данных</h2>
+
+		<p>Осталось создать базу данных и пользователя. Для этого подключаемся к базе данных с правами администратора:</p>
+
+		<pre class="console">$ mysql -uroot -p mysql</pre>
+
+		<p>Создадим базу данных:</p>
+
+		<pre class="code">CREATE DATABASE blog CHARSET UTF8;</pre>
+
+		<p>Создадим пользователя, от имени которого движок блога будет подключаться к базе данных, а вместо blog_password подставим сгенерированный пароль:</p>
+
+		<pre class="code">INSERT INTO user(user, password, host) VALUES('blog', PASSWORD('blog_password'), 'localhost');
+FLUSH PRIVILEGES;</pre>
+
+		<p>Дадим новому пользователю права на полный доступ к базе данных:</p>
+
+		<pre class="code">GRANT ALL ON blog.* TO blog@localhost;
+FLUSH PRIVILEGES;</pre>
+
+		<h2>5. Настройка блога</h2>
+
+		<p>Для окончательной настройки блога нужно перейти по ссылке http://blog.domain.tld/wp-admin/install.php и заполнить форму с информацией о блоге и учётными данными его администратора:</p>
+
+		<img src="wordpress1.png" />
+
+		<p>После отправки данных откроется страница следующего вида:</p>
+
+		<img src="wordpress2.png" />
+
+		<p>На этом настройка блога почти закончена. Осталось лишь выбрать и установить подходящую тему и, при необходимости, установить полезные плагины.</p>
+
+		<h2>6. Темы и плагины</h2>
+
+		<p>Я подготовил несколько deb-пакетов с темами и плагинами к Wordpress и поместил их в собственный репозиторий.</p>
+
+		<p>Чтобы подключить репозиторий, можно добавить его в файл /etc/apt/sources.list:</p>
+
+		<pre class="code">deb http://stupin.su/debian/ wheezy main</pre>
+
+		<p>Обновим список пакетов в репозиториях:</p>
+
+		<pre class="console"># apt-get update</pre>
+
+		<p>Теперь можно установить из репозитория любой из имеющихся пакетов:</p>
+
+		<ul>
+			<li>Тема Fluid Blue - <b>wordpress-theme-fluid-blue</b></li>
+
+			<li>Тема F2 - <b>wordpress-theme-f2</b> - наследник темы Fluid Blue, пришедший ей на смену</li>
+
+			<li>Тема Indicator - <b>wordpress-theme-indicator</b></li>
+
+			<li>Тема Restaurateur - <b>wordpress-theme-restaurateur</b></li>
+
+			<li>Тема Rundown - <b>wordpress-theme-rundown</b></li>
+
+			<li>Плагин Blogger Importer - <b>wordpress-blogger-importer</b> - импорт заметок из блогов на blogger.com в Wordpress</li>
+
+			<li>Плагин Categories to Tags Converter - <b>wordpress-wpcat2tag-importer</b> - позволяет превратить категорию в тег и наоборт</li>
+		</ul>
+
+		<p>На этом пока всё.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Установка и настройка Wordpress">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,1038 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="zabbix,debian,linux,3.4" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2020-11-01 -->
+		<title>Доработка веб-интерфейса Zabbix 3.4 для работы с ClickHouse</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Доработка веб-интерфейса Zabbix 3.4 для работы с ClickHouse</h1>
+
+		<p>Теперь, когда у нас имеется <a href="../zabbix-clickhouse-part1/">настроенный сервер Clickhouse с заготовленными в нём таблицами истории и тенденций Zabbix</a>, можно попробовать доработать веб-интерфейс Zabbix для работы с Clickhouse. Реализацию поддержки Clickhouse будем делать на базе уже имеющейся поддержки хранилищ Elasticsearch и SQL. Поскольку ClickHouse использует SQL-образный синтаксис запросов, но может возвращать ответ в виде JSON по протоколу HTTP, то нам пригодятся фрагменты кода реализации поддержки как того, так и другого типа хранилища. Разработка и отладка заплатки выполнялась на данных, скопированных в Clickhouse из хранилища SQL при помощи описанного ранее скрипта <a href="../zabbix-clickhouse-part1/copy_data.py">copy_data.py</a>.</p>
+
+		<p>Получившуюся заплатку с неописанными здесь мелкими изменениями в комментариях к другим функциям можно взять по ссылке <a href="zabbix3_4_12_frontend_clickhouse.patch">zabbix3_4_12_frontend_clickhouse.patch</a>.</p>
+
+		<p>Описанная здесь реализация поддержки ClickHouse отличается от реализации из <a href="https://glaber.io/">Glaber</a>, следующим:</p>
+
+		<ul>
+			<li>вместо модуля curl для php для обращения к API ClickHouse используется штатная функция file_get_contents,</li>
+
+			<li>вместо типа DateTime для колонок clock используется тип UInt32, что приближает поддержку ClickHouse к родной структуре таблиц Zabbix,</li>
+
+			<li>реализована поддержка работы с таблицами истории журнального типа - history_log,</li>
+
+			<li>реализовано раздельное хранение исторических данных в таблицах history, history_uint, history_str, history_text, history_log, что приближает поддержку ClickHouse к родной структуре таблиц Zabbix,</li>
+
+			<li>веб-интерфейс поддерживает индивидуальный выбор типа хранилища для каждой из таблиц истории: SQL, Elasticsearch или ClickHouse,</li>
+
+			<li>при отображении графиков используются данные из таблиц trends и trends_uint, которые должны быть доступны по URL таблиц history и history_uint соответственно,</li>
+
+			<li>реализованы оптимизации запросов на страницах последних данных и графиков нескольких элементов данных: вместо отдельных запросов по каждому элементу данных выполняется от одного до 5 запросов по каждому из типов элементов данных. Внутри каждого запроса данные подзапросов объединяются при помощи выражения UNION ALL.</li>
+		</ul>
+
+		<p>Я старался скрупулёзно воспроизводить стиль исходного кода, однако не всегда этот код мне кажется идеальным. В частности, в коде присутствуют микрооптимизации, кэширующие соответствие типов значений элементов данных URL'ам хранилища. Эти микрооптимизации на фоне обращений к самим хранилищам экономят настолько мизерное количество ресурсов, что лучше было бы обойтись вообще без них - код бы от этого стал только нагляднее. Не совсем понятно, почему в некоторых не самых тяжёлых функциях реализовано объединение запросов при помощи UNION ALL, а в наиболее тяжёлых - не реализовано. Наконец, сама поддержка различных хранилищ не выполнена в стиле ООП: нет базового класса хранилища и нет отдельных реализаций хранилищ в виде классов, отнаследованных от базового класса. Вместо этого поддержка разных типов хранилищ реализована прямо в коде классов CHistoryManager, CHistory, CTrend, из которых два последних используют часть методов из первого.</p>
+
+		<p>У веб-интерфейса есть интересная особенность. На странице просмотра графика могут использоваться данные из таблицы тенденций, даже если данные есть в таблице истории. На выбор таблицы-источника данных влияет длительность хранения исторических данных, указанная в свойствах самого элемента данных. Также если в настройках на странице «Администрирование» - «Общие», в разделе «Очистка истории» отмечена галочка «Переопределить период хранения истории элементов данных», то используется значение, указанное в поле «Период хранения данных». В моём случае в этом поле было указано значение 60d, а в таблице истории имелись данные за 365 дней, включая те данные, которые были сгенерированы по таблицам тенденций. Когда я поменял значение в этом поле на 365d, на графиках стали отображаться только данные из таблиц истории.</p>
+
+		<p>Ниже описаны внесённые заплаткой доработки веб-интерфейса и их обоснование.</p>
+
+		<h2>1. Файл конфигурации</h2>
+
+		<p>Первым делом поправим пример файла конфигурации frontends/php/conf/zabbix.conf.php.example. В нём можно увидеть, что в переменной конфигурации $HISTORY['types'] можно указать список таблиц, для которых будет использоваться Elasticsearch. Делается это следующим обрзом:</p>
+
+		<pre class="code">$HISTORY['types'] = ['uint', 'text'];</pre>
+
+		<p>Поскольку нам нужно достичь возможности использовать одно из трёх разных хранилищ, я решил изменить формат этой переменной так, чтобы для каждой из таблиц можно было указывать тип её хранилища:</p>
+
+		<pre class="code">$HISTORY['type'] = [
+                'uint' =&gt; 'clickhouse',
+                'text' =&gt; 'elastic'
+];</pre>
+
+		<p>При этом в переменной $HISTORY['url'], как и раньше, будет указывается URL хранилища. Только теперь это может быть как URL хранилища Elasticsearch, так и URL хранилища Clickhouse.</p>
+
+		<p>Отобразим логику изменений файла конфигурации в примере этого файла следующим образом:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/frontends/php/conf/zabbix.conf.php.example
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/frontends/php/conf/zabbix.conf.php.example
++++ zabbix-3.4.12-1+buster/frontends/php/conf/zabbix.conf.php.example
+@@ -17,10 +17,13 @@ $ZBX_SERVER_NAME            = '';
+ 
+ $IMAGE_FORMAT_DEFAULT  = IMAGE_FORMAT_PNG;
+ 
+-// Elasticsearch url (can be string if same url is used for all types).
++// Elasticsearch or ClickHouse url.
+ $HISTORY['url']   = [
+-               'uint' =&gt; 'http://localhost:9200',
++               'uint' =&gt; 'http://login:password@localhost:8123/?database=zabbix',
+                'text' =&gt; 'http://localhost:9200'
+ ];
+-// Value types stored in Elasticsearch.
+-$HISTORY['types'] = ['uint', 'text'];
++// Value types stored in Elasticsearch or ClickHouse.
++$HISTORY['types'] = [
++               'uint' =&gt; 'clickhouse',
++               'text' =&gt; 'elastic'
++];</pre>
+
+		<h2>2. Вспомогательный класс для работы с Clickhouse</h2>
+
+		<p>В отличие от <a href="https://glaber.io/">Glaber</a>, в моей доработке веб-интерфейса Zabbix для обращения к Clickhouse не используется модуль php-curl, а используется встроенная в PHP функция file_get_contents, что позволяет обойтись прежними зависимостями при установке веб-интерфейса.</p>
+
+		<p>Для выполнения запросов к Clickhouse добавим файл frontends/php/include/classes/helpers/CClickHouseHelper.php со вспомогательным классом CClickHouseHelper:</p>
+
+		<pre class="code">&lt;?php
+
+/**
+ * A helper class for working with ClickHouse.
+ */
+class CClickHouseHelper {
+
+       /**
+        * Perform request to ClickHouse.
+        *
+        * @param string $method      HTTP method to be used to perform request
+        * @param string $endpoint    requested url
+        * @param mixed  $request     data to be sent
+        *
+        * @return string    result
+        */
+       private static function request($method, $endpoint, $query) {
+               $options = [
+                       'http' =&gt; [
+                               'header'  =&gt; "Content-Type: application/json; charset=UTF-8",
+                               'method'  =&gt; $method,
+                               'ignore_errors' =&gt; true // To get error messages from ClickHouse.
+                       ]
+               ];
+
+               $query .= ' FORMAT JSONCompact';
+               $options['http']['content'] = $query;
+
+               try {
+                       $response = file_get_contents($endpoint, false, stream_context_create($options));
+               }
+               catch (Exception $e) {
+                       error($e-&gt;getMessage());
+               }
+
+               return json_decode($response, true);
+       }
+
+       public static function values($method, $endpoint, $query = null, $columns = null, $map = null) {
+               #file_put_contents('/var/log/nginx/chartlog.log', "$query\n\n", FILE_APPEND);
+               $response = self::request($method, $endpoint, $query);
+
+               $values = [];
+               foreach ($response['data'] as $row) {
+                       $value = [];
+                       for($i = 0; $i &lt; count($row); $i++)
+                       {
+                               if ($columns) {
+                                       $column = $columns[$i];
+                               } else {
+                                       $column = $response['meta'][$i]['name'];
+                               }
+
+                               if ($map &amp;&amp; array_key_exists($column, $map))
+                               {
+                                       $column = $map[$column];
+                               }
+
+                               $value[$column] = $row[$i];
+                       }
+                       $values[] = $value;
+               }
+               #$json = json_encode($values, true);
+               #file_put_contents('/var/log/nginx/chartlog.log', "$json\n", FILE_APPEND);
+               return $values;
+       }
+
+       public static function value($method, $endpoint, $query = null, $column = 'value') {
+               $values = self::values($method, $endpoint, $query, [$column]);
+
+               if ((count($values) &gt; 0) &amp;&amp; array_key_exists($column, $values[0])) {
+                       return $values[0][$column];
+               }
+               return null;
+       }
+}</pre>
+
+		<p>В отличие от <a href="https://glaber.io/">Glaber</a>, этот класс выполняет запросы в формате JSON, а не TSV. В классе есть функция request, которая выполняет переданные ей запросы и возвращает в ответ данные, извлечённые из JSON. Эта функция вызывается только из функций values и value.</p>
+
+		<p>Функция values позволяет выполнить SQL-запрос на получение множества строк данных. Clickhouse вместе с данными ответа также возвращает имена колонок. Если не указывать аргументы columns и map, то при формировании результата будут использоваться имена колонок, которые вернул Clickhouse. Результат будет представлять собой список словарей: каждая строчка списка будет соответствовать одной строке из результата выполнения запроса, а каждый словарь в строке будет в ключе содержать имя колонки, а в значении ключа - значение этой колонки.</p>
+
+		<p>Если указать функции values аргумент columns, то вместо возвращённых сервером Clickhouse имён колонок будут использоваться указанные, в порядке их указания в списке columns.</p>
+
+		<p>Если указать функции values аргумент maps, являющийся словарём, то вместо возвращённых сервером Clickhouse имён колонок будут возвращаться значения из словаря. maps должен быть словарём, в котором ключами являются имена колонок, возвращённых сервером Clickhouse, а их значениями - желаемые имена колонок.</p>
+
+		<p>Функция value возвращает одно значение, возвращённое запросом, или значение null, если запрос ничего не вернул. Если запрос вернёт несколько строк, то будет возвращено значение из первой строки. Если аргумент column не указан, то возвращено будет значение из колонки value.</p>
+
+		<p>В тексте функции values имеются закомментированные строчки, которые могут помочь при отладке запросов к Clickhouse. Раскомментировав их, можно, по желанию, вести журнал запросов и результатов выполнения этих запросов.</p>
+
+		<h2>3. Новый тип хранилища</h2>
+
+		<p>Теперь добавим новое определение источника данных в файл frontends/php/include/defines.inc.php:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/frontends/php/include/defines.inc.php
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/frontends/php/include/defines.inc.php
++++ zabbix-3.4.12-1+buster/frontends/php/include/defines.inc.php
+@@ -41,6 +41,7 @@ define('ZBX_PERIOD_DEFAULT',  3600); // 1
+ // by default set to 86400 seconds (24 hours)
+ define('ZBX_HISTORY_PERIOD', 86400);
+ 
++define('ZBX_HISTORY_SOURCE_CLICKHOUSE',        'clickhouse');
+ define('ZBX_HISTORY_SOURCE_ELASTIC',   'elastic');
+ define('ZBX_HISTORY_SOURCE_SQL',               'sql');</pre>
+
+		<h2>4. Доработка класса CHistoryManager</h2>
+
+		<p>В файле frontends/php/include/classes/api/managers/CHistoryManager.php определён класс CHistoryManager, который отвечает за работу с таблицами истории непосредственно самого веб-интерфейса. Потребуется доработать функции getLastValues, getValueAt, getGraphAggregation, getAggregatedValue и getMinClock. Начнём, однако, не с этого, а с введения новых вспомогательных фукнций.</p>
+
+		<h3>4.1. Новая функция getClickHouseEndpoints</h3>
+
+		<p>Вместо функции getElasticsearchUrl введём аналогичную по смыслу фукнцию getClickHouseEndpoints, которая будет использовать вспомогательную функцию getClickhouseUrl:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/frontends/php/include/classes/api/managers/CHistoryManager.php
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/frontends/php/include/classes/api/managers/CHistoryManager.php
++++ zabbix-3.4.12-1+buster/frontends/php/include/classes/api/managers/CHistoryManager.php
+@@ -968,6 +1321,51 @@ class CHistoryManager {
+                return $cache[$value_type];
+        }
+ 
++       private static function getClickHouseUrl($value_name) {
++               static $urls = [];
++               static $invalid = [];
++
++               // Additional check to limit error count produced by invalid configuration.
++               if (array_key_exists($value_name, $invalid)) {
++                       return null;
++               }
++
++               if (!array_key_exists($value_name, $urls)) {
++                       global $HISTORY;
++
++                       $urls[$value_name] = $HISTORY['url'][$value_name];
++               }
++
++               return $urls[$value_name];
++       }
++
++       /**
++        * Get endpoints for ClickHouse requests.
++        *
++        * @param mixed $value_types    value type(s)
++        *
++        * @return array    ClickHouse query endpoints
++        */
++       public static function getClickHouseEndpoints($value_types) {
++               if (!is_array($value_types)) {
++                       $value_types = [$value_types];
++               }
++
++               $endpoints = [];
++
++               foreach (array_unique($value_types) as $type) {
++                       if (self::getDataSourceType($type) === ZBX_HISTORY_SOURCE_CLICKHOUSE) {
++                               $index = self::getTypeNameByTypeId($type);
++
++                               if (($url = self::getClickHouseUrl($index)) !== null) {
++                                       $endpoints[$type] = $url;
++                               }
++                       }
++               }
++
++               return $endpoints;
++       }
++
+        private static function getElasticsearchUrl($value_name) {
+                static $urls = [];
+                static $invalid = [];</pre>
+
+		<p>Функция getClickhouseEndpoints возвращает URL для доступа к таблицам истории указанных типов значений.</p>
+
+		<h3>4.2. Доработка функции getLastValues</h3>
+
+		<p>Функция getLastValues последовательно обращается к хранилищам каждого типа и запрашивает у него последние значения тех элементов данных, которые хранятся в соответствующем хранилище. Результаты запросов складываются в общую копилку и возвращаются в качестве результата. Добавим в функцию поддержку хранилища ClickHouse:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/frontends/php/include/classes/api/managers/CHistoryManager.php
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/frontends/php/include/classes/api/managers/CHistoryManager.php
++++ zabbix-3.4.12-1+buster/frontends/php/include/classes/api/managers/CHistoryManager.php
+@@ -37,6 +37,12 @@ class CHistoryManager {
+                $results = [];
+                $grouped_items = self::getItemsGroupedByStorage($items);
+ 
++               if (array_key_exists(ZBX_HISTORY_SOURCE_CLICKHOUSE, $grouped_items)) {
++                       $results += $this-&gt;getLastValuesFromClickHouse($grouped_items[ZBX_HISTORY_SOURCE_CLICKHOUSE], $limit,
++                                       $period
++                       );
++               }
++
+                if (array_key_exists(ZBX_HISTORY_SOURCE_ELASTIC, $grouped_items)) {
+                        $results += $this-&gt;getLastValuesFromElasticsearch($grouped_items[ZBX_HISTORY_SOURCE_ELASTIC], $limit,
+                                        $period</pre>
+
+		<p>Теперь нужно реализовать функцию getLastValuesFromClickhouse. Я реализовал два варианта функции. Первый просто последовательно запрашивает последнее значение каждого из указанных в запросе элементов данных и объединяет результаты запросов, как это сделано в функции getLastValuesFromElasticsearch. Второй вариант из запрашиваемых значений формирует группы по их типам. Для каждого типа значений формируется единый запрос, объединяющий результаты отдельных запросов при помощи выражения UNION ALL. Таким образом можно увеличить отзывчивость веб-интерфейса, сократив количество HTTP-запросов к серверу Clickhouse. Первый вариант фигурирует в коде под именем _getLastValuesFromClickHouse, а второй - более эффективный - под именем getLastValuesFromClickHouse:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/frontends/php/include/classes/api/managers/CHistoryManager.php
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/frontends/php/include/classes/api/managers/CHistoryManager.php
++++ zabbix-3.4.12-1+buster/frontends/php/include/classes/api/managers/CHistoryManager.php
+@@ -51,6 +57,77 @@ class CHistoryManager {
+        }
+ 
+        /**
++        * ClickHouse specific implementation of getLastValues.
++        *
++        * @see CHistoryManager::getLastValues
++        */
++       private function _getLastValuesFromClickHouse($items, $limit, $period) {
++               $results = [];
++
++               foreach ($items as $item) {
++                       $endpoints = self::getClickHouseEndpoints($item['value_type']);
++                       if ($endpoints) {
++                               $query =
++                                       'SELECT *'.
++                                       ' FROM '.self::getTableName($item['value_type']).
++                                       ' WHERE itemid='.($item['itemid'] + 0).
++                                               ($period ? ' AND clock&gt;'.(time() - $period) : '').
++                                       ' ORDER BY clock DESC';
++
++                               if ($limit &gt; 0) $query .= ' LIMIT '.$limit;
++
++                               $values = CClickHouseHelper::values('POST', reset($endpoints), $query);
++                               if ($values) {
++                                       $results[$item['itemid']] = $values;
++                               }
++                       }
++               }
++
++               return $results;
++       }
++
++       /**
++        * ClickHouse specific implementation of getLastValues.
++        *
++        * @see CHistoryManager::getLastValues
++        */
++       private function getLastValuesFromClickHouse($items, $limit, $period) {
++               $results = [];
++               $type_queries = [];
++
++               foreach ($items as $item) {
++                       $query =
++                               'SELECT *'.
++                               ' FROM '.self::getTableName($item['value_type']).
++                               ' WHERE itemid='.($item['itemid'] + 0).
++                                       ($period ? ' AND clock&gt;'.(time() - $period) : '').
++                               ' ORDER BY clock DESC';
++
++                       if ($limit &gt; 0) $query .= ' LIMIT '.$limit;
++
++                       $type_queries[$item['value_type']][] = $query;
++               }
++
++               foreach ($type_queries as $value_type =&gt; $queries) {
++                       $endpoints = self::getClickHouseEndpoints($value_type);
++                       if ($endpoints) {
++                               $query =
++                                       'SELECT *'.
++                                       ' FROM ('.implode(' UNION ALL ', $queries).')';
++
++                               $values = CClickHouseHelper::values('POST', reset($endpoints), $query);
++
++                               foreach($values as $row) {
++                                       $itemid = $row['itemid'];
++                                       $results[$itemid][] = $row;
++                               }
++                       }
++               }
++
++               return $results;
++       }
++
++       /**
+         * Elasticsearch specific implementation of getLastValues.
+         *
+         * @see CHistoryManager::getLastValues</pre>
+
+		<p>Можно пойти дальше и написать вариант функции, который использует специфический тип запросов, поддерживаемый ClickHouse: LIMIT 1 BY itemid. В таком случае можно будет упростить запрос и обойтись без выражений UNION ALL.</p>
+
+		<h3>4.3. Доработка функции getValueAt</h3>
+
+		<p>Аналогичным образом доработаем функцию getValueAt, которая ищет значение элемента данных, соответствующее указанной отметки времени:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/frontends/php/include/classes/api/managers/CHistoryManager.php
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/frontends/php/include/classes/api/managers/CHistoryManager.php
++++ zabbix-3.4.12-1+buster/frontends/php/include/classes/api/managers/CHistoryManager.php
+@@ -172,6 +249,9 @@ class CHistoryManager {
+         */
+        public function getValueAt($item, $clock, $ns) {
+                switch (self::getDataSourceType($item['value_type'])) {
++                       case ZBX_HISTORY_SOURCE_CLICKHOUSE:
++                               return $this-&gt;getValueAtFromClickHouse($item, $clock, $ns);
++
+                        case ZBX_HISTORY_SOURCE_ELASTIC:
+                                return $this-&gt;getValueAtFromElasticsearch($item, $clock, $ns);
+ 
+@@ -181,6 +261,74 @@ class CHistoryManager {
+        }
+ 
+        /**
++        * ClickHouse specific implementation of getValueAt.
++        *
++        * @see CHistoryManager::getValueAt
++        */
++       private function getValueAtFromClickHouse($item, $clock, $ns) {
++               $value = null;
++               $table = self::getTableName($item['value_type']);
++
++               $endpoints = self::getClickHouseEndpoints($item['value_type']);
++               if ($endpoints) {
++                       $url = reset($endpoints);
++
++                       $query = 'SELECT value'.
++                                       ' FROM '.$table.
++                                       ' WHERE itemid='.($item['itemid']+0).
++                                               ' AND clock='.($clock+0).
++                                               ' AND ns='.($ns+0).
++                                       ' LIMIT 1';
++                       $value = CClickHouseHelper::value('POST', $url, $query);
++                       if ($value !== null) {
++                               return $value;
++                       }
++
++                       $query = 'SELECT DISTINCT clock'.
++                                       ' FROM '.$table.
++                                       ' WHERE itemid='.($item['itemid']+0).
++                                               ' AND clock='.($clock+0).
++                                               ' AND ns&lt;'.($ns+0);
++                       $max_clock = CClickHouseHelper::value('POST', $url, $query, 'clock');
++
++                       if ($max_clock === null) {
++                               $query = 'SELECT MAX(clock) AS clock'.
++                                               ' FROM '.$table.
++                                               ' WHERE itemid='.($item['itemid']+0).
++                                                       ' AND clock&lt;'.($clock+0).
++                                                       (ZBX_HISTORY_PERIOD ? ' AND clock&gt;='.($clock - ZBX_HISTORY_PERIOD) : '');
++
++                               $max_clock = CClickHouseHelper::value('POST', $url, $query, 'clock');
++                       }
++
++                       if ($max_clock === null) {
++                               return $value;
++                       }
++
++                       if ($clock == $max_clock) {
++                               $query = 'SELECT value'.
++                                               ' FROM '.$table.
++                                               ' WHERE itemid='.($item['itemid']+0).
++                                                       ' AND clock='.($clock+0).
++                                                       ' AND ns&lt;'.($ns+0).
++                                               ' LIMIT 1';
++                       }
++                       else {
++                               $query = 'SELECT value'.
++                                               ' FROM '.$table.
++                                               ' WHERE itemid='.($item['itemid']+0).
++                                                       ' AND clock='.($max_clock+0).
++                                               ' ORDER BY itemid, clock, ns DESC'.
++                                               ' LIMIT 1';
++                       }
++
++                       $value = CClickHouseHelper::value('POST', $url, $query);
++
++               }
++               return $value;
++       }
++
++       /**
+         * Elasticsearch specific implementation of getValueAt.
+         *
+         * @see CHistoryManager::getValueAt</pre>
+
+		<p>Оптимизированной версии фукнции тут нет, потому что функция выполняет только один запрос, извлекающий единственное значение.</p>
+
+		<h3>4.4. Доработка функции getGraphAggregation</h3>
+
+		<p>Функция getGraphAggregation возвращает агрегированные данные одного или нескольких элементов данных для отрисовки графика, доступного по ссылкам на странице просмотра последних данных. Поскольку на одном графике могут отображаться кривые нескольких элементов данных, то данные для каждой из кривых можно получать либо отдельными запросами, либо сгруппированными запросами с выражениями UNION ALL. Первый вариант функции фигурирует ниже под именем _getGraphAggregationFromClickHouse, а второй, оптимизированный вариант функции можно найти по имени getGraphAggregationFromClickHouse:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/frontends/php/include/classes/api/managers/CHistoryManager.php
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/frontends/php/include/classes/api/managers/CHistoryManager.php
++++ zabbix-3.4.12-1+buster/frontends/php/include/classes/api/managers/CHistoryManager.php
+@@ -345,6 +493,12 @@ class CHistoryManager {
+                $grouped_items = self::getItemsGroupedByStorage($items);
+ 
+                $results = [];
++               if (array_key_exists(ZBX_HISTORY_SOURCE_CLICKHOUSE, $grouped_items)) {
++                       $results += $this-&gt;getGraphAggregationFromClickHouse($grouped_items[ZBX_HISTORY_SOURCE_CLICKHOUSE],
++                                       $time_from, $time_to, $width, $size, $delta
++                       );
++               }
++
+                if (array_key_exists(ZBX_HISTORY_SOURCE_ELASTIC, $grouped_items)) {
+                        $results += $this-&gt;getGraphAggregationFromElasticsearch($grouped_items[ZBX_HISTORY_SOURCE_ELASTIC],
+                                        $time_from, $time_to, $width, $size, $delta
+@@ -361,6 +515,114 @@ class CHistoryManager {
+        }
+ 
+        /**
++        * ClickHouse specific implementation of getGraphAggregation.
++        *
++        * @see CHistoryManager::getGraphAggregation
++        */
++       private function _getGraphAggregationFromClickHouse(array $items, $time_from, $time_to, $width, $size, $delta) {
++               $group_by = 'itemid';
++               $sql_select_extra = '';
++
++               if ($width !== null &amp;&amp; $size !== null &amp;&amp; $delta !== null) {
++                       $calc_field = 'round('.$width.'*modulo(clock+'.$delta.','.$size.')/('.$size.'),0)';
++
++                       $sql_select_extra = ','.$calc_field.' AS i';
++                       $group_by .= ','.$calc_field;
++               }
++
++               $results = [];
++
++               foreach ($items as $item) {
++                       $endpoints = self::getClickHouseEndpoints($item['value_type']);
++                       if ($endpoints) {
++                               if ($item['source'] === 'history') {
++                                       $sql_select = 'COUNT(*) AS count,AVG(value) AS avg,MIN(value) AS min,MAX(value) AS max';
++                                       $sql_from = ($item['value_type'] == ITEM_VALUE_TYPE_UINT64) ? 'history_uint' : 'history';
++                               }
++                               else {
++                                       $sql_select = 'SUM(num) AS count,AVG(value_avg) AS avg,MIN(value_min) AS min,MAX(value_max) AS max';
++                                       $sql_from = ($item['value_type'] == ITEM_VALUE_TYPE_UINT64) ? 'trends_uint' : 'trends';
++                               }
++
++                               $query =
++                                       'SELECT itemid,'.$sql_select.$sql_select_extra.',MAX(clock) AS max_clock'.
++                                       ' FROM '.$sql_from.
++                                       ' WHERE itemid='.($item['itemid']+0).
++                                               ' AND clock&gt;='.($time_from+0).
++                                               ' AND clock&lt;='.($time_to+0).
++                                       ' GROUP BY '.$group_by;
++
++                               $values = CClickHouseHelper::values('POST', reset($endpoints), $query, null, ['max_clock' =&gt; 'clock']);
++
++                               $results[$item['itemid']]['source'] = $item['source'];
++                               $results[$item['itemid']]['data'] = $values;
++                       }
++               }
++
++               return $results;
++       }
++
++       /**
++        * ClickHouse specific implementation of getGraphAggregation.
++        *
++        * @see CHistoryManager::getGraphAggregation
++        */
++       private function getGraphAggregationFromClickHouse(array $items, $time_from, $time_to, $width, $size, $delta) {
++               $group_by = 'itemid';
++               $sql_select_extra = '';
++               $query_extra = '';
++
++               if ($width !== null &amp;&amp; $size !== null &amp;&amp; $delta !== null) {
++                       $calc_field = 'round('.$width.'*modulo(clock+'.$delta.','.$size.')/('.$size.'),0)';
++
++                       $sql_select_extra = ','.$calc_field.' AS i';
++                       $group_by .= ','.$calc_field;
++                       $query_extra = ',i';
++               }
++
++               $results = [];
++               $url_queries = [];
++               foreach ($items as $item) {
++                       $endpoints = self::getClickHouseEndpoints($item['value_type']);
++                       if ($endpoints) {
++                               if ($item['source'] === 'history') {
++                                       $sql_select = 'COUNT(*) AS count,AVG(value) AS avg,MIN(value) AS min,MAX(value) AS max';
++                                       $sql_from = ($item['value_type'] == ITEM_VALUE_TYPE_UINT64) ? 'history_uint' : 'history';
++                               }
++                               else {
++                                       $sql_select = 'SUM(num) AS count,AVG(value_avg) AS avg,MIN(value_min) AS min,MAX(value_max) AS max';
++                                       $sql_from = ($item['value_type'] == ITEM_VALUE_TYPE_UINT64) ? 'trends_uint' : 'trends';
++                               }
++
++                               $query =
++                                       'SELECT itemid,'.$sql_select.$sql_select_extra.',MAX(clock) AS max_clock'.
++                                       ' FROM '.$sql_from.
++                                       ' WHERE itemid='.($item['itemid']+0).
++                                               ' AND clock&gt;='.($time_from+0).
++                                               ' AND clock&lt;='.($time_to+0).
++                                       ' GROUP BY '.$group_by;
++
++                               $results[$item['itemid']]['source'] = $item['source'];
++                               $url_queries[reset($endpoints)][] = $query;
++                       }
++               }
++
++               foreach ($url_queries as $url =&gt; $queries) {
++                       $query =
++                               'SELECT itemid,count,avg,min,max'.$query_extra.',max_clock'.
++                               ' FROM ('.implode(' UNION ALL ', $queries).')';
++
++                       $values = CClickHouseHelper::values('POST', $url, $query, null, ['max_clock' =&gt; 'clock']);
++
++                       foreach($values as $row) {
++                               $results[$row['itemid']]['data'][] = $row;
++                       }
++               }
++
++               return $results;
++       }
++
++       /**
+         * Elasticsearch specific implementation of getGraphAggregation.
+         *
+         * @see CHistoryManager::getGraphAggregation</pre>
+
+		<h3>4.5. Доработка функции getAggregatedValue</h3>
+
+		<p>Функция getAggregatedValue, как следует из её названия, возвращает агрегированное значение элемента данных. Функция агрегации указывается в аргументе aggregation (значением может быть строка «MAX», «MIN», «AVG», «COUNT», «SUM»), интересующий элемент данных - в аргументе item, а начальная отметка времени, начиная с которого нужно вернуть агрегированное значение, указывается в аргументе time_from. Из аргумента item на самом деле используется только идентификатор элемента данных, доступный по ключу itemid. По понятным причинам, оптимизированной версии функции getAggregatedValueFromClickHouse нет - здесь происходит запрос только по одному элементу данных:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/frontends/php/include/classes/api/managers/CHistoryManager.php
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/frontends/php/include/classes/api/managers/CHistoryManager.php
++++ zabbix-3.4.12-1+buster/frontends/php/include/classes/api/managers/CHistoryManager.php
+@@ -585,6 +847,9 @@ class CHistoryManager {
+         */
+        public function getAggregatedValue(array $item, $aggregation, $time_from) {
+                switch (self::getDataSourceType($item['value_type'])) {
++                       case ZBX_HISTORY_SOURCE_CLICKHOUSE:
++                               return $this-&gt;getAggregatedValueFromClickHouse($item, $aggregation, $time_from);
++
+                        case ZBX_HISTORY_SOURCE_ELASTIC:
+                                return $this-&gt;getAggregatedValueFromElasticsearch($item, $aggregation, $time_from);
+ 
+@@ -594,6 +859,27 @@ class CHistoryManager {
+        }
+ 
+        /**
++        * ClickHouse specific implementation of getAggregatedValue.
++        *
++        * @see CHistoryManager::getAggregatedValue
++        */
++       private function getAggregatedValueFromClickHouse(array $item, $aggregation, $time_from) {
++               $value = null;
++               $endpoints = self::getClickHouseEndpoints($item['value_type']);
++               if ($endpoints) {
++                       $query =
++                               'SELECT '.$aggregation.'(value) AS value'.
++                               ' FROM '.self::getTableName($item['value_type']).
++                               ' WHERE clock&gt;'.$time_from.
++                               ' AND itemid='.($item['itemid']+0).
++                               ' HAVING COUNT(*)&gt;0';
++
++                       $value = CClickHouseHelper::value('POST', reset($endpoints), $query);
++               }
++               return $value;
++       }
++
++       /**
+         * Elasticsearch specific implementation of getAggregatedValue.
+         *
+         * @see CHistoryManager::getAggregatedValue</pre>
+
+		<h3>4.6. Доработка функции getMinClock</h3>
+
+		<p>Функция getMinClock принимает список элементов данных в аргументе items, для которых нужно найти наименьшую отметку времени. Насколько я понимаю, эта функция используется при попытке открыть график в последних данных за всё время. Здесь выполняется один запрос с выражениями UNION ALL для объединения результатов запросов ко всем таблицам в ClickHouse.</p>
+
+		<p>Интересно, что выражение UNION ALL используется и в функции getMinClockFromSql. Собственно, после того, как я наткнулся на эту функцию, мне и пришла в голову идея оптимизировать остальные функции, уменьшив количество запросов к ClickHouse при помощи выражения UNION ALL.</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/frontends/php/include/classes/api/managers/CHistoryManager.php
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/frontends/php/include/classes/api/managers/CHistoryManager.php
++++ zabbix-3.4.12-1+buster/frontends/php/include/classes/api/managers/CHistoryManager.php
+@@ -718,6 +1004,10 @@ class CHistoryManager {
+ 
+                $min_clock = [];
+ 
++               if (array_key_exists(ZBX_HISTORY_SOURCE_CLICKHOUSE, $storage_items)) {
++                       $min_clock[] = $this-&gt;getMinClockFromClickHouse($storage_items[ZBX_HISTORY_SOURCE_CLICKHOUSE], $source);
++               }
++
+                if (array_key_exists(ZBX_HISTORY_SOURCE_ELASTIC, $storage_items)) {
+                        $min_clock[] = $this-&gt;getMinClockFromElasticsearch($storage_items[ZBX_HISTORY_SOURCE_ELASTIC]);
+                }
+@@ -750,6 +1040,66 @@ class CHistoryManager {
+        }
+ 
+        /**
++        * ClickHouse specific implementation of getMinClock.
++        *
++        * @see CHistoryManager::getMinClock
++        */
++       private function getMinClockFromClickHouse(array $items, $source) {
++               $url_queries = [];
++               $endpoints = self::getClickHouseEndpoints(array_keys($items));
++               foreach ($items as $type =&gt; $itemids) {
++                       if (!$itemids) {
++                               continue;
++                       }
++
++                       if (!array_key_exists($type, $endpoints)) {
++                               continue;
++                       }
++
++                       $url = $endpoints[$type];
++
++                       switch ($type) {
++                               case ITEM_VALUE_TYPE_FLOAT:
++                                       $sql_from = $source;
++                                       break;
++                               case ITEM_VALUE_TYPE_STR:
++                                       $sql_from = 'history_str';
++                                       break;
++                               case ITEM_VALUE_TYPE_LOG:
++                                       $sql_from = 'history_log';
++                                       break;
++                               case ITEM_VALUE_TYPE_UINT64:
++                                       $sql_from = $source.'_uint';
++                                       break;
++                               case ITEM_VALUE_TYPE_TEXT:
++                                       $sql_from = 'history_text';
++                                       break;
++                               default:
++                                       $sql_from = 'history';
++                       }
++
++                       $url_queries[$url][] =
++                               'SELECT MIN(clock) AS min_clock'.
++                               ' FROM '.$sql_from.
++                               ' WHERE itemid IN ('.implode(',', $itemids).')';
++               }
++
++               $min_clock = [];
++               foreach ($url_queries as $url =&gt; $queries) {
++                       $query =
++                               'SELECT MIN(min_clock) AS min'.
++                               ' FROM ('.implode(' UNION ALL ', $queries).')';
++
++                       $clock = CClickHouseHelper::value('POST', $url, $query, 'min');
++                       if ($clock !== null) {
++                               $min_clock[] = $clock;
++                       }
++               }
++
++               return min($min_clock);
++       }
++
++       /**
+         * Elasticsearch specific implementation of getMinClock.
+         *
+         * @see CHistoryManager::getMinClock</pre>
+
+		<h2>5. Доработка класса CHistory</h2>
+
+		<p>В файле frontends/php/include/classes/api/services/CHistory.php определён класс CHistory, который отвечает за работу метода API history.get. Метод позволяет получать значения указанных элементов данных за указанный период. По сути в этом классе есть только одна публичная функция get и по одной приватной функции с реализацией каждого из типов хранилищ. Доработаем саму функцию get и добавим функцию getFromClickHouse с реализацией доступа к хранилищу ClickHouse:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/frontends/php/include/classes/api/services/CHistory.php
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/frontends/php/include/classes/api/services/CHistory.php
++++ zabbix-3.4.12-1+buster/frontends/php/include/classes/api/services/CHistory.php
+@@ -118,6 +118,9 @@ class CHistory extends CApiService {
+                ]);
+ 
+                switch (CHistoryManager::getDataSourceType($options['history'])) {
++                       case ZBX_HISTORY_SOURCE_CLICKHOUSE:
++                               return $this-&gt;getFromClickHouse($options);
++
+                        case ZBX_HISTORY_SOURCE_ELASTIC:
+                                return $this-&gt;getFromElasticsearch($options);
+ 
+@@ -127,6 +130,139 @@ class CHistory extends CApiService {
+        }
+ 
+        /**
++        * ClickHouse specific implementation of get.
++        *
++        * @see CHistory::get
++        */
++       private function getFromClickHouse($options) {
++               $result = [];
++               $sql_parts = [
++                       'select'        =&gt; ['history' =&gt; 'h.itemid'],
++                       'from'          =&gt; [],
++                       'where'         =&gt; [],
++                       'group'         =&gt; [],
++                       'order'         =&gt; [],
++                       'limit'         =&gt; null
++               ];
++
++               if (!$table_name = CHistoryManager::getTableName($options['history'])) {
++                       $table_name = 'history';
++               }
++
++               $endpoints = CHistoryManager::getClickHouseEndpoints($options['history']);
++               if (!$endpoints) {
++                       return $result;
++               }
++               $url = reset($endpoints);
++
++               $sql_parts['from']['history'] = $table_name.' h';
++
++               // itemids
++               if ($options['itemids'] !== null) {
++                       $sql_parts['where']['itemid'] = dbConditionInt('h.itemid', $options['itemids'], false, true, false);
++               }
++
++               // time_from
++               if ($options['time_from'] !== null) {
++                       $sql_parts['where']['clock_from'] = 'h.clock&gt;='.($options['time_from']+0);
++               }
++
++               // time_till
++               if ($options['time_till'] !== null) {
++                       $sql_parts['where']['clock_till'] = 'h.clock&lt;='.($options['time_till']+0);
++               }
++
++               // filter
++               if (is_array($options['filter'])) {
++                       $this-&gt;dbFilter($sql_parts['from']['history'], $options, $sql_parts);
++               }
++
++               // search
++               if (is_array($options['search'])) {
++                       zbx_db_search($sql_parts['from']['history'], $options, $sql_parts);
++               }
++
++               // output
++               if ($options['output'] == API_OUTPUT_EXTEND) {
++                       unset($sql_parts['select']['clock']);
++                       $sql_parts['select']['history'] = 'h.*';
++               }
++               elseif ($options['output'] != API_OUTPUT_COUNT) {
++                       unset($sql_parts['select']['clock']);
++                       $sql_parts['select']['history'] = implode(',', $options['output']);
++               }
++
++               // countOutput
++               if ($options['countOutput']) {
++                       $options['sortfield'] = '';
++                       $sql_parts['select'] = ['count(*) as rowscount'];
++
++                       // groupCount
++                       if ($options['groupCount']) {
++                               foreach ($sql_parts['group'] as $key =&gt; $fields) {
++                                       $sql_parts['select'][$key] = $fields;
++                               }
++                       }
++               }
++
++               // sorting
++               $sql_parts = $this-&gt;applyQuerySortOptions($table_name, $this-&gt;tableAlias(), $options, $sql_parts);
++
++               // limit
++               if (zbx_ctype_digit($options['limit']) &amp;&amp; $options['limit']) {
++                       $sql_parts['limit'] = $options['limit'];
++               }
++
++               $sql_parts['select'] = array_unique($sql_parts['select']);
++               $sql_parts['from'] = array_unique($sql_parts['from']);
++               $sql_parts['where'] = array_unique($sql_parts['where']);
++               $sql_parts['order'] = array_unique($sql_parts['order']);
++
++               $sql_select = '';
++               $sql_from = '';
++               $sql_order = '';
++
++               if ($sql_parts['select']) {
++                       $sql_select .= implode(',', $sql_parts['select']);
++               }
++
++               if ($sql_parts['from']) {
++                       $sql_from .= implode(',', $sql_parts['from']);
++               }
++
++               $sql_where = $sql_parts['where'] ? ' WHERE '.implode(' AND ', $sql_parts['where']) : '';
++
++               if ($sql_parts['order']) {
++                       $sql_order .= ' ORDER BY '.implode(',', $sql_parts['order']);
++               }
++
++               if ($sql_parts['limit'] &gt; 0) {
++                       $sql_limit = ' LIMIT '.$sql_parts['limit'];
++               }
++               $query = 'SELECT '.$sql_select.
++                               ' FROM '.$sql_from.
++                               $sql_where.
++                               $sql_order.
++                               $sql_limit;
++
++               $values = CClickHouseHelper::values('POST', $url, $query);
++               foreach ($values as $row) {
++                       if ($options['countOutput']) {
++                               $result = $row;
++                       }
++                       else {
++                               $result[] = $row;
++                       }
++               }
++
++               if (!$options['preservekeys']) {
++                       $result = zbx_cleanHashes($result);
++               }
++
++               return $result;
++       }
++
++       /**
+         * SQL specific implementation of get.
+         *
+         * @see CHistory::get</pre>
+
+		<h2>6. Доработка класса CTrend</h2>
+
+		<p>Почти всё, сказанное про класс CHistory, справедливо и для класса CTrend. В файле frontends/php/include/classes/api/services/CTrend.php определён класс CTrend, который отвечает за работу метода API trend.get. Метод позволяет получать из таблиц тенденций агрегированные почасовые значения указанных элементов данных за указанный период. В этом классе есть только одна публичная функция get и по одной приватной функции с реализацией каждого из типов хранилищ.</p>
+
+		<p>Поскольку в реализации поддержки Elasticsearch нет поддержки таблиц тенденций, а поддержка ClickHouse была сделана на базе поддержки Elasticsearch, то поддержки таблиц тенденций не должно быть и в реализации ClickHouse. Собственно, поэтому в файле конфигурации не предусмотрена возможность указать тип используемого хранилища для таблиц тенденций. Я же реализовал поддержку таблиц тенденций в неявном предположении, что таблица тенденций находится в том же хранилище ClickHouse, что и основная таблица с историческими данными. То есть, если для таблицы history используется хранилище ClickHouse, то неявно предполагается, что по той же ссылке должна быть доступна и таблица trends. И если в ClickHouse хранится таблица history_uint, то по той же ссылке должна быть доступна таблица trends_uint.</p>
+
+		<p>Интересно, что раньше в Zabbix не было методов API для доступа к таблицам тенденций, но в сети гуляли заплатки с реализацией метода trend.get, выполненные по аналогии с методом history.get. Когда же разработчики Zabbix решили добавить метод API для доступа к таблицам тенденций, то реализовали метод trend.get несколько иначе. В частности, методу trend.get не нужно указывать тип запрашиваемых значений элементов данных, метод ищет данные во всех таблицах и возвращает результат поиска в обеих таблицах тенденций.</p>
+
+		<p>Итак, доработаем саму функцию get и добавим функцию getFromClickHouse с реализацией доступа к хранилищу ClickHouse:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/frontends/php/include/classes/api/services/CTrend.php
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/frontends/php/include/classes/api/services/CTrend.php
++++ zabbix-3.4.12-1+buster/frontends/php/include/classes/api/services/CTrend.php
+@@ -71,11 +71,15 @@ class CTrend extends CApiService {
+                        }
+                }
+ 
+-               foreach ([ZBX_HISTORY_SOURCE_ELASTIC, ZBX_HISTORY_SOURCE_SQL] as $source) {
++               foreach ([ZBX_HISTORY_SOURCE_CLICKHOUSE, ZBX_HISTORY_SOURCE_ELASTIC, ZBX_HISTORY_SOURCE_SQL] as $source) {
+                        if (array_key_exists($source, $storage_items)) {
+                                $options['itemids'] = $storage_items[$source];
+ 
+                                switch ($source) {
++                                       case ZBX_HISTORY_SOURCE_CLICKHOUSE:
++                                               $data = $this-&gt;getFromClickHouse($options);
++                                               break;
++
+                                        case ZBX_HISTORY_SOURCE_ELASTIC:
+                                                $data = $this-&gt;getFromElasticsearch($options);
+                                                break;
+@@ -92,6 +96,103 @@ class CTrend extends CApiService {
+                                }
+                        }
+                }
++
++               return $result;
++       }
++
++       /**
++        * ClickHouse specific implementation of get.
++        *
++        * @see CTrend::get
++        */
++       private function getFromClickHouse($options) {
++               $sql_where = [];
++
++               if ($options['time_from'] !== null) {
++                       $sql_where['clock_from'] = 't.clock&gt;='.($options['time_from']+0);
++               }
++
++               if ($options['time_till'] !== null) {
++                       $sql_where['clock_till'] = 't.clock&lt;='.($options['time_till']+0);
++               }
++
++               if (!$options['countOutput']) {
++                       $sql_limit = ($options['limit'] &amp;&amp; zbx_ctype_digit($options['limit'])) ? $options['limit'] : null;
++
++                       $sql_fields = [];
++
++                       if (is_array($options['output'])) {
++                               foreach ($options['output'] as $field) {
++                                       if ($this-&gt;hasField($field, 'trends') &amp;&amp; $this-&gt;hasField($field, 'trends_uint')) {
++                                               $sql_fields[] = 't.'.$field;
++                                       }
++                               }
++                       }
++                       elseif ($options['output'] == API_OUTPUT_EXTEND) {
++                               $sql_fields[] = 't.*';
++                       }
++
++                       // An empty field set or invalid output method (string). Select only "itemid" instead of everything.
++                       if (!$sql_fields) {
++                               $sql_fields[] = 't.itemid';
++                       }
++
++                       $result = [];
++
++                       foreach ([ITEM_VALUE_TYPE_FLOAT, ITEM_VALUE_TYPE_UINT64] as $value_type) {
++                               $endpoints = CHistoryManager::getClickHouseEndpoints($value_type);
++                               if (!$endpoints) {
++                                       continue;
++                               }
++
++                               if ($sql_limit !== null &amp;&amp; $sql_limit &lt;= 0) {
++                                       break;
++                               }
++
++                               $sql_from = ($value_type == ITEM_VALUE_TYPE_FLOAT) ? 'trends' : 'trends_uint';
++
++                               if ($options['itemids'][$value_type]) {
++                                       $sql_where['itemid'] = dbConditionInt('t.itemid', array_keys($options['itemids'][$value_type]), false, true, false);
++
++                                       $query = 'SELECT '.implode(',', $sql_fields).
++                                                       ' FROM '.$sql_from.' t'.
++                                                       ' WHERE '.implode(' AND ', $sql_where);
++
++                                       if ($sql_limit &gt; 0) $query .= ' LIMIT '.$sql_limit;
++
++                                       $values = CClickHouseHelper::values('POST', reset($endpoints), $query);
++
++                                       if ($sql_limit !== null) {
++                                               $sql_limit -= count($values);
++                                       }
++
++                                       $result = array_merge($result, $values);
++                               }
++                       }
++
++                       $result = $this-&gt;unsetExtraFields($result, ['itemid'], $options['output']);
++               }
++               else {
++                       $result = 0;
++
++                       foreach ([ITEM_VALUE_TYPE_FLOAT, ITEM_VALUE_TYPE_UINT64] as $value_type) {
++                               if ($options['itemids'][$value_type]) {
++                                       $endpoints = CHistoryManager::getClickHouseEndpoints($value_type);
++                                       if (!$endpoints) {
++                                               continue;
++                                       }
++
++                                       $sql_from = ($value_type == ITEM_VALUE_TYPE_FLOAT) ? 'trends' : 'trends_uint';
++                                       $sql_where['itemid'] = dbConditionInt('t.itemid', array_keys($options['itemids'][$value_type]), false, true, false);
++
++                                       $query = 'SELECT COUNT(*) AS rowcount'.
++                                                       ' FROM '.$sql_from.' t'.
++                                                       ' WHERE '.implode(' AND ', $sql_where);
++
++                                       $result += CClickHouseHelper::value('POST', reset($endpoints), $query, 'rowcount');
++                               }
++                       }
++               }
+ 
+                return $result;
+        }</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Доработка веб-интерфейса Zabbix 3.4 для работы с ClickHouse">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

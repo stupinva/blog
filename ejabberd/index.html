@@ -1,0 +1,393 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="перевод,Реми ван Элст,linux,ejabberd" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-09-10 -->
+		<title>Реми ван Элст. Настройка ejabberd для обмена мгновенными сообщениями по протоколу XMPP - своя альтернатива Google Talk Hangouts, 2013</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Реми ван Элст. Настройка ejabberd для обмена мгновенными сообщениями по протоколу XMPP - своя альтернатива Google Talk Hangouts, 2013</h1>
+
+		<p>Перевод статьи: <a href="https://raymii.org/s/tutorials/Set_up_a_federated_XMPP_Chat_Network_with_ejabberd.html">Set up a federated XMPP Chat Network with ejabberd, your own Google Talk Hangouts alternative</a></p>
+
+		<p>Автор: Реми ван Элст (Remy van Elst)</p>
+
+		<p>В этом руководстве показано, как установить сервер ejabberd для обмена мгновенными сообщениями. В нём рассказывается о базовом одноузловом сервере ejabberd, а также о настройке кластера ejabberd. Руководство включает в себя примеры ошибок и записей DNS SRV. <a href="http://clients.inceptionhosting.com/aff.php?aff=083">Для установки собственного сервера XMPP можно воспользоваться услугами хостинга Inception Hosting VPS. Я пользуюсь их услугами и на мой взгляд этот хостинг очень стабильный, обладает высокой производительностью и низкими ценами.</a></p>
+
+		<h2>1. Зачем настраивать собственный сервер XMPP</h2>
+
+		<p>Существует несколько причин для настройки собственного сервера XMPP.</p>
+
+		<p>Может быть вы пользовались сервисом Google Talk или, как он теперь называется, Hangouts. Не так давно сервис Google прекратил поддерживать совместимость с XMPP. Если у вас есть контакты не на gmail, можно продолжать общаться с ними. Можно по-прежнему использовать открытый протокол, поддержка которого широко распространена и не станет частью закрытого программного и аппаратного обеспечения Google.</p>
+
+		<p>Возможно также, что вы хотите получить больший контроль за историей переписки. Выключите историю переписки ejabberd и воспользуйтесь <a href="https://otr.cypherpunks.ca/">протоколом OTR</a>, который позволит обеспечить вам полную тайну переписки (и Perfect Forward Secrecy - совершенно прямую секретность).</p>
+
+		<p>А может быть вы хотите пользоваться многопротокольными приложениями для обмена мгновенными сообщениями, такими как <a href="http://pidgin.im/">Pidgin</a>, <a href="http://psi-im.org/">Psi+</a>, <a href="https://live.gnome.org/Empathy">Empathy</a>, <a href="http://adium.im/">Adium</a>, iChat/Messages или Miranda IM. На Android можно использовать <a href="http://www.xabber.com/">Xabber</a>, <a href="http://beem-project.com/">Beem</a> или <a href="http://oneteam.im/">OneTeam</a>. Знаете ли вы, что большие компании, такие как Facebook, WhatsApp и Google, используют (или использовали ранее) XMPP в качестве основного протокола для обмена мгновенными сообщениями?</p>
+
+		<p>Или можете быть вы - системный администратор, которому нужна локальная система для обмена мгновенными сообщениями. У одного из моих клиентов есть кластер ejabberd, состоящий из 4 виртуальных машин с Debian 7 (по 2 гигабайта оперативной памяти на каждой). Кластер располагается на трёх площадках и в одном дата-центре, и обслуживает 12000 пользователей, из которых обычно одновременно подключено 6000.</p>
+
+		<p>XMPP - это прекрасный расширяемый протокол, дополнительную информацию о котором можно найти здесь: <a href="https://en.wikipedia.org/wiki/XMPP">https://en.wikipedia.org/wiki/XMPP</a></p>
+
+		<h2>2. Информация</h2>
+
+		<p>Эта статья проверена на Debian 7, Ubuntu 12.04 и 10.04, на OS X 10.8 Server. Все использовавшиеся серверы ejabberd были установлены через пакетный менеджер - либо через apt, либо через порты. Описанная конфигурация не проверялась, но также должна работать в Windows Server 2012 с ejabberd, собранном из исходных текстов на языке Erlang.</p>
+
+		<p>В статье используется домен example.org и сервер chat.example.org в качестве доменного имени XMPP-сервера. В разделе про кластеризацию используются серверы srv1.example.org и srv2.example.org. При настройке замените эти значения на ваши собственные.</p>
+
+		<h2>3. Установка одиночного/ведущего узла ejabberd</h2>
+
+		<p>Если вы хотите настроить одиночный узел ejabberd, без кластеризации, тогда воспользуйтесь только этим разделом и разделом про DNS. Если же вы хотите настроить кластер, тогда воспользуйтесь этим разделом, а затем перейдите к следующему.</p>
+
+		<h3>3.1. Установка ejabberd</h3>
+
+		<p>Это просто - для установки ejabberd воспользуйтесь пакетным менеджером:</p>
+
+		<pre class="console">apt-get install ejabberd</pre>
+
+		<p>Также нужно установить несколько зависимостей среды поддержки Erlang.</p>
+
+		<h3>3.2. Настройка ejabberd</h3>
+
+		<p>Приступим к настройке сервиса ejabberd. Для начала остановим его:</p>
+
+		<pre class="console">/etc/init.d/ejabberd stop</pre>
+
+		<p>Теперь запустите текстовый редактор для редактирования файлов конфигурации. Конфигурация ejabberd - это конфигурация на языке Erlang, поэтому комментарии начинаются не с #, а с %%. Также каждая опция в файле конфигурации завершается точкой (.).</p>
+
+		<pre class="console">vim /etc/ejabberd/ejabberd.cfg</pre>
+
+		<p>Сначала добавим домен для обмена мгновенными сообщениями:</p>
+
+		<pre class="code">{hosts, ["example.org"]}.</pre>
+
+		<p>Если нужно больше доменов, можно добавить и их следующим образом:</p>
+
+		<pre class="code">{hosts, ["sparklingclouds.nl", "raymii.org", "sparklingnetwork.nl"]}.</pre>
+
+		<p>Эти доменные имена не являются именами серверов.</p>
+
+		<p>Далее объявим пользователя-администратора:</p>
+
+		<pre class="code">{acl, admin, {user, "remy", "example.org"}}.</pre>
+
+		<p>remy соответствует части до символа @ в идентификаторе XMPP, а example.org соответствует части после этого символа. Если вам нужно больше пользователей-администраторов - добавьте дополнительные строки ACL.</p>
+
+		<p>Теперь если вы хотите разрешить регистрироваться через XMPP-клиента, включите встроенную функцию регистрации:</p>
+
+		<pre class="code">{access, register, [{allow, all}]}.</pre>
+
+		<p>Если используется аутентификацию по данным из MySQL или LDAP, тогда возможность регистрации нужно отключить.</p>
+
+		<p>Мне нравится пользоваться общими списками контактов с группами списков контактов. Некоторые из моих клиентов используют общий список контактов для всех, так что никто не может добавить контакты, но могут видеть всех подключенных пользователей. Для этого нужно включить modsharedroster:</p>
+
+		<pre class="code">%% Сделайте это в блоке modules
+{mod_shared_roster,[]},</pre>
+
+		<p>Если файл конфигурации вас устраивает, сохраните его и перезапустите ejabberd:</p>
+
+		<pre class="console">/etc/init.d/ejabberd restart</pre>
+
+		<p>Теперь для проверки нашей конфигурации нужно зарегистрировать пользователя. Если функция встроенной регистрации была включена, можно воспользоваться XMPP-клиентом. Если же функция встроенной регистрации была выключена - воспользуйтесь командой ejabberdctl:</p>
+
+		<pre class="console">ejabberdctl register remy example.org 'passw0rd'</pre>
+
+		<p>Теперь проверим учётную запись, воспользовавшись клиентом XMPP, таким как Pidgin, Psi+ или Empathy. Если вам удалось подключиться, можно продолжать настройку. Если же не удалось - проверьте журналы ejabberd, настройки пакетного фильтра и тому подобное, чтобы устранить проблему.</p>
+
+		<h2>4. Кластеризация ejabberd</h2>
+
+		<p>Отметим, прежде чем приступать к кластеризации ejabberd, вам нужен правильно работающий ведущий узел. Если ведущий узел не работает, то сначала исправьте его.</p>
+
+		<p>Важно: используемые вами модули должны быть одинаковыми на каждом из узлов кластера. Если вы используете аутентификацию LDAP/MySQL или shared_roster, или особые настройки MUC, или отправку сообщений не подключенным в данный момент пользователям, то при кластеризации эти настройки не будут действовать, пока не выставить их на всех узлах.</p>
+
+		<p>Теперь давайте приступим. Сначала займёмся настройкой ведущего узла, а затем перейдём к настройке ведомых узлов.</p>
+
+		<h3>4.1. Подготовка ведущего узла</h3>
+
+		<p>Остановим сервер на ведущем узле и отредактируем файл /etc/default/ejabberd:</p>
+
+		<pre class="console">vim /etc/default/ejabberd</pre>
+
+		<p>Раскомментируем опцию с именем узла и заменим её значение на полное доменное имя узла:</p>
+
+		<pre class="code">ERLANG_NODE=ejabberd@srv1.example.org</pre>
+
+		<p>Затем добавим внешний (публичный) IP-адрес, указав его как кортеж - с запятыми вместо точек:</p>
+
+		<pre class="code">INET_DIST_INTERFACE={20,30,10,5}</pre>
+
+		<p>Если ejabberd будет использоваться только в локальной сети, тогда укажите первичный адрес сетевой карты.</p>
+
+		<p>Мы собираемся удалить все таблицы mnesia. Они будут пересозданы при перезапуске ejabberd. Это проще, чем менять сами данные mnesia. Не делайте этого на уже настроенном узле, не сняв резервную копию с cookie-файла Erlang.</p>
+
+		<p>Для начала создадим резервную копию cookie-файла Erlang:</p>
+
+		<pre class="console">cp /var/lib/ejabberd/.erlang.cookie ~/</pre>
+
+		<p>Затем удалим базу данных mnesia:</p>
+
+		<pre class="console">rm /var/lib/ejabberd/*</pre>
+
+		<p>Теперь восстановим cookie-файл Erlang:</p>
+
+		<pre class="console">cp ~/.erlang.cookie /var/lib/ejabberd/.erlang.cookie</pre>
+
+		<p>Чтобы удостовериться, что все процессы erlang были остановлены, завершите все процессы пользователя ejabberd принудительно. Делать это не обязательно, но диспетчер процессов epmd всё ещё может продолжать работать:</p>
+
+		<pre class="console">killall -u ejabberd</pre>
+
+		<p>И теперь снова запустим ejabberd:</p>
+
+		<pre class="console">/etc/init.d/ejabberd start</pre>
+
+		<p>Если после этого удалось подключиться и обмениваться сообщениями, тогда перейдите к следующей части - к настройке ведомых узлов.</p>
+
+		<h3>4.2. Подготовка ведомых узлов</h3>
+
+		<p>Сначала ведомые узлы нужно настроить так, как описано в первой части этой статьи. Для этого можно скопировать файлы конфигурации с ведущего узла.</p>
+
+		<p>Остановим сервер ejabberd:</p>
+
+		<pre class="console">/etc/init.d/ejabberd stop</pre>
+
+		<p>Остановим сервер ejabberd на ведомом узле и отредактируем файл /etc/default/ejabberd:</p>
+
+		<pre class="console">vim /etc/default/ejabberd</pre>
+
+		<p>Раскомментируем опцию с именем узла и заменим её значение на полное доменное имя узла:</p>
+
+		<pre class="code">ERLANG_NODE=ejabberd@srv2.example.org</pre>
+
+		<p>Затем добавим внешний (публичный) IP-адрес, указав его как кортеж - с запятыми вместо точек:</p>
+
+		<pre class="code">INET_DIST_INTERFACE={30,40,20,6}</pre>
+
+		<p>Если ejabberd будет использоваться только в локальной сети, тогда укажите первичный адрес сетевой карты.</p>
+
+		<p>Теперь удалим все таблицы mnesia:</p>
+
+		<pre class="console">rm /var/lib/ejabberd/*</pre>
+
+		<p>Скопируем cookie-файл с ведущего узла ejabberd при помощи cat и vim или через scp:</p>
+
+		<pre class="console"># На ведущем узле
+cat /var/lib/ejabberd/.erlang.cookie
+HFHHGYYEHF362GG1GF
+
+# На ведомом узле
+echo "HFHHGYYEHF362GG1GF" &gt; /var/lib/ejabberd/.erlang.cookie
+chown ejabberd:ejabberd /var/lib/ejabberd/.erlang.cookie</pre>
+
+		<p>Теперь приступим к компиляции модуля easy_cluster на Erlang. Это очень маленький модуль, который добавляет к оболочке Erlang команду для более простого добавления кластера. Вместо этих команд в оболочке Erlang можно выполнить сами Erlang-функции в отладочной оболочке, но я считаю, что модуль удобнее и его использование уменьшает вероятность ошибок:</p>
+
+		<pre class="console">vim /usr/lib/ejabberd/ebin/easy_cluster.erl</pre>
+
+		<p>Добавьте следующее содержимое:</p>
+
+		<pre class="code">-module(easy_cluster).
+
+-export([test_node/1,join/1]).
+
+test_node(MasterNode) -&gt;
+    case net_adm:ping(MasterNode) of 'pong' -&gt;
+        io:format("server is reachable.~n"); %% Сервер доступен
+    _ -&gt;
+        io:format("server could NOT be reached.~n") %% Сервер не доступен
+    end.
+
+join(MasterNode) -&gt;
+    application:stop(ejabberd),
+    mnesia:stop(),
+    mnesia:delete_schema([node()]),
+    mnesia:start(),
+    mnesia:change_config(extra_db_nodes, [MasterNode]),
+    mnesia:change_table_copy_type(schema, node(), disc_copies),
+    application:start(ejabberd).</pre>
+
+		<p>Сохраните его и скомпилируйте в работающий Erlang-модуль:</p>
+
+		<pre class="console">cd /usr/lib/ejabberd/ebin/
+erlc easy_cluster.erl</pre>
+
+		<p>Теперь проверим, что компиляция была успешной:</p>
+
+		<pre class="console">ls | grep easy_cluster.beam</pre>
+
+		<p>Если вы увидели файл, значит компиляция завершилась успешно. Дополнительную информацию по модулю можно найти здесь: <a href="https://github.com/chadillac/ejabberd-easy_cluster/">https://github.com/chadillac/ejabberd-easy_cluster/</a></p>
+
+		<p>Теперь приступим к присоединению узла кластера к ведущему узлу. Убедитесь что ведущий узел запущен и работает. Также удостоверьтесь, что cookie-файлы Erlang синхронизированы.</p>
+
+		<p>На ведомом узле запустите интерактивную оболочку ejabberd:</p>
+
+		<pre class="console">/etc/init.d/ejabberd live</pre>
+
+		<p>Эта команда запустит оболочку Erlang, после чего оболочка начнёт выводить информацию. Когда она прекратит вывод, можно нажать Enter и получить приглашение. Введите следующую команду, чтобы проверить, что ведущий узел достижим:</p>
+
+		<pre class="console">easy_cluster:test_node('ejabberd@srv1.example.org').</pre>
+
+		<p>Вы должны получить сообщение "server is reachable" - "Сервер доступен". Если это так, то продолжим.</p>
+
+		<p>Введём следующую команду, чтобы действительно присоединить узел:</p>
+
+		<pre class="console">easy_cluster:join('ejabberd@srv1.example.org').</pre>
+
+		<p>Вот пример вывода при успешной проверке и подсоединении узла:</p>
+
+		<pre class="console">/etc/init.d/ejabberd live
+*******************************************************
+* To quit, press Ctrl-g then enter q and press Return *
+*******************************************************
+
+Erlang R15B01 (erts-5.9.1) [source] [async-threads:0] [kernel-poll:false]
+
+Eshell V5.9.1 (abort with ^G)
+
+=INFO REPORT==== 10-Jun-2013::20:38:15 ===
+I(&lt;0.39.0&gt;:cyrsasl_digest:44) : FQDN used to check DIGEST-MD5 SASL authentication: "srv2.example.org"
+
+=INFO REPORT==== 10-Jun-2013::20:38:15 ===
+I(&lt;0.576.0&gt;:ejabberd_listener:166) : Reusing listening port for 5222
+
+=INFO REPORT==== 10-Jun-2013::20:38:15 ===
+I(&lt;0.577.0&gt;:ejabberd_listener:166) : Reusing listening port for 5269
+
+=INFO REPORT==== 10-Jun-2013::20:38:15 ===
+I(&lt;0.578.0&gt;:ejabberd_listener:166) : Reusing listening port for 5280
+
+=INFO REPORT==== 10-Jun-2013::20:38:15 ===
+I(&lt;0.39.0&gt;:ejabberd_app:72) : ejabberd 2.1.10 is started in the node 'ejabberd@srv2.example.org'
+easy_cluster:test_node('ejabberd@srv1.example.org').
+server is reachable.
+ok
+(ejabberd@srv2.example.org)2&gt; easy_cluster:join('ejabberd@srv1.example.org').
+
+=INFO REPORT==== 10-Jun-2013::20:38:51 ===
+I(&lt;0.39.0&gt;:ejabberd_app:89) : ejabberd 2.1.10 is stopped in the node 'ejabberd@srv2.example.org'
+
+=INFO REPORT==== 10-Jun-2013::20:38:51 ===
+    application: ejabberd
+    exited: stopped
+    type: temporary
+
+=INFO REPORT==== 10-Jun-2013::20:38:51 ===
+    application: mnesia
+    exited: stopped
+    type: permanent
+
+=INFO REPORT==== 10-Jun-2013::20:38:52 ===
+I(&lt;0.628.0&gt;:cyrsasl_digest:44) : FQDN used to check DIGEST-MD5 SASL authentication: "srv2.example.org"
+
+=INFO REPORT==== 10-Jun-2013::20:38:53 ===
+I(&lt;0.1026.0&gt;:ejabberd_listener:166) : Reusing listening port for 5222
+
+=INFO REPORT==== 10-Jun-2013::20:38:53 ===
+I(&lt;0.1027.0&gt;:ejabberd_listener:166) : Reusing listening port for 5269
+
+=INFO REPORT==== 10-Jun-2013::20:38:53 ===
+I(&lt;0.1028.0&gt;:ejabberd_listener:166) : Reusing listening port for 5280
+ok
+(ejabberd@srv2.example.org)3&gt;
+
+=INFO REPORT==== 10-Jun-2013::20:38:53 ===
+I(&lt;0.628.0&gt;:ejabberd_app:72) : ejabberd 2.1.10 is started in the node 'ejabberd@srv2.example.org'</pre>
+
+		<p>Покиньте оболочку Erlang дважды нажав Ctrl+C. Теперь остановите ejabberd и запустите его снова:</p>
+
+		<pre class="console">/etc/init.d/ejabberd restart</pre>
+
+		<p>Теперь в административном веб-интерфейсе можно проверить, что узел успешно присоединился к кластеру: <a href="http://srv1.example.org:5280/admin/nodes/">http://srv1.example.org:5280/admin/nodes/</a></p>
+
+		<img src="ejabberd.png" />
+
+		<p>Если будут отображены другие узлы, значит всё готово. Если нет, тогда убедитесь, что выполнили каждый шаг и обратитесь к разделу ниже с описанием решений проблем.</p>
+
+		<p>Повторите описанные выше шаги для каждого из узлов, которые нужно добавить. Вы можете добавить столько узлов, сколько захотите.</p>
+
+		<h2>5. Ошибки при кластеризации</h2>
+
+		<p>В процессе настройки кластера могут произойти ошибки. Ниже перечислены примечания по встречавшимся мне ошибкам.</p>
+
+		<ul>
+			<li>Перезапуск ejabberd не приводит к перезапуску epmd (демона Erlang)
+
+				<ul>
+					<li>избыточное решение: killall -u ejabberd</li>
+				</ul>
+
+			</li>
+
+			<li>ejabberd возвращает ошибки с именем узла
+				<ul>
+					<li>убедитесь в правильности настройки имени узла (имя узла - srv1.example.com).</li>
+				</ul>
+
+			</li>
+
+			<li>ejabberd возвращает ошибки несогласованности базы данных
+				<ul>
+					<li>создайте резервную копию cookie-файла Erlang (/var/lib/ejabberd/.erlang.cookie), а затем удалите содержимое каталога /var/lib/ejabberd, чтобы mnesia перестроила таблицы.</li>
+				</ul>
+			</li>
+
+			<li>ejabberd сообщает "Попытка подключения от запрещённого узла" - "Connection attempt from disallowed node"
+				<ul>
+					<li>убедитесь в корректности cookie-файла Erlang (/var/lib/ejabberd/.erlang.cookie). Перед вставкой содержимого в редакторе vim перейдите в режим вставки...</li>
+				</ul>
+			</li>
+		</ul>
+
+		<h2>6. Записи DNS SRV</h2>
+
+		<p>Записи DNS SRV используются XMPP-клиентами и другими XMPP-серверами для поиска правильного адреса сервера. Например, Алиса настраивает своего XMPP-клиента на адрес alice@example.org. Её клиент ищет запись SRV и узнаёт, что сервер для обмена мгновенными сообщениями находится по адресу chat.example.org. Боб настраивает своего клиента на адрес bob@bobsbussiness.com и добавляет Алису в список контактов. XMPP-сервер домена bobsbussiness.com ищет запись SRV и узнаёт, что он должен установить подключение типа сервер-к-серверу по адресу chat.example.org, чтобы дать Бобу возможность переписываться с Алисой.</p>
+
+		<p>Конфигурация BIND 9 будет выглядеть следующим образом:</p>
+
+		<pre class="code">; XMPP
+_xmpp-client._tcp IN SRV 5 0 5222 chat.example.org.
+_xmpp-server._tcp IN SRV 5 0 5269 chat.example.org.
+_jabber._tcp IN SRV 5 0 5269 chat.example.org.</pre>
+
+		<p>Основные записи SRV указывают порты для подключения клиентов и для подключений типа сервер-к-серверу, а третья запись - это устаревший формат записей Jabber. Если используется хостинг DNS, введите эти записи в панели администрирования или посоветуйтесь с технической поддержкой хостинга.</p>
+
+		<p>Для проверки правильности SRV-записей можно воспользоваться командой dig:</p>
+
+		<pre class="console">dig _xmpp-client._tcp.example.org SRV
+dig _xmpp-server._tcp.example.org SRV</pre>
+
+		<p>Или если на вашем компьютере установлена операционная система Windows, тогда воспользуйтесь nslookup:</p>
+
+		<pre class="console">nslookup -querytype=SRV _xmpp-client._tcp.example.org
+nslookup -querytype=SRV _xmpp-server._tcp.example.org</pre>
+
+		<p>Если результат будет похожим на приведённый ниже, значит всё настроено верно:</p>
+
+		<pre class="console">;; QUESTION SECTION:
+;_xmpp-client._tcp.raymii.org. IN SRV
+;; ANSWER SECTION:
+_xmpp-client._tcp.raymii.org. 3600 IN SRV 5 0 5222 chat.raymii.org.</pre>
+
+		<p>На самом же деле в моём случае у chat.raymii.org имеется несколько A-записей:</p>
+
+		<pre class="console">;; ADDITIONAL SECTION:
+chat.raymii.org. 3600 IN A 84.200.77.167
+chat.raymii.org. 3600 IN A 205.185.117.74
+chat.raymii.org. 3600 IN A 205.185.124.11</pre>
+
+		<p>Но если был настроен только один узел, то это будет либо запись CNAME, либо одна запись A/AAAA.</p>
+
+		<h2>7. Заключительное тестирование</h2>
+
+		<p>Чтобы протестировать, что всё работает, можно добавить в список контактов XMPP-бота Duck Duck Go. Если вам без проблем удалось добавить его и поговорить с ним, то значит всё было сделано верно. Адрес бота - im@ddg.gg.</p>
+
+		<h2>8. Примечания переводчика</h2>
+
+		<p>В оригинальной статье часто использовалось слово "федерализация" для того, чтобы подчеркнуть, что протокол XMPP не предполагает наличие единых серверов для всей сети, как это происходит в случае ICQ, WhatsApp, Viber или Telegram. XMPP предусматривает возможность создания множества сетей, у каждой из которых есть свои собственные серверы. Серверы каждой из сетей могут взаимодействовать с серверами других сетей на равноправных началах. То есть по аналогии с унитарными и федеральными государствами, ICQ можно назвать унитарной сетью, а XMPP можно назвать федеративной сетью. В переводе эти слова убраны, т.к. они не общеприняты и только запутывают. В качестве компенсации я добавил это примечание.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Реми ван Элст. Настройка ejabberd для обмена мгновенными сообщениями по протоколу XMPP - своя альтернатива Google Talk Hangouts, 2013">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

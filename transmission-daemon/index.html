@@ -1,0 +1,110 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="torrent,transmission,debian,linux" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2008-07-27 -->
+		<title>Настройка торрент-клиента transmission-daemon в Debian</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка торрент-клиента transmission-daemon в Debian</h1>
+
+		<p>Торрентом я начал интересоваться несколько месяцев назад, как только у меня появился безлимитный интернет. Как ни печально это для других протоколов, но торрент показал себя как самое надёжное средство для скачивания объёмных данных, например, DVD-образов любимого мною Debian'а.</p>
+
+		<p>Захотелось мне выделить под торрент-клиент отдельную Linux-машинку под Debian, благо есть старый системный блок на котором это можно сделать.</p>
+
+		<p>Начал я с обзора торрент-клиентов под Linux:</p>
+
+		<p><a href="http://starl1te.wordpress.com/2007/06/14/torrent-%D0%BA%D0%BB%D0%B8%D0%B5%D0%BD%D1%82%D1%8B-%D0%B2-linux/">Torrent клиенты в Linux</a></p>
+
+		<p>Я со своей идеей оказался не одинок, многим другим людям пришла в голову та же мысль. Вариантов программ без GUI оказалось немного - rtorrent c ncurses-интерфейсом, мультипротокольный p2p-демон mldonkey, transmission-daemon и btpd.</p>
+
+		<p>rtorrent можно запустить в screen-сессии, а можно, в добавок к этому, ещё и прикрутить к нему web-интерфейс:</p>
+
+		<ul>
+			<li><a href="http://librarian.spb.ru/2008/06/10/config-rtorrent/">config rtorrent</a></li>
+
+			<li><a href="http://librarian.spb.ru/2008/04/24/skachal-i-nastroil-rtorrent/">Скачал и настроил rtorrent</a></li>
+
+			<li><a href="http://librarian.spb.ru/2008/06/08/rtorrent-pervyie-shagi/">rtorrent - первые шаги</a></li>
+
+			<li><a href="http://streamzone.ru/tracker/phpbb2.php?page=viewtopic&amp;printertopic=1&amp;t=2555&amp;start=0&amp;postdays=0&amp;postorder=asc">Torrent сервер для раздач файлов на платформе Gentoo Linux</a></li>
+		</ul>
+
+		<p>В общем-то не самый плохой вариант, но мне запуск ncurses-программы в сессии screen не кажется кошерным.</p>
+
+		<p>В процессе дальнейших копаний материалов на эту тему решил, что mldonkey также мне не подходит, поскольку он, судя по отзывам, часто падает.</p>
+
+		<p>Есть ещё некий btpd, копать в направлении которого мне не захотелось, поскольку я уже подобрал подходящий вариант, о котором ниже. Если кому-то будет интересно узнать что-либо о btpd, прошу рассказать о результатах копания мне :)</p>
+
+		<p>Наконец был найден подходящий вариант, основанный на transmission-daemon и AJAX веб-интерфейсе Clutch:</p>
+
+		<p><a href="http://sigizmund.livejournal.com/278872.html">Clutch</a></p>
+
+		<p>Вот, кстати, краткое описание консольного клиента, демона и утилиты управления демоном torrent:</p>
+
+		<p><a href="http://www.tux.in.ua/articles/709">Торрент-клиент Transmission</a></p>
+
+		<p>Этот вариант и был выбран в качестве наиболее перспективного, для дальнейшего изучения были скачаны руководства по установке связки transmission и Clutch:</p>
+
+		<ul>
+			<li><a href="http://recurser.com/trac/transmission/wiki/GettingStarted">Installation Clutch (Linux)</a></li>
+
+			<li><a href="http://www.mybook-linux.co.nr/transmission.html">Installing Transmission with Clutch WebUI</a></li>
+
+			<li><a href="http://www.synology.com/wiki/index.php/Transmission_Clutch_HowTo">Transmission Clutch HowTo</a></li>
+		</ul>
+
+		<p>В Debian Etch поставить transmission без GTK оказалось непросто, т.к. пакета без GTK-интерфейса в репозитарии не было. Я написал инструкцию по сборке пакета без GTK-клиента, но теперь она не нужна, т.к. в Lenny пакет transmission был разделён на три части:</p>
+
+		<ol>
+			<li>transmission-common - содержит различные README, информацию о лицензии и т.п.,</li>
+
+			<li>transmission-cli - содержит демон, утилиту для правления демоном, прокси и простой консольный клиент, который может работать отдельно от демона,</li>
+
+			<li>transmission-gtk - графическая утилита для управления демоном, использующая GTK.</li>
+		</ol>
+
+		<p>Установим пакет transmission-cli:</p>
+
+		<pre class="console"># aptitude install transmission-cli</pre>
+
+		<p>Однако, как и в Etch, в Lenny нет скрипта для запуска и остановки демона и нет конфигурационного файла для его настройки. Я написал, как мне кажется, довольно гибко настраиваемый скрипт для запуска transmission-daemon. Скачать его можно здесь: <a href="transmission.sh">transmission.sh</a></p>
+
+		<p>Помещаем скрипт в каталог /etc/init.d/.</p>
+
+		<p>Для настройки опций запуска демона используется специальный конфигурационный файл, шаблон которого можно взять здесь: <a href="transmission.conf">transmission.conf</a></p>
+
+		<p>По-умолчанию я выставил те настройки, которые, как мне показалось, будут подходящими большинству пользователей.</p>
+
+		<p>Для себя же я поменял настройки так:</p>
+
+		<pre class="code">TORRENT_DIR=/home/torrents/
+PORT_MAPPING=disable
+USER=www-data
+GROUP=www-data</pre>
+
+		<p>Запускаем демон вручную:</p>
+
+		<pre class="console"># /etc/init.d/transmission.sh start</pre>
+
+		<p>Осталось добавить этот скрипт в автозагрузку и автовыгрузку.</p>
+
+		<pre class="console"># update-rc.d transmission.sh defaults</pre>
+
+		<p>Всё, на этом первая статья завершена. В следующей статье расскажу, как я настраивал веб-интерфейс Clutch к transmission-daemon.</p>
+
+		<p>Последнее обновление 26 февраля 2009 года.</p>
+
+		<p>Дополнение от 8 октября 2009 года:</p>
+
+		<p>Transmission всех версий выше 1.22 имеет новый способ управления. Теперь для управления демоном используется не сокет-файл, а HTTP-сервер, работающий по умолчанию на TCP-порту 9091. Сервер поддерживает digest-авторизацию, управление осуществляется с помощью какой-то разновидности протокола RPC. Также на этом HTTP-сервере имеется встроенный Web-клиент для управления Transission, старый знакомый Clutch, который доступен при подключении браузером к серверу. Никаких особых настроек не требуется, в squeeze демон снабжён init-сценарием для запуска.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка торрент-клиента transmission-daemon в Debian">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,500 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="python,django,перевод" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-07-30 -->
+		<title>Джэми Мэтьюз. Построение высокоуровневого API запросов: правильный способ использования ORM Django, 2012</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Джэми Мэтьюз. Построение высокоуровневого API запросов: правильный способ использования ORM Django, 2012</h1>
+
+		<p>Перевод статьи: <a href="https://www.dabapps.com/blog/higher-level-query-api-django-orm/">Building a higher-level query API: the right way to use Django's ORM</a></p>
+
+		<p>Автор: Джэми Мэтьюз (Jamie Matthews)</p>
+
+		<p>Эта статья основана на обсуждении в <a href="http://brightonpy.org/">группе пользователей Python города Брайтон</a> (Brighton Python User Group) 10 апреля 2012 года.</p>
+
+		<h2>1. Аннотация</h2>
+
+		<p>В этой статье я хочу показать, что использование низкоуровневых методов запросов ORM Django (filter, order_by и т.п.) прямо в представлении обычно является плохой практикой. Вместо этого лучше построить собственный проблемно-ориентированный API запросов на уровне модели, которой принадлежит бизнес-логика. Сделать это в Django не особо просто, но глубоко погрузившись во внутренности ORM, всё же можно найти для этого несколько приемлемых способов.</p>
+
+		<h2>2. Обзор</h2>
+
+		<p>При написании приложений Django мы привыкли добавлять методы к моделям для изоляции бизнес-логики и сокрытия деталей реализации. Этот подход кажется совершенно естественным и он действительно свободно используется во встроенных приложениях Django:</p>
+
+		<pre class="console">&gt;&gt;&gt; from django.contrib.auth.models import User
+&gt;&gt;&gt; user = User.objects.get(pk=5)
+&gt;&gt;&gt; user.set_password('super-sekrit')
+&gt;&gt;&gt; user.save()</pre>
+
+		<p>Здесь set_password - это метод, определённый в модели django.contrib.auth.models.User, который скрывает детали реализации хэширования пароля. В наглядном виде этот код выглядит примерно следующим образом:</p>
+
+		<pre class="code">from django.contrib.auth.hashers import make_password
+
+class User(models.Model):
+
+    # здесь находятся поля модели...
+
+    def set_password(self, raw_password):
+        self.password = make_password(raw_password)</pre>
+
+		<p>Мы построили проблемно-ориентированный API поверх инструментов для обобщённого низкоуровневого объектно-реляционного отображения, которые предоставляются Django. Это основа проблемного-ориентированного подхода: мы увеличиваем количество уровней абстракции, делая менее явным код, взаимодействующий с API. В результате код получается более устойчивым, пригодным для повторного использования и (самое важное) более наглядным.</p>
+
+		<p>Итак, мы уже применили этот подход к отдельным экземплярам модели. Почему бы не воспользоваться подобным подходом по отношению к API, которое используется для выборки коллекций экземпляров моделей из базы данных?</p>
+
+		<h2>3. Учебное приложение: список дел</h2>
+
+		<p>Чтобы проиллюстрировать этот подход, воспользуемся простым приложением для ведения списка дел. Оговоримся ещё раз: это учебное приложение. Тяжело показать настоящее приложение без необходимости углубляться во множество деталей кода. Не обращайте внимание на реализацию списка дел, а вместо этого постарайтесь представить, как этот подход будет работать в одном из ваших полномасштабных приложений.</p>
+
+		<p>Вот файл models.py из нашего приложения:</p>
+
+		<pre class="code">from django.db import models
+
+PRIORITY_CHOICES = [(1, 'High'), (2, 'Low')]
+
+class Todo(models.Model):
+    content = models.CharField(max_length=100)
+    is_done = models.BooleanField(default=False)
+    owner = models.ForeignKey('auth.User')
+    priority = models.IntegerField(choices=PRIORITY_CHOICES,
+                                   default=1)</pre>
+
+		<p>Теперь давайте посмотрим, какие запросы к этим данным мы могли бы выполнить. Допустим, мы создаём представление для просмотра списка дел из нашего приложения. Мы хотим отобразить все незавершённые дела с высоким приоритетом, существующие в настоящее время у вошедшего пользователя. Вот наш первоначальный вариант кода:</p>
+
+		<pre class="code">def dashboard(request):
+
+    todos = Todo.objects.filter(
+        owner=request.user
+    ).filter(
+        is_done=False
+    ).filter(
+        priority=1
+    )
+
+    return render(request, 'todos/list.html', {
+        'todos': todos,
+    })</pre>
+
+		<p>Да, я знаю, что этом можно записать проще: request.user.todo_set.filter(is_done=False, priority=1). Но напоминаю: это просто пример!</p>
+
+		<h2>4. Почему это плохо?</h2>
+
+		<ul>
+			<li>Во-первых, это многословно. Семь строк (в зависимости от того, как вы предпочитаете расставлять переводы строк в цепочках вызовов методов) просто чтобы получить интересующие нас строки. Конечно, это всего-лишь пример. В настоящем приложении код обращения к ORM может быть гораздо более сложным.</li>
+
+			<li>Здесь наблюдается утечка деталей реализации. Код, который взаимодействует с моделью, должен знать, что здесь существует свойство по имени is_done и это BooleanField. Если вы поменяете реализацию (возможно вам захочется заменить булево поле is_done на поле статуса, которое может принимать одно из нескольких значений), то код сломается.</li>
+
+			<li>Он не прозрачен - его смысл не понятен с первого взгляда.</li>
+
+			<li>Наконец, потенциально он будет повторяться. Представьте, что появилось новое требование: написать управляющую команду, которая будет вызываться через планировщик задач каждую неделю и отсылать всем пользователям список незавершённых дел с высоким приоритетом. Вам придётся скопировать и вставить эти семь строк в новый скрипт. Это не соответствует принципу DRY - Do not repeat yourself - не повторяйся.</li>
+		</ul>
+
+		<p>Давайте подведём итоги: использование низкоуровневых методов ORM прямо в представлении обычно является плохой практикой.</p>
+
+		<p>Ну хорошо, а как же это можно улучшить?</p>
+
+		<h2>5. Менеджеры запросов и объекты запросов</h2>
+
+		<p>Перед рассмотрением вариантов решений ненадолго отвлечёмся, чтобы пояснить некоторые понятия.</p>
+
+		<p>В Django есть две тесно связанные конструкции, относящиеся к операциям над таблицами: менеджеры запросов и объекты запросов.</p>
+
+		<p>Менеджер запросов (экземпляр django.db.models.manager.Manager) описывается как "интерфейс, через который осуществляются операции с моделями Django в базе данных". Менеджер модели - это шлюз к функциональности ORM для доступа к таблицам (экземпляры моделей обычно предоставляют функциональность для доступа к одной строке таблицы). Каждый класс модели предоставляет менеджер по умолчанию, который называется objects.</p>
+
+		<p>Объект запроса (django.db.models.query.QuerySet) представляет "коллекцию объектов из базы данных". Это абстракция с отложенным выполнением вычисленного запроса SELECT. Эта абстракция может быть отфильтрована, упорядочена и использована для ограничения или изменения набора строк, который она представляет. Она отвечает за создание и манипулирование экземплярами django.db.models.sql.query.Query, которые преобразуются в настоящие SQL-запросы к одному из поддерживаемых типов нижележащих баз данных.</p>
+
+		<p>Уф. Запутались? Хотя разницу между менеджерами запросов и объектами запросов легко объяснить тем, кто хорошо знаком со внутренностями ORM, она не кажется очевидной, особенно новичкам.</p>
+
+		<p>Эта путаница усугубляется тем, что знакомый API менеджеров на самом деле немного не такой, каким кажется...</p>
+
+		<h2>6. API менеджера - это обман</h2>
+
+		<p>Методы объектов запросов можно объединять в цепочки. Каждый вызов метода объекта запроса (например filter) возвращает клонированную версию исходного объекта запроса, готового к вызову другого метода. Этот естественный интерфейс - часть прекрасного ORM Django.</p>
+
+		<p>Но на самом деле Model.objects - это менеджер запросов (а не объект запроса), что создаёт проблемы: нам нужно начать нашу цепочку методов вызовов с objects, но продолжение цепочки даст в результате объект запроса.</p>
+
+		<p>И как же эта проблема решается в коде самого Django? Итак, обман API объясняется: все методы объекта запроса повторно реализуются в менеджере запросов. Версии этих методов из менеджера запросов просто транслируются в только что созданный объект запроса через self.get_query_set():</p>
+
+		<pre class="code">class Manager(object):
+
+    # Пропускаем служебные вещи...
+
+    def get_query_set(self):
+        return QuerySet(self.model, using=self._db)
+
+    def all(self):
+        return self.get_query_set()
+
+    def count(self):
+        return self.get_query_set().count()
+
+    def filter(self, *args, **kwargs):
+        return self.get_query_set().filter(*args, **kwargs)
+
+    # и так далее сто с лишним строк...</pre>
+
+		<p>Чтобы увидеть весь этот ужас, загляните в <a href="https://github.com/django/django/blob/master/django/db/models/manager.py#L167">исходный код класса Manager</a>.</p>
+
+		<p>Мы скоро вернёмся к этому хитромудрому API...</p>
+
+		<h2>7. Возвращаемся к списку дел</h2>
+
+		<p>И так, давайте вернёмся к решению нашей проблемы прояснения нашего беспорядочного API запросов. <a href="https://docs.djangoproject.com/en/dev/topics/db/managers/#custom-managers">В документации Django рекомендуется</a> следующий подход: определить собственные подклассы Manager и присоединить их к нужным моделям.</p>
+
+		<p>Можно даже добавить в модель несколько дополнительных менеджеров или можно переопределить objects, оставив один менеджер, но добавив к нему собственные методы.</p>
+
+		<p>Давайте попробуем каждый из этих подходов в приложении со списком дел.</p>
+
+		<h3>8.1. Подход 1: несколько собственных менеджеров</h3>
+
+		<pre class="code">class IncompleteTodoManager(models.Manager):
+    def get_query_set(self):
+        return super(TodoManager, self).get_query_set().filter(is_done=False)
+
+class HighPriorityTodoManager(models.Manager):
+    def get_query_set(self):
+        return super(TodoManager, self).get_query_set().filter(priority=1)
+
+class Todo(models.Model):
+    content = models.CharField(max_length=100)
+    # здесь следуют прочие поля...
+
+    objects = models.Manager() # менеджер по умолчанию
+
+    # присоединяем собственные менеджеры:
+    incomplete = models.IncompleteTodoManager()
+    high_priority = models.HighPriorityTodoManager()</pre>
+
+		<p>Реализованное здесь API выглядит следующим образом:</p>
+
+		<pre class="console">&gt;&gt;&gt; Todo.incomplete.all()
+&gt;&gt;&gt; Todo.high_priority.all()</pre>
+
+		<p>К несчастью, этот подход порождает несколько больших проблем.</p>
+
+		<ul>
+			<li>Реализация очень многословная. Нужно определить отдельный класс для каждого кусочка функциональности.</li>
+
+			<li>Создаётся беспорядок в пространстве имён модели. Разработчики Django привыкли использовать Model.objects в качестве шлюза к таблицам. Это пространство имён, под которым собираются все операции на уровне таблиц. Было бы неприятно расстаться с этим чётким соглашением.</li>
+
+			<li>Настоящая беда: нельзя пользоваться цепочками фильтров. Нельзя комбинировать менеджеров: для получения незавершённых и высокоприоритетных дел нужно вернуться к низкоуровневому коду ORM: воспользоваться либо Todo.incomplete.filter(priority=1), либо Todo.high_priority.filter(is_done=False).</li>
+		</ul>
+
+		<p>Я думаю, что минусы полностью перевешивают достоинства этого подхода и создание нескольких менеджеров модели в большинстве случаев является плохой практикой.</p>
+
+		<h3>8.2. Подход 2: методы менеджера</h3>
+
+		<p>Что ж, давайте попробуем другой подход, разрешённый в Django: собственный менеджер с несколькими методами.</p>
+
+		<pre class="code">class TodoManager(models.Manager):
+    def incomplete(self):
+        return self.filter(is_done=False)
+
+    def high_priority(self):
+        return self.filter(priority=1)
+
+class Todo(models.Model):
+    content = models.CharField(max_length=100)
+    # здесь следуют прочие поля...
+
+    objects = TodoManager()</pre>
+
+		<p>Теперь наш API выглядит следующим образом:</p>
+
+		<pre class="console">&gt;&gt;&gt; Todo.objects.incomplete()
+&gt;&gt;&gt; Todo.objects.high_priority()</pre>
+
+		<p>Гораздо лучше. Здесь меньше кода (есть только одно определение класса) и методы запроса размещаются в пространстве имён внутри менеджера objects.</p>
+
+		<p>Однако, такие запросы по-прежнему нельзя объединять в цепочки. Todo.objects.incomplete() вернёт обычный объект запроса, поэтому нельзя написать Todo.objects.incomplete().high_priority(). Нам по-прежнему придётся писать Todo.objects.incomplete().filter(is_done=False). Не годится.</p>
+
+		<h3>8.3. Подход 3: собственный объект запроса</h3>
+
+		<p>Теперь мы на неизведанной территории. Этого нельзя найти в документации Django...</p>
+
+		<pre class="code">class TodoQuerySet(models.query.QuerySet):
+    def incomplete(self):
+        return self.filter(is_done=False)
+
+    def high_priority(self):
+        return self.filter(priority=1)
+
+class TodoManager(models.Manager):
+    def get_query_set(self):
+        return TodoQuerySet(self.model, using=self._db)
+
+class Todo(models.Model):
+    content = models.CharField(max_length=100)
+    # здесь следуют прочие поля...
+
+    objects = TodoManager()</pre>
+
+		<p>Вот как это выглядит при использовании:</p>
+
+		<pre class="console">&gt;&gt;&gt; Todo.objects.get_query_set().incomplete()
+&gt;&gt;&gt; Todo.objects.get_query_set().high_priority()
+&gt;&gt;&gt; # или
+&gt;&gt;&gt; Todo.objects.all().incomplete()
+&gt;&gt;&gt; Todo.objects.all().high_priority()</pre>
+
+		<p>Мы почти на месте! Здесь не больше кода, чем в подходе 2, имеются те же достоинства, а кроме того (барабанная дробь) - можно использовать цепочки!</p>
+
+		<pre class="console">&gt;&gt;&gt; Todo.objects.all().incomplete().high_priority()</pre>
+
+		<p>Однако, совершенство ещё не достигнуто. Собственный менеджер - ничего более, чем шаблонная заготовка. И этот all() выглядит как нарост, который надоедает набирать. Но важнее то, что он всё запутывает - из-за него код выглядит странно.</p>
+
+		<h3>8.4. Подход 3a: копируем Django, транслируем всё</h3>
+
+		<p>Теперь пригодится наше обсуждение "API менеджера - это обман": мы знаем, как исправить эту проблему. Мы просто переопределим все методы из объекта запросов в нашем менеджере, транслируя их обратно в наш объект запросов:</p>
+
+		<pre class="code">class TodoQuerySet(models.query.QuerySet):
+    def incomplete(self):
+        return self.filter(is_done=False)
+
+    def high_priority(self):
+        return self.filter(priority=1)
+
+class TodoManager(models.Manager):
+    def get_query_set(self):
+        return TodoQuerySet(self.model, using=self._db)
+
+    def incomplete(self):
+        return self.get_query_set().incomplete()
+
+    def high_priority(self):
+        return self.get_query_set().high_priority()</pre>
+
+		<p>Мы получаем в точности тот API, какой нам и нужен:</p>
+
+		<pre class="console">&gt;&gt;&gt; Todo.objects.incomplete().high_priority() # Ура!</pre>
+
+		<p>Однако код получился многословным и он не соответствует принципу DRY. Каждый раз, когда нужно добавить новый метод в объект запросов или поменять сигнатуру существующего метода, нужно не забыть сделать такие же изменения в менеджере. В противном случае этот метод не будет работать правильно. Похоже на источник будущих проблем.</p>
+
+		<h3>8.5. Подход 3b: django-model-utils</h3>
+
+		<p>Python - динамический язык. Можно ли избежать повторения шаблонных заготовок? Это возможно при помощи небольшого стороннего приложения, которое называется django-model-utils. Просто запустите pip install django-model-utils, а затем...</p>
+
+		<pre class="code">from model_utils.managers import PassThroughManager
+
+class TodoQuerySet(models.query.QuerySet):
+    def incomplete(self):
+        return self.filter(is_done=False)
+
+    def high_priority(self):
+        return self.filter(priority=1)
+
+    class Todo(models.Model):
+        content = models.CharField(max_length=100)
+        # здесь следуют прочие поля...
+
+        objects = PassThroughManager.for_queryset_class(TodoQuerySet)()</pre>
+
+		<p>Вот так намного приятнее. Мы просто определили наш собственный подкласс объекта запросов, как и в прошлый раз, и добавили его в нашу модель через класс PassThroughManager, который имеется в django-model-utils.</p>
+
+		<p>PassThroughManager работает благодаря реализации метода __getattr__, который перехватывает вызовы несуществующих методов и автоматически передаёт их в объект запроса. Он выполняет несколько проверок для предотвращения бесконечной рекурсии при обращении к некоторым свойствам. Именно поэтому я рекомендую использовать испытанную реализацию, предоставляемую django-model-utils, а не пытаться накропать её собственноручно.</p>
+
+		<h2>8. Чем это поможет?</h2>
+
+		<p>Помните код представления, который был приведён выше?</p>
+
+		<pre class="code">def dashboard(request):
+
+    todos = Todo.objects.filter(
+        owner=request.user
+    ).filter(
+        is_done=False
+    ).filter(
+        priority=1
+    )
+
+    return render(request, 'todos/list.html', {
+        'todos': todos,
+    })</pre>
+
+		<p>После небольшой доработки его можно привести к следующему виду:</p>
+
+		<pre class="code">def dashboard(request):
+    todos = Todo.objects.for_user(
+        request.user
+    ).incomplete().high_priority()
+
+    return render(request, 'todos/list.html', {
+        'todos': todos,
+    })</pre>
+
+		<p>Я думаю вы согласитесь, что эта вторая версия намного проще и нагляднее, чем первая?</p>
+
+		<h2>9. Может ли помочь Django?</h2>
+
+		<p>В списке рассылки django-dev <a href="https://groups.google.com/d/topic/django-developers/rRr314MxcwI/discussion">обсуждались</a> способы упростить решение рассмотренной проблемы. По итогам обсуждения была заведена <a href="https://code.djangoproject.com/ticket/17494">заявка</a>. Захари Воз (Zachary Voase) предложил следующее:</p>
+
+		<pre class="code">class TodoManager(models.Manager):
+
+    @models.querymethod
+    def incomplete(query):
+        return query.filter(is_done=False)</pre>
+
+		<p>Это определение задекорированного метода incomplete может волшебным образом сделать его доступным сразу в менеджере и объекте запросов.</p>
+
+		<p>Лично я не совсем согласен с идеей использования декоратора. Он слегка затуманивает детали и не выглядит изящным. Я нутром чую, что добавление методов в подкласс объектов запросов (а не в подкласс менеджера) - это лучший, более простой подход.</p>
+
+		<p>Можно было бы пойти и дальше. Вернувшись назад и заново продумав проектные решения API Django с нуля, может быть удалось бы найти настоящие, более глубокие улучшения. Можно ли стереть различия между менеджерами и объектами запросов? Или по крайней мере прояснить эти различия?</p>
+
+		<p>Я убеждён, что если бы была предпринята такая переработка, то она должна была бы появиться в Django 2.0 или в последующих версиях.</p>
+
+		<h2>10. Итак, напомним:</h2>
+		
+		<p>Использование низкоуровневого кода запросов ORM в представлениях и других высокоуровневых частях приложения обычно является плохой практикой. Вместо этого, создав собственное API объектов запросов и присоединив его к модели при помощи PassThroughManager из django-model-utils, мы получаем следующие выгоды:</p>
+
+		<ul>
+			<li>Код получается более компактным и устойчивым.</li>
+
+			<li>Уменьшаются повторы, увеличивается уровень абстракции.</li>
+
+			<li>Бизнес-логика помещается на уровень модели, к которой она и принадлежит.</li>
+		</ul>
+
+		<p>Благодарю за чтение!</p>
+
+		<p>Если вы хотите вонзить свои зубы в большие проекты на Django (а также и во множество других интересных вещей), мы можем <a href="https://www.dabapps.com/careers/">предложить вам работу</a>.</p>
+
+		<h2>11. Примечания переводчика</h2>
+
+		<p>Поначалу могло показаться, что в этой статье рассматривается ещё один способ избавления от "магических чисел", который был рассмотрен в статье <a href="../django-choices/">Правильная обработка choices в полях моделей Django</a>. Однако это решение отличается от уже рассмотренного. Приведу пример того, как его можно применить в реальных проектах.</p>
+
+		<p>Эту статью я нашел именно потому, что мне был нужен способ добавить собственный метод в объект запроса. Этот пример хорош ещё и потому, что в нём одновременно используются идеи из прошлой статьи <a href="../django-choices/">Правильная обработка choices в полях моделей Django</a> и из этой статьи.</p>
+
+		<p>Имеется модель, которая содержит настройки менеджера SNMP. Напоминаю, что менеджер - это программа, которая занимается опросом оборудования по SNMP. Настройки на оборудовании - это настройки агента SNMP. Настройки агента сложнее, потому что содержат список сообществ и пользователей, имеющих доступ к оборудованию по SNMP, тип доступа - только чтение или чтение-запись, и ветку дерева OID'ов, к которой относится описываемый доступ - так называемые SNMP View. Так вот, сейчас мы рассматриваем только настройки менеджера SNMP.</p>
+
+		<p>Модель так и называется - SNMP и первоначально описывается следующим образом:</p>
+
+		<pre class="code">class SNMP(models.Model):
+    VERSION_1 = 1
+    VERSION_2C = 2
+    VERSION_3 = 3
+    VERSION = (
+	(VERSION_1, 'SNMPv1'),
+	(VERSION_2C, 'SNMPv2c'),
+	(VERSION_3, 'SNMPv3'),
+    )
+
+    V3_SECURITY_LEVEL_NO_AUTH_NO_PRIV = 0
+    V3_SECURITY_LEVEL_AUTH_NO_PRIV = 1
+    V3_SECURITY_LEVEL_AUTH_PRIV = 2
+    V3_SECURITY_LEVEL = (
+	(V3_SECURITY_LEVEL_NO_AUTH_NO_PRIV, 'noAuthNoPriv'),
+	(V3_SECURITY_LEVEL_AUTH_NO_PRIV, 'authNoPriv'),
+	(V3_SECURITY_LEVEL_AUTH_PRIV, 'authPriv'),
+    )
+
+    V3_AUTH_PROTOCOL_MD5 = 0
+    V3_AUTH_PROTOCOL_SHA = 1
+    V3_AUTH_PROTOCOL = (
+	(V3_AUTH_PROTOCOL_MD5, 'MD5'),
+	(V3_AUTH_PROTOCOL_SHA, 'SHA'),
+    )
+
+    V3_PRIV_PROTOCOL_DES = 0
+    V3_PRIV_PROTOCOL_AES = 1
+    V3_PRIV_PROTOCOL = (
+	(V3_PRIV_PROTOCOL_DES, 'DES'),
+	(V3_PRIV_PROTOCOL_AES, 'AES'),
+    )
+
+    DEFAULT_PORT = 161
+
+    snmp_port = models.IntegerField(u'SNMP-порт', blank=True, default=DEFAULT_PORT)
+    snmp_version = models.PositiveIntegerField(u'Версия SNMP', choices=VERSION, default=VERSION_1)
+    snmp_community = models.CharField(u'SNMP-сообщество', max_length=255, blank=True, default='')
+    snmpv3_contextname = models.CharField(u'SNMP-контекст безопасности', max_length=255, blank=True, default='')
+    snmpv3_securityname = models.CharField(u'SNMP-имя безопасности', max_length=255, blank=True, default='')
+    snmpv3_securitylevel = models.PositiveIntegerField(u'SNMP-уровень безопасности', choices=V3_SECURITY_LEVEL, default=V3_SECURITY_LEVEL_NO_AUTH_NO_PRIV)
+    snmpv3_authprotocol = models.PositiveIntegerField(u'SNMP-протокол аутентификации', choices=V3_AUTH_PROTOCOL, default=V3_AUTH_PROTOCOL_MD5)
+    snmpv3_authpassphrase = models.CharField(u'SNMP-пароль аутентификации', max_length=255, blank=True, default='')
+    snmpv3_privprotocol = models.PositiveIntegerField(u'SNMP-протокол безопасности', choices=V3_PRIV_PROTOCOL, default=V3_PRIV_PROTOCOL_DES) 
+    snmpv3_privpassphrase = models.CharField(u'SNMP-пароль безопасности', max_length=255, blank=True, default='')
+
+    class Meta:
+	unique_together = (('snmp_port', 'snmp_version', 'snmp_community', 'snmpv3_contextname', 'snmpv3_securityname', 'snmpv3_securitylevel', 'snmpv3_authprotocol', 'snmpv3_authpassphrase', 'snmpv3_privprotocol', 'snmpv3_privpassphrase'),)
+	verbose_name = u'Настройки SNMP'
+	verbose_name_plural = u'Настройки SNMP'</pre>
+
+		<p>Все остальные поля, не имеющие отношения к рассматриваемому примеру, были пропущены.</p>
+
+		<p>Суть в том, что в зависимости от версии SNMP используются настройки, хранящиеся в разных полях. В случае SNMP версий 1 и 2c используется только поле snmp_community. В случае третьей версии SNMP как минимум используются ещё и поля snmpv3_contextname, snmpv3_securityname и snmpv3_securitylevel.</p>
+
+
+		<p>В зависимости от значения поля snmpv3_securitylevel могут использоваться ещё 4 поля. Если snmpv3_securitylevel соответствует noAuthNoPriv, то дополнительные поля не используются. Если snmpv3_securitylevel соответствует authNoPriv, то дополнительно используются поля snmpv3_authprotocol и snmpv3_authpassphrase. Если snmpv3_securitylevel соответствует authPriv, то используются поля snmpv3_authprotocol, snmpv3_authpassphrase, а так же snmpv3_privprotocol и snmpv3_privpassphrase.</p>
+
+
+		<p>Представим теперь, что у нас имеется объект с настройками SNMP, которые были введены пользователем через веб-интерфейс, или поступили через API в составе структуры, описывающей устройство. Прежде чем добавлять эти настройки SNMP в таблицу, нужно проверить - есть ли уже эти настройки в таблице. Надеяться на индекс в этом случае бесполезно - значения неиспользуемых полей могут отличаться друг от друга, так что индекс не обнаружит по сути уже существующие в таблице настройки, у которых в неиспользуемых полях значения отличаются от значений в добавляемых настройках.</p>
+
+
+		<p>Верным решением была бы обязательная валидация данных при создании или изменении объекта SNMP. Но если проконтролировать изменение одного объекта при помощи методов геттеров и сеттеров ещё можно, то проконтролировать запросы, обновляющие массово несколько записей сразу, уже сложнее. Полноценную валидацию на всех возможных этапах использования объектов провести довольно сложно.</p>
+
+
+		<p>Можно немного упростить задачу и воспользоваться решением, описанным в рассматриваемой статье - сделать у объекта SNMP ещё один метод, который будет оставлять в выборке из таблицы только те объекты, которые соответствуют эталонному объекту SNMP. В моём случае это решение располагается перед описанием модели SNMP и выглядит следующим образом:</p>
+
+		<pre class="code">class SNMPQuerySet(models.query.QuerySet):
+    def like(self, snmp):
+	qs = self.filter(snmp_port=snmp.snmp_port,
+			 snmp_version=snmp.snmp_version)
+
+	if snmp.snmp_version in (self.model.VERSION_1, self.model.VERSION_2C):
+	    qs = qs.filter(snmp_community=snmp.snmp_community)
+
+	elif snmp.snmp_version == self.model.VERSION_3:
+	    qs = qs.filter(snmpv3_contextname=snmp.snmpv3_contextname,
+			   snmpv3_securityname=snmp.snmpv3_securityname,
+			   snmpv3_securitylevel=snmp.snmpv3_securitylevel)
+
+	    if snmp.snmpv3_securitylevel == self.model.V3_SECURITY_LEVEL_AUTH_NO_PRIV:
+		qs = qs.filter(snmpv3_authprotocol=snmp.snmpv3_authprotocol,
+			       snmpv3_authpassphrase=snmp.snmpv3_authpassphrase)
+	    elif snmp.snmpv3_securitylevel == self.model.V3_SECURITY_LEVEL_AUTH_PRIV:
+		qs = qs.filter(snmpv3_authprotocol=snmp.snmpv3_authprotocol,
+			       snmpv3_authpassphrase=snmp.snmpv3_authpassphrase,
+			       snmpv3_privprotocol=snmp.snmpv3_privprotocol,
+			       snmpv3_privpassphrase=snmp.snmpv3_privpassphrase)
+	return qs
+
+class SNMPManager(models.Manager):
+    def get_queryset(self):
+	return SNMPQuerySet(self.model, using=self._db)
+
+    def like(self, snmp):
+	return self.get_queryset().like(snmp)</pre>
+
+		<p>Теперь остаётся только добавить менеджер запросов SNMPManager в качестве менеджера по умолчанию в модель SNMP. Добавим перед строчкой "class Meta:" всего одну строку:</p>
+
+		<pre class="code">objects = SNMPManager()</pre>
+
+		<p>После описанной доработки модели, можно действовать следующим образом:</p>
+
+		<pre class="code"># Получаем настройки SNMP от пользователя
+user_snmp_settings = ...
+
+# Ищем подобные настройки в таблице
+found_snmp_settings = SNMP.objects.like(user_snmp_settings).first()
+
+# Если настройки уже есть, используем их в последующих операциях
+if found_snmp_settings:
+    user_snmp_settings = found_snmp_settings
+# В противном случае добавляем в таблицу настройки, полученные от пользователя
+else:
+    user_snmp_settings.save()
+
+# Дальше используем user_snmp_settings
+...</pre>
+
+		<p>Стоит ли пользоваться этим методом или можно решить эту задачу изящнее каким-то другим способом - решать вам. Я хотел лишь сообщить о существовании подобного приёма и описать, как им можно воспользоваться.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Джэми Мэтьюз. Построение высокоуровневого API запросов: правильный способ использования ORM Django, 2012">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,355 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="buster,zabbix,debian,linux,3.4" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2020-11-08 -->
+		<title>Поддержка нескольких типов хранилищ в сервере Zabbix 3.4</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Поддержка нескольких типов хранилищ в сервере Zabbix 3.4</h1>
+
+		<p>В <a href="../zabbix-clickhouse-part2/">доработанном веб-интерфейсе Zabbix</a> реализована возможность индивидуальной настройких типа хранилища для каждой из таблиц истории. Теперь необходимо реализовать возможность настройки хранилища для каждой из таблиц на стороне сервера Zabbix. Я решил прибегнуть к следующей схеме: в файле конфигурации я добавил по одной опции для каждой из таблиц истории, в каждой опции указывается через запятую тип хранилища и URL, по которому оно доступно. Если для опции не указано значение, то используется хранилище по умолчанию - база данных SQL.</p>
+
+		<p>В файле конфигурации сервера Zabbix это может выглядеть следующим образом:</p>
+
+		<pre class="code">HistoryStorage=clickhouse,http://zabbix:zabbix@localhost:8123/?database=zabbix
+HistoryUintStorage=clickhouse,http://zabbix:zabbix@localhost:8123/?database=zabbix
+HistoryStrStorage=elastic,http://hostnameelastic:9200
+HistoryTextStorage=elastic,http://hostnameelastic:9200
+HistoryLogStorage=elastic,http://hostnameelastic:9200</pre>
+
+		<p>Готовую заплатку с реализацией раздельного выбора типа хранилища для каждой из таблиц истории можно найти по ссылке <a href="zabbix3_4_12_server_storage_per_table.patch">zabbix3_4_12_server_storage_per_table.patch</a>.</p>
+
+		<p>Ниже в логическом порядке описываются изменения, вносимые этой заплаткой.</p>
+
+		<p>Кстати, заплатки описываются так подробно по двум обстоятельствам:</p>
+
+		<ul>
+			<li>Несмотря на то, что Zabbix - это программное обеспечение со свободным исходным кодом, разработку этого программного обеспечения ведёт коммерческая организация. Эта коммерческая компания зарабатывает деньги на поддержке своего продукта и у неё нет желания заниматься поддержкой дополнительных спорных функций, внесённых в код сторонними разработчиками. Представьте, что какой-то Вася реализовал в Zabbix поддержку хранения исторических данных в том же Clickhouse. Клиент, оплативший коммерческую поддержку Zabbix, устанавливает себе Zabbix и пытается воспользоваться ClickHouse в качестве хранилища исторических данных. Даже если с кодом Васи нет никаких проблем и он аккуратно написан, у клиента может возникнуть множество самых разных проблем, связанных с эксплуатацией непосредственно самого ClickHouse. В компании нет специалистов, знакомых с Clickhouse, поэтому компания будет вынуждена отказать клиенту в поддержке. Возникнет вопрос - за что же тогда платит клиент, если компания не осуществляет поддержку функций, реализованных в её продукте? Вот поэтому разработчики Zabbix обычно не принимают в исходный код своего продукта никаких заплаток, вносящих в код продукта глобальные изменения. Zabbix, являясь программным обеспечением со свободным исходным кодом, фактически не принадлежит сообществу, а принадлежит коммерческой компании.</li>
+
+			<li>Из заплатки самой по себе не так легко понять логику вносимых ей изменений. Если понадобится адаптировать заплатку к другой версии Zabbix, то нужно будет разбираться в имеющейся заплатке и исходном коде той версии Zabbix, для которой эта заплатка была сделана, а потом повторить все эти изменения в другой версии Zabbix. Описание, подобное приведённому ниже, должно помочь во-первых, понять логику изменений, вносимых заплаткой, а во-вторых, помочь внести подобные изменения мелкими кусочками в другую версию Zabbix.</li>
+		</ul>
+
+		<h2>1. Доработка файла конфигурации</h2>
+
+		<p>Задекларируем наши намерения, доработав соответствующим образом пример файла конфигурации conf/zabbix_server.conf:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/conf/zabbix_server.conf
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/conf/zabbix_server.conf
++++ zabbix-3.4.12-1+buster/conf/zabbix_server.conf
+@@ -133,19 +133,40 @@ DBUser=zabbix
+ # Default (for MySQL):
+ # DBPort=3306
+ 
+-### Option: HistoryStorageURL
+-#      History storage HTTP[S] URL.
++### Option: HistoryStorage
++#      Storage type and HTTP[S] URL for double type values history.
+ #
+ # Mandatory: no
+ # Default:
+-# HistoryStorageURL=
++# HistoryStorage=
+ 
+-### Option: HistoryStorageTypes
+-#      Comma separated list of value types to be sent to the history storage.
++### Option: HistoryUintStorage
++#      Storage type and HTTP[S] URL for unsigned integer type values history.
+ #
+ # Mandatory: no
+ # Default:
+-# HistoryStorageTypes=uint,dbl,str,log,text
++# HistoryUintStorage=
++
++### Option: HistoryStrStorage
++#      Storage type and HTTP[S] URL for string type values history.
++#
++# Mandatory: no
++# Default:
++# HistoryStrStorage=
++
++### Option: HistoryTextStorage
++#      Storage type and HTTP[S] URL for text type values history.
++#
++# Mandatory: no
++# Default:
++# HistoryTextStorage=
++
++### Option: HistoryLogStorage
++#      Storage type and HTTP[S] URL for log type values history.
++#
++# Mandatory: no
++# Default:
++# HistoryLogStorage=
+ 
+ ############ ADVANCED PARAMETERS ################</pre>
+
+		<h2>2. Доработка сервера Zabbix и Zabbix-прокси</h2>
+
+		<p>Теперь удалим поддержку чтения опций конфигурации HistoryStorageUrl и HistoryStorageOpts из исходного текста сервера Zabbix в файле src/zabbix_server/server.c и добавим в него поддержку чтения новых опций конфигурации HistoryStorage, HistoryUintStorage, HistoryStrStorage, HistoryTextStorage, HistoryLogStorage:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/src/zabbix_server/server.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/zabbix_server/server.c
++++ zabbix-3.4.12-1+buster/src/zabbix_server/server.c
+@@ -258,8 +258,11 @@ char       *CONFIG_TLS_PSK_FILE            = NULL;
+ #endif
+ 
+ char   *CONFIG_SOCKET_PATH             = NULL;
+-char   *CONFIG_HISTORY_STORAGE_URL     = NULL;
+-char   *CONFIG_HISTORY_STORAGE_OPTS    = NULL;
++char   *CONFIG_HISTORY_STORAGE         = NULL;
++char   *CONFIG_HISTORY_UINT_STORAGE    = NULL;
++char   *CONFIG_HISTORY_STR_STORAGE     = NULL;
++char   *CONFIG_HISTORY_TEXT_STORAGE    = NULL;
++char   *CONFIG_HISTORY_LOG_STORAGE     = NULL;
+ 
+ int    get_process_info_by_thread(int local_server_num, unsigned char *local_process_type, int *local_process_num);
+ 
+@@ -438,9 +441,6 @@ static void zbx_set_defaults(void)
+ 
+        if (NULL == CONFIG_SSL_KEY_LOCATION)
+                CONFIG_SSL_KEY_LOCATION = zbx_strdup(CONFIG_SSL_KEY_LOCATION, DATADIR "/zabbix/ssl/keys");
+-
+-       if (NULL == CONFIG_HISTORY_STORAGE_OPTS)
+-               CONFIG_HISTORY_STORAGE_OPTS = zbx_strdup(CONFIG_HISTORY_STORAGE_OPTS, "uint,dbl,str,log,text");
+ #endif
+ 
+ #ifdef HAVE_SQLITE3
+@@ -499,8 +499,11 @@ static void        zbx_validate_config(ZBX_TASK
+        err |= (FAIL == check_cfg_feature_str("SSLCALocation", CONFIG_SSL_CA_LOCATION, "cURL library"));
+        err |= (FAIL == check_cfg_feature_str("SSLCertLocation", CONFIG_SSL_CERT_LOCATION, "cURL library"));
+        err |= (FAIL == check_cfg_feature_str("SSLKeyLocation", CONFIG_SSL_KEY_LOCATION, "cURL library"));
+-       err |= (FAIL == check_cfg_feature_str("HistoryStorageURL", CONFIG_HISTORY_STORAGE_URL, "cURL library"));
+-       err |= (FAIL == check_cfg_feature_str("HistoryStorageTypes", CONFIG_HISTORY_STORAGE_OPTS, "cURL library"));
++       err |= (FAIL == check_cfg_feature_str("HistoryStorage", CONFIG_HISTORY_STORAGE, "cURL library"));
++       err |= (FAIL == check_cfg_feature_str("HistoryUintStorage", CONFIG_HISTORY_UINT_STORAGE, "cURL library"));
++       err |= (FAIL == check_cfg_feature_str("HistoryStrStorage", CONFIG_HISTORY_STR_STORAGE, "cURL library"));
++       err |= (FAIL == check_cfg_feature_str("HistoryTextStorage", CONFIG_HISTORY_TEXT_STORAGE, "cURL library"));
++       err |= (FAIL == check_cfg_feature_str("HistoryLogStorage", CONFIG_HISTORY_LOG_STORAGE, "cURL library"));
+ #endif
+ 
+ #if !defined(HAVE_LIBXML2) || !defined(HAVE_LIBCURL)
+@@ -696,9 +699,15 @@ static void        zbx_load_config(ZBX_TASK_EX
+                        PARM_OPT,       1,                      100},
+                {"StartPreprocessors",          &amp;CONFIG_PREPROCESSOR_FORKS,             TYPE_INT,
+                        PARM_OPT,       1,                      1000},
+-               {"HistoryStorageURL",           &amp;CONFIG_HISTORY_STORAGE_URL,            TYPE_STRING,
++               {"HistoryStorage",              &amp;CONFIG_HISTORY_STORAGE,                TYPE_STRING,
++                       PARM_OPT,       0,                      0},
++               {"HistoryUintStorage",          &amp;CONFIG_HISTORY_UINT_STORAGE,           TYPE_STRING,
++                       PARM_OPT,       0,                      0},
++               {"HistoryStrStorage",           &amp;CONFIG_HISTORY_STR_STORAGE,            TYPE_STRING,
++                       PARM_OPT,       0,                      0},
++               {"HistoryTextStorage",          &amp;CONFIG_HISTORY_TEXT_STORAGE,           TYPE_STRING,
+                        PARM_OPT,       0,                      0},
+-               {"HistoryStorageTypes",         &amp;CONFIG_HISTORY_STORAGE_OPTS,           TYPE_STRING_LIST,
++               {"HistoryLogStorage",           &amp;CONFIG_HISTORY_LOG_STORAGE,            TYPE_STRING,
+                        PARM_OPT,       0,                      0},
+                {NULL}
+        };</pre>
+
+		<p>Поскольку Zabbix-прокси реализован на основе сервера Zabbix, аналогичные фиктивные изменения нужно внести в исходный код Zabbix-прокси в файле src/zabbix_proxy/proxy.c:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/src/zabbix_proxy/proxy.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/zabbix_proxy/proxy.c
++++ zabbix-3.4.12-1+buster/src/zabbix_proxy/proxy.c
+@@ -251,8 +251,11 @@ char       *CONFIG_TLS_PSK_FILE            = NULL;
+ 
+ char   *CONFIG_SOCKET_PATH             = NULL;
+ 
+-char   *CONFIG_HISTORY_STORAGE_URL     = NULL;
+-char   *CONFIG_HISTORY_STORAGE_OPTS    = NULL;
++char   *CONFIG_HISTORY_STORAGE         = NULL;
++char   *CONFIG_HISTORY_UINT_STORAGE    = NULL;
++char   *CONFIG_HISTORY_STR_STORAGE     = NULL;
++char   *CONFIG_HISTORY_TEXT_STORAGE    = NULL;
++char   *CONFIG_HISTORY_LOG_STORAGE     = NULL;
+ 
+ int    get_process_info_by_thread(int local_server_num, unsigned char *local_process_type, int *local_process_num);</pre>
+
+		<h2>3. Доработка основы библиотеки zbxhistory</h2>
+
+		<p>Суть вносимых изменений особенно наглядно можно увидеть в следующей заплатке для файла src/libs/zbxhistory/history.c. Вместо использования фиксированного URL для всех таблиц из переменной CONFIG_HISTORY_STORAGE_URL и переменной CONFIG_HISTORY_STORAGE_OPTS, которая предписывает использовать этот URL для таблиц указанных в ней типов, мы определяем тип хранилища для каждой из таблиц и вызываем функцию инициализации соответствующего модуля, передавая ей URL для доступа к этой конкретной таблице:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/src/libs/zbxhistory/history.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxhistory/history.c
++++ zabbix-3.4.12-1+buster/src/libs/zbxhistory/history.c
+@@ -27,8 +27,11 @@
+ 
+ ZBX_VECTOR_IMPL(history_record, zbx_history_record_t);
+ 
+-extern char    *CONFIG_HISTORY_STORAGE_URL;
+-extern char    *CONFIG_HISTORY_STORAGE_OPTS;
++extern char    *CONFIG_HISTORY_STORAGE;
++extern char    *CONFIG_HISTORY_UINT_STORAGE;
++extern char    *CONFIG_HISTORY_STR_STORAGE;
++extern char    *CONFIG_HISTORY_TEXT_STORAGE;
++extern char    *CONFIG_HISTORY_LOG_STORAGE;
+ 
+ zbx_history_iface_t    history_ifaces[ITEM_VALUE_TYPE_MAX];
+ 
+@@ -46,16 +49,23 @@ zbx_history_iface_t history_ifaces[ITEM_
+ int    zbx_history_init(char **error)
+ {
+        int             i, ret;
+-       /* TODO: support per value type specific configuration */
+-
+-       const char      *opts[] = {"dbl", "str", "log", "uint", "text"};
++       char            *elastic_url;
++       const char      *opts[] = {
++                               CONFIG_HISTORY_STORAGE,
++                               CONFIG_HISTORY_STR_STORAGE,
++                               CONFIG_HISTORY_LOG_STORAGE,
++                               CONFIG_HISTORY_UINT_STORAGE,
++                               CONFIG_HISTORY_TEXT_STORAGE
++                       };
+ 
+        for (i = 0; i &lt; ITEM_VALUE_TYPE_MAX; i++)
+        {
+-               if (NULL == CONFIG_HISTORY_STORAGE_URL || NULL == strstr(CONFIG_HISTORY_STORAGE_OPTS, opts[i]))
+-                       ret = zbx_history_sql_init(&amp;history_ifaces[i], i, error);
++               if (elastic_url = zbx_strstartswith(opts[i], "elastic,"))
++                       ret = zbx_history_elastic_init(&amp;history_ifaces[i], i, elastic_url, error);
++               /*else if (clickhouse_url = zbx_strstartswith(opts[i], "clickhouse,"))
++                       ret = zbx_history_clickhouse_init(&amp;history_ifaces[i], i, clickhouse_url, error);*/
+                else
+-                       ret = zbx_history_elastic_init(&amp;history_ifaces[i], i, error);
++                       ret = zbx_history_sql_init(&amp;history_ifaces[i], i, error);
+ 
+                if (FAIL == ret)
+                        return FAIL;</pre>
+
+		<p>В доработанном коде функции zbx_history_init добавлен закомментированный участок, обозначающий будущую поддержку хранилища ClickHouse.</p>
+
+		<p>Из кода удалён комментарий о необходимости реализовать раздельную возможность настройки типов хранилищ для каждой из таблиц, потому что именно это мы сейчас и делаем.</p>
+
+		<p>В коде используется новая функция zbx_startswith для проверки, что строка начинается с указанного префикса.</p>
+
+		<p>При доработке изменилась сигнатура функции zbx_history_elastic_init, теперь ей передаётся дополнительный аргумент - elastic_url.</p>
+
+		<p>Остановимся поподробнее на двух последних обстоятельствах.</p>
+
+		<h2>4. Новая функция zbx_startswith</h2>
+
+		<p>Во-первых, добавим объявление новой функции zbx_startswith в файл include/common.h и её реализацию в файл src/libs/zbxcommon/str.c:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/include/common.h
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/include/common.h
++++ zabbix-3.4.12-1+buster/include/common.h
+@@ -1114,6 +1114,7 @@ char      *zbx_time2str(time_t time);
+ #define ZBX_NULL2STR(str)      (NULL != str ? str : "(null)")
+ #define ZBX_NULL2EMPTY_STR(str)        (NULL != (str) ? (str) : "")
+ 
++char    *zbx_strstartswith(const char *str, const char *prefix);
+ char   *zbx_strcasestr(const char *haystack, const char *needle);
+ int    cmp_key_id(const char *key_1, const char *key_2);
+ int    zbx_strncasecmp(const char *s1, const char *s2, size_t n);
+Index: zabbix-3.4.12-1+buster/src/libs/zbxcommon/str.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxcommon/str.c
++++ zabbix-3.4.12-1+buster/src/libs/zbxcommon/str.c
+@@ -1827,6 +1827,38 @@ char     *zbx_time2str(time_t time)
+        return buffer;
+ }
+ 
++/******************************************************************************
++ *                                                                            *
++ * Function: zbx_startswith                                                   *
++ *                                                                            *
++ * Purpose: compare start of string str with string prefix                    *
++ *                                                                            *
++ * Parameters: str - [IN] null terminated source string                       *
++ *             prefix - [IN] null terminated prefix string                    *
++ *                                                                            *
++ * Return value: pointer to rest of str or NULL, if prefix not found          *
++ *                                                                            *
++ * Author: Vladimir Stupin                                                    *
++ *                                                                            *
++ ******************************************************************************/
++char   *zbx_strstartswith(const char *str, const char *prefix)
++{
++       if (NULL == prefix)
++               return (char *)str;
++
++       if (NULL == str)
++               return NULL;
++
++       while ('\0' != *prefix)
++       {
++               if ('\0' == *str || *str != *prefix)
++                       return NULL;
++               str++;
++               prefix++;
++       }
++       return (char *)str;
++}
++
+ int    zbx_strncasecmp(const char *s1, const char *s2, size_t n)
+ {
+        if (NULL == s1 &amp;&amp; NULL == s2)</pre>
+
+		<h2>5. Доработка поддержки Elasticsearch</h2>
+
+		<p>Во-вторых, изменим объявление функции zbx_history_elastic_init в заголовочном файле src/libs/zbxhistory/history.h:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/src/libs/zbxhistory/history.h
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxhistory/history.h
++++ zabbix-3.4.12-1+buster/src/libs/zbxhistory/history.h
+@@ -47,6 +47,6 @@ struct zbx_history_iface
+ int    zbx_history_sql_init(zbx_history_iface_t *hist, unsigned char value_type, char **error);
+ 
+ /* elastic hist */
+-int    zbx_history_elastic_init(zbx_history_iface_t *hist, unsigned char value_type, char **error);
++int    zbx_history_elastic_init(zbx_history_iface_t *hist, unsigned char value_type, const char *url, char **error);
+ 
+ #endif</pre>
+
+		<p>Осталось лишь соответствующим образом изменить реализацию этой функции в файле src/libs/zbxhistory/history_elastic.c:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/src/libs/zbxhistory/history_elastic.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxhistory/history_elastic.c
++++ zabbix-3.4.12-1+buster/src/libs/zbxhistory/history_elastic.c
+@@ -37,8 +37,6 @@
+ 
+ const char     *value_type_str[] = {"dbl", "str", "log", "uint", "text"};
+ 
+-extern char    *CONFIG_HISTORY_STORAGE_URL;
+-
+ typedef struct
+ {
+        char    *base_url;
+@@ -912,7 +910,7 @@ static void elastic_flush(zbx_history_if
+  *               FAIL    - otherwise                                                *
+  *                                                                                  *
+  ************************************************************************************/
+-int    zbx_history_elastic_init(zbx_history_iface_t *hist, unsigned char value_type, char **error)
++int    zbx_history_elastic_init(zbx_history_iface_t *hist, unsigned char value_type, const char *url, char **error)
+ {
+        zbx_elastic_data_t      *data;
+ 
+@@ -924,7 +922,7 @@ int zbx_history_elastic_init(zbx_history
+ 
+        data = zbx_malloc(NULL, sizeof(zbx_elastic_data_t));
+        memset(data, 0, sizeof(zbx_elastic_data_t));
+-       data-&gt;base_url = zbx_strdup(NULL, CONFIG_HISTORY_STORAGE_URL);
++       data-&gt;base_url = zbx_strdup(NULL, url);
+        zbx_rtrim(data-&gt;base_url, "/");
+        data-&gt;buf = NULL;
+        data-&gt;post_url = NULL;</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Поддержка нескольких типов хранилищ в сервере Zabbix 3.4">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,43 @@
+diff -Naur ntpd.c.orig ntpd.c
+--- ntpd.c.orig	2017-03-09 21:50:49.172397236 +0500
++++ ntpd.c	2017-03-09 21:50:56.932419305 +0500
+@@ -34,6 +34,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <time.h>
+ #include <unistd.h>
+ 
+ #include "ntpd.h"
+@@ -95,6 +96,7 @@
+ 	int			 ch, nfds, timeout = INFTIM;
+ 	int			 pipe_chld[2];
+ 	extern char		*__progname;
++	time_t			start_time;
+ 
+ 	__progname = _compat_get_progname(argv[0]);
+ 
+@@ -183,6 +185,8 @@
+ 		fatal(NULL);
+ 	imsg_init(ibuf, pipe_chld[0]);
+ 
++	start_time = getmonotime();
++
+ 	while (quit == 0) {
+ 		pfd[PFD_PIPE].fd = ibuf->fd;
+ 		pfd[PFD_PIPE].events = POLLIN;
+@@ -195,11 +199,12 @@
+ 				quit = 1;
+ 			}
+ 
+-		if (nfds == 0 && lconf.settime) {
++		if (lconf.settime &&
++		    (nfds == 0 || getmonotime() > start_time+SETTIME_TIMEOUT)) {
+ 			lconf.settime = 0;
+ 			timeout = INFTIM;
+ 			log_init(lconf.debug);
+-			log_debug("no reply received in time, skipping initial "
++			log_warnx("no reply received in time, skipping initial "
+ 			    "time setting");
+ 			if (!lconf.debug)
+ 				if (daemon(1, 0))

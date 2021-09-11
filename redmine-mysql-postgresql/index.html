@@ -1,0 +1,146 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="pgloader,redmine,jessie,postgresql,linux,debian,mysql" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2015-07-26 -->
+		<title>Миграция Redmine с MySQL на PostgreSQL</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Миграция Redmine с MySQL на PostgreSQL</h1>
+
+		<p>На этот раз рассмотрим перенос данных из MySQL в PostgreSQL, пригодный, пожалуй, для любых приложений, предоставляющих выбор из этих двух СУБД.</p>
+
+		<p>pgloader может перенести содержимое базы данных полностью в автоматическом режиме, воссоздавая необходимые таблицы, индексы и внешние ключи. Но этот подход не самый лучший, потому что в дальнейшем могут возникнуть непредвиденные проблемы при работе приложения или в процессе миграции на его более свежие версии. Поэтому лучше будет создать пустую базу данных, взять структуру этой новой пустой базы данных и наполнить её существующими данными.</p>
+
+		<p>Рассмотрим эту стратегию миграции на примере Redmine.</p>
+
+		<h2>1. Получение схемы базы данных</h2>
+
+		<p>Схема базы данных - это её структура, то есть таблицы, индексы, ключи, без данных.</p>
+
+		<p>Установим дополнительно пакет, отвечающий за работу Redmine совместно с СУБД PostgreSQL:</p>
+
+		<pre class="console"># apt-get install redmine-pgsql</pre>
+
+		<p>Для начала перейдём в каталог /etc/redmine/, в котором есть подкаталоги, соответствующие экземплярам redmine:</p>
+
+		<pre class="console"># cd /etc/redmine/</pre>
+
+		<p>Скопируем каталог одного из экземпляров в другой каталог, создав таким образом новый экземпляр. В данном случае копируем экземпляр default и создаём на его основе экземпляр pgsql:</p>
+
+		<pre class="console"># rsync -rogp default/ pgsql/</pre>
+
+		<p>Открываем файл /etc/redmine/pgsql/database.yml и заменяем в нём имя пользователя в поле username, имя базы данных в поле database и тип базы данных в поле adapter. У меня получился такой файл:</p>
+
+		<pre class="code">production:
+  adapter: postgresql
+  database: redmine_pgsql
+  host: localhost
+  port:
+  username: redmine_pgsql
+  password: password
+  encoding: utf8</pre>
+
+		<p>Теперь нужно создать соответствующего пользователя и базу данных:</p>
+
+		<pre class="console"># su - postgres
+$ createuser -P redmine_pgsql
+$ createdb -E UTF-8 -O redmine_pgsql redmine_pgsql
+$ exit</pre>
+
+		<p>Пустая база данных и пользователь созданы. Теперь нам нужно наполнить эту базу данных структурой и первичными данными. Для этого переходим в каталог /usr/share/redmine/, в котором находится Redmine, и запускаем команду миграции экземпляра pgsql, которая сделает всё необходимое:</p>
+
+		<pre class="console"># cd /usr/share/redmine
+# rake db:migrate RAILS_ENV=production X_DEBIAN_SITEID=pgsql</pre>
+
+		<p>Теперь, если всё прошло успешно, создаём резервную копию этой базы данных, но без собственно данных:</p>
+
+		<pre class="console"># su - postgres
+$ pg_dump -s -d redmine_pgsql &gt; redmine_pgsql.sql</pre>
+
+		<p>Теперь можно удалить этого пользователя и его базу данных, от них нам больше ничего не нужно:</p>
+
+		<pre class="console">$ dropdb redmine_pgsql
+$ dropuser redmine_pgsql
+$ exit</pre>
+
+		<p>Теперь можно удалить и каталог с настройками экземпляра pgsql:</p>
+
+		<pre class="console"># cd /etc/redmine
+# rm -R pgsql</pre>
+
+		<p>Как стало ясно в процессе дальнейших попыток воспользоваться дампом, его нужно откорректировать:</p>
+
+		<ul>
+			<li>Удалить комментарии и пустые строки, т.к. pgloader ожидает, что в каждой строчке будет указан какой-то запрос, который что-то изменяет,</li>
+
+			<li>Удалить запрос, добавляющий описание языка PL/PgSQL,</li>
+
+			<li>Удалить двойные кавычки вокруг имён полей, совпадающих с зарезервированными словами,</li>
+
+			<li>Сменить владельца базы данных с redmine_pgsql на владельца базы данных, которую будем переносить из MySQL в PostgreSQL.</li>
+		</ul>
+
+		<p>Сделать это можно вот так:</p>
+
+		<pre class="console">$ cat redmine_pgsql.sql | sed -e 's/^--.*$//g; s/^COMMENT .*$//; /^$/d; s/"//g; s/TO redmine_pgsql/TO redmine_default/g' &gt; redmine_default.sql</pre>
+
+		<p>Теперь нужно поделить файл redmine_default.sql на две части. Первый должен создать структуру базы данных без ограничений и внешних ключей, а второй - добавлять их. К счастью, стандартный дамп, созданный pg_dump, можно легко поделить на нужные нам части. Первая часть заканчивается запросами вида "ALTER TABLE ONLY ... ALTER COLUMN ... SET DEFAULT ...", а вторая часть начинается запросами вида "ALTER TABLE ONLY ... ADD CONSTRAINT ...". В результате должны получиться файлы redmine_default1.sql и redmine_default2.sql</p>
+
+		<p>Приведу ссылки на эти файлы: <a href="redmine_default1.sql">redmine_default1.sql</a> и <a href="redmine_default2.sql">redmine_default2.sql</a> Они соответствуют версии Remine, поставляющейся в репозиториях Debian Jessie (версии пакетов - 3.0~20140825-5). Если у вас именно эта версия Redmine, можно пропустить весь этот раздел и сразу воспользоваться этими файлами.</p>
+
+		<h2>2. Собственно перенос данных</h2>
+
+		<p>Если pgloader ещё не установлен, установим его:</p>
+
+		<pre class="console"># apt-get install pgloader</pre>
+
+		<p>Теперь создадим файл redmine_default.sql с настройками миграции:</p>
+
+		<pre class="code">LOAD DATABASE
+  FROM mysql://redmine_default:password@localhost/redmine_default
+  INTO postgresql://redmine_default:password@localhost/redmine_default
+
+WITH include no drop,
+     truncate,
+     create no tables,
+     create no indexes,
+     no foreign keys,
+     reset sequences,
+     data only
+
+SET maintenance_work_mem TO '128MB',
+    work_mem to '12MB'
+
+BEFORE LOAD EXECUTE redmine_default1.sql</pre>
+
+		<p>Теперь отключаем Redmine, чтобы данные не менялись в процессе переноса в новую СУБД:</p>
+
+		<pre class="console"># /etc/init.d/uwsgi stop redmine</pre>
+
+		<p>Открываем файл с настройками подключения к базе данных мигрируемого экземпляра default. В данном случае это файл /etc/redmine/default/database.yml, который в данный момент настроен на использование MySQL. Нужно создать точно такого же пользователя и базу данных в PostgreSQL:</p>
+
+		<pre class="console"># su - postgres
+$ createuser -P redmine_default
+$ createdb -E UTF-8 -O redmine_default redmine_default
+$ exit</pre>
+
+		<p>Запускаем миграцию:</p>
+
+		<pre class="console">$ pgloader redmine_default.load</pre>
+
+		<p>После миграции открываем снова файл с настройками подключения к базе данных мигрируемого экземпляра default. Это файл /etc/redmine/default/database.yml, заменяем в нём тип базы данных с mysql2 на postgresql.</p>
+
+		<p>Теперь можно запустить uwsgi, чтобы Redmine вновь стал доступен для пользователей. Тестируем, всё ли правильно работает. Дальше можно перенести другие экземпляры Redmine и по окончании миграции удалить пакет Redmine для работы с MySQL:</p>
+
+		<pre class="console"># apt-get purge redmine-mysql</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Миграция Redmine с MySQL на PostgreSQL">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

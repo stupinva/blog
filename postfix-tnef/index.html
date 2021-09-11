@@ -1,0 +1,130 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="postfix,tynef smtpd,linux,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2011-03-25 -->
+		<title>Декодирование писем в формате TNEF в Postfix</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Декодирование писем в формате TNEF в Postfix</h1>
+
+		<p>Вчера столкнулся с интересной проблемой, корень которой в очередной раз нашёлся в Microsoft. Один из сотрудников пожаловался, что некоторые письма к нему приходят без вложений. Я попытался разобраться в ситуации и выяснил, что письма в почтовом клиенте имеют точно такой же размер, какой они имеют, когда их принимает Postfix. Стало быть почтовый сервер, почтовый клиент, антивирус на сервере и на компьютере почтового клиента никаких изменений в письма не вносят.</p>
+
+		<p>Потом я обратил внимание на размер письма (несколько сотен килобайт) и на отображаемый в клиенте текст. Письмо было явно слишком большим для такого небольшого объёма информации. Я заглянул в исходный текст письма и обнаружил, что в нём имеется вложение с именем файла "winmail.dat" и MIME-типом "application/ms-tnef".</p>
+
+		<p>Я заинтересовался, а что же это вообще такое и обнаружил, что это изобретённый Microsoft новый формат для писем, а понимают его только почтовые клиенты Outlook и те клиенты, разработчики которых специально озаботились этой проблемой. Письмо открывалось с помощью изделия той же фирмы Microsoft - Outlook Express, но изделие молча игнорировало попытки старшего брата донести до него информацию.</p>
+
+		<p>Первым делом я нашёл рецепт отключения этой фичи в Outlook отправителя <a href="http://www.mail.ru/pages/help/181.html">Файлы winmail.dat в письмах</a> и отправил эту ссылку отправителю.</p>
+
+		<p>Предвидя возможные повторы этой проблемы и необходимость снова и снова отправлять эту ссылку разным людям, я поискал, а нельзя ли этот TNEF преобразовывать прямо на сервере? Нашёл следующую заметку <a href="https://web.archive.org/web/20131208115041/http://www.mahno.su:80/freebsd/mail/postfix-ytnef-filter">Postfix + ytnef filter</a>, которая, к слову, была написана всего полтора месяца назад. Так что если бы я столкнулся с проблемой раньше, возможно мне так и пришлось бы отправлять людям ссылку.</p>
+
+		<p>Там описывается настройка прокси-конвертера ytnef smtpd для FreeBSD. Поскольку у меня сервер работает под Debian Lenny, я решил выложить тут адаптированный вариант, а иначе просто ограничился бы ссылкой.</p>
+
+		<p>Итак, перво-наперво, ставим сам конвертер ytnef и python:</p>
+
+		<pre class="console"># aptitude install --with-recommends ytnef
+# aptitude install python</pre>
+
+		<p>Качаем архив со скриптом по ссылке и распаковываем его:</p>
+
+		<pre class="console">$ wget <a href="https://web.archive.org/web/20140625121553/http://www.viraj.org:80/ytnef_smtpd/ytnef_smtpd-1.1.tar.gz">https://web.archive.org/web/20140625121553/http://www.viraj.org:80/ytnef_smtpd/ytnef_smtpd-1.1.tar.gz</a>
+$ tar xzvf ytnef_smtpd-1.1.tar.gz
+$ cd ytnef_smtpd-1.1</pre>
+
+		<p>Копируем скрипт туда, где ему положено лежать:</p>
+
+		<pre class="console"># cp ytnef_smtpd.py /usr/local/bin/
+# chmod +x /usr/local/bin/ytnef_smtpd.py</pre>
+
+		<p>И меняем настройки скрипта, которые находятся в нём самом-же. У меня в Postfix уже есть два прокси, первый сканирует письма на предмет наличия вирусов, а второй проставляет оценки уровня спама. Наша задача - встроить новый прокси в начало цепочки, чтобы сначала письмо преобразовывалось, а затем уже проверялось и оценивалось.</p>
+
+		<p>Приведу лишь изменённые строки:</p>
+
+		<pre class="code">LISTEN_PORT = 10028
+REMOTE_PORT = 10026
+YTNEF_BIN = '/usr/bin/ytnef'
+FILE_BIN = '/usr/bin/file'
+LOG_FILE = '/var/log/ytnef_smtpd.log'</pre>
+
+		<p>Скрипт будет ожидать подключений к порту 10028, а преобразованное письмо будет отправлять на порт 10026, где его будет ловить уже антивирус.</p>
+
+		<p>Теперь создадим скрипт автозапуска /etc/init.d/ytnef_smtpd.sh (он немного отличается от оригинала):</p>
+
+		<pre class="code">#!/bin/sh
+
+case "$1" in
+  start)
+    if [ -f /var/run/ytnef_smtpd.pid ]
+    then
+      echo "Script already launched. PID: "`cat /var/run/ytnef_smtpd.pid`"
+    else
+      echo "Starting ytnef smtpd..."
+      /usr/local/bin/ytnef_smtpd.py &amp;
+      echo $! &gt; /var/run/ytnef_smtpd.pid
+      echo "...Done!"
+    fi
+    ;;
+  stop)
+    if [ -f /var/run/ytnef_smtpd.pid ]
+    then
+      echo "Shutting down ytnef smtpd..."
+      kill -TERM `cat /var/run/ytnef_smtpd.pid`
+      rm -f /var/run/ytnef_smtpd.pid
+      echo "...Done!"
+    else
+      echo "ytnef smtpd not launched."
+    fi
+    ;;
+  *)
+    echo "Use start script for: { start | stop }" &gt;&amp;2
+    exit 1
+    ;;
+esac</pre>
+
+		<p>Пропишем его автозапуск и запустим:</p>
+
+		<pre class="console"># chmod +x /etc/init.d/ytnef_smtpd.sh
+# update-rc.d ytnef_smtpd.sh defaults
+# /etc/init.d/ytnef_smtpd.sh start</pre>
+
+		<p>Теперь скрипт должен прослушивать порт 10028, это можно проверить следующей командой:</p>
+
+		<pre class="console"># netstat -nlp4 | grep 10028</pre>
+
+		<p>Если это так, значит пока что всё идёт нормально.</p>
+
+		<p>Теперь нужно перенастроить Postfix, так чтобы он перенаправлял только что полученные письма на обработку ytnef smtpd.</p>
+
+		<p>В файле /etc/postfix/main.cf прописываем порт первого прокси в цепочке (в нашем случае это порт ytnef smtpd - 10028):</p>
+
+		<pre class="code">content_filter = scan:127.0.0.1:10028</pre>
+
+		<p>И если до этого у вас не было прокси, добавляем в файл /etc/postfix/master.cf следующие строчки (обратите внимание на пробелы в начале всех строк, кроме первой):</p>
+
+		<pre class="code">127.0.0.1:10025 inet n - n - 16 smtpd
+  -o content_filter=
+  -o receive_override_options=no_unknown_recipient_checks,no_header_body_checks
+  -o smtpd_helo_restrictions=
+  -o smtpd_client_restrictions=
+  -o smtpd_sender_restrictions=
+  -o smtpd_recipient_restrictions=permit_mynetworks,reject
+  -o mynetworks_style=host
+  -o smtpd_authorized_xforward_hosts=127.0.0.0/8</pre>
+
+		<p>Эти строчки настроят ещё один smtp-сервер, который будет принимать письма на порту 10025 только от локальных программ, но при этом не будет отправлять письма на дальнейшую проверку. Именно этот порт необходимо указать в настройке "REMOTE_PORT", если у вас больше нет никаких прокси в цепочке.</p>
+
+		<p>Осталось перезапустить postfix и всё должно заработать:</p>
+
+		<pre class="console"># /etc/init.d/postfix restart</pre>
+
+		<p>Я специально ради этого устанавливал себе на компьютер Outlook, отправил из него письмо в формате tnef и принял в Outlook Express. Письмо прочиталось вместе с вложениями.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Декодирование писем в формате TNEF в Postfix">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

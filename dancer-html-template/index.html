@@ -1,0 +1,106 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="dancer,html::template,perl,dh-make-perl,dancer::template::htmltemplate" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2012-09-16 -->
+		<title>Шаблоны HTML::Template в Perl-фреймворке Dancer</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Шаблоны HTML::Template в Perl-фреймворке Dancer</h1>
+
+		<p>Захотелось немного изучить веб-фреймворк Dancer, т.к. писать с использованием модуля CGI и его компании хоть и можно, но не удобно. Особенно раздражает неудобство в использовании cookie, а ещё больше - неудобство установки или удаления cookie в редиректе. Хотя, конечно, этим всё не ограничивается.</p>
+
+		<p>Ставим фреймворк:</p>
+
+		<pre class="console"># apt-get install libdancer-perl</pre>
+
+		<p>Создаём каркас будущего приложения под названием test:</p>
+
+		<pre class="console">$ dancer -a test</pre>
+
+		<p>Теперь можно перейти в каталог test/bin и запустить оттуда приложение app.pl:</p>
+
+		<pre class="console">$ cd test/bin
+$ ./app.pl</pre>
+
+		<p>Запустится только что созданное приложение test, которое будет ожидать подключений на TCP-порту 3000. Можно открыть в браузере ссылку http://localhost:3000 и увидеть тестовую страницу:</p>
+
+		<img src="dancer.png" />
+
+		<p>Как вы уже догадались по заголовку заметки, необычное в этом снимке экрана только одно - строчка "Template engine: html_template".</p>
+
+		<p>По умолчанию в Dancer'е используется некий "простой" шаблонизатор simple. В качестве альтернативы предлагается использовать template_toolkit, я же хочу воспользоваться html_template, который по сегодняшним временам кому-то может показаться довольно "дубовым".</p>
+
+		<p>К сожалению, в репозитории Debian этого модуля нет. Поэтому поставим сначала пакет dh-make-perl:</p>
+
+		<pre class="console"># apt-get install dh-make-perl</pre>
+
+		<p>Теперь с его помощью поставим нужный нам Perl-модуль Dancer::Template::HtmlTemplate, соглашаясь при первом запуске на все умолчальные настройки:</p>
+
+		<pre class="console"># dh-make-perl --install --cpan Dancer::Template::HtmlTemplate</pre>
+
+		<p>Теперь укажем Dancer'у, что мы хотим использовать этот шаблонизатор в нашем приложении. Для этого закомментируем в файле настроек config.yml в каталоге проекта строчку шаблонизатора simple и добавим строчку с шаблонизатором html_template:</p>
+
+		<pre class="code">#template: "simple"
+template: "html_template"</pre>
+
+		<p>Теперь самое время отредактировать шаблоны в соответствии с правилами выбранного нами шаблонизатора - заменим все строчки типа "&lt;% var %&gt;" на строчки типа "&lt;TMPL_VAR NAME="var"&gt;". Шаблоны находятся в каталоге views проекта и имена их файлов оканчиваются расширением ".tt".</p>
+
+		<p>Теперь можно снова запустить наше тестовое веб-приложение и увидеть ту самую страницу, снимок которой я привёл выше.</p>
+
+		<p>Если заглянуть в исходный текст модуля, то можно увидеть, что опции HTML::Template, используемые при загрузке шаблона, можно настроить всё в том же файле настройки config.yml:</p>
+
+		<pre class="code">my $ht = HTML::Template-&gt;new(
+  filename =&gt; $template,
+  die_on_bad_params =&gt; 0, # Required, as we pass through other params too
+  %{$self-&gt;config}
+);</pre>
+
+		<p>Я использую настройки utf8 и loop_context_vars. Их я и пропишу в файл config.yml:</p>
+
+		<pre class="code">engines:
+  html_template:
+    utf8:              1
+    loop_context_vars: 1</pre>
+
+		<p>Теперь создадим в каталоге views шаблон страницы hello, поместив в файл hello.tt следующий текст:</p>
+
+		<pre class="code">&lt;h3 align="center"&gt;
+&lt;TMPL_VAR NAME="name"&gt;
+&lt;/h3&gt;</pre>
+
+		<p>И откроем файл test.pm в каталоге lib, допишем в него обработчик страницы hello:</p>
+
+		<pre class="code">get '/hello/:name' =&gt; sub {
+  template 'hello', { name =&gt; param('name') };
+};</pre>
+
+		<p>Теперь перейдём по ссылке "http://localhost:3000/hello/превед" и увидим следующее:</p>
+
+		<img src="dancer-test.png" />
+
+		<p>Страница создана на основе макета, лежащего в файле views/layouts/main.tt и созданного нами шаблона view/hello.tt. Если захочется поменять что-то в макете - можно отредактировать его, можно создать новый макет и положить его рядом. Выбрать используемый макет можно прямо в обработчике. В документации приведены два примера.</p>
+
+		<p>Отключение макета на определённой странице:</p>
+
+		<pre class="code">get '/' =&gt; sub {
+  template 'index', {}, { layout =&gt; undef };
+};</pre>
+
+		<p>Или использование указанного макета:</p>
+
+		<pre class="code">get '/user' =&gt; sub {
+  template 'user', {}, { layout =&gt; 'user' };
+};</pre>
+
+		<p>На этом пока всё.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Шаблоны HTML::Template в Perl-фреймворке Dancer">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

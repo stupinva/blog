@@ -1,0 +1,378 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="buster,mariadb,stretch,zabbix,tokudb,debian,linux,3.4,mysql" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2020-08-16 -->
+		<title>История и тенденции Zabbix в TokuDB</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>История и тенденции Zabbix в TokuDB</h1>
+
+		<p>Одной из самых тяжело решаемых проблем, с которой сталкиваются системные администраторы, использующие систему мониторинга Zabbix, является проблема недостаточной производительности дисковой подсистемы.</p>
+
+		<p>Первая рекомендация, которой стоит попробовать воспользоваться - это, конечно-же, удаление ненужных элементов данных, пересмотр периодичности их съёма в пользу более длительных интервалов, уменьшение длительности хранения данных. Чем меньше данных в таблицах истории, тем быстрее происходит работа с данными. Ускоряется поиск, т.к. становятся короче индексы, ускоряется чтение, т.к. в выборку для отображения на графике попадает меньше данных, запись данных тоже ускоряется, т.к. чем меньше данных в таблице, тем быстрее обновляются индексы. Кроме того, если все часто требуемые данные будут умещаться в оперативной памяти СУБД, работа с данными существенно ускорится.</p>
+
+		<p>Если первая рекомендация не помогает, тогда нужно приступать к чуть более сложным методам методам: нужно заняться оптимизацией производительности СУБД и сервера.</p>
+
+		<p>В случае с MySQL первым делом нужно убедиться, что база данных не находится в одном файле и, при необходимости, разнести таблицы по разным файлам: сделать полную резервную копию, удалить базы данных, включить innodb_file_per_table=YES, перезапустить MySQL, восстановить базы данных из резервных копий.</p>
+
+		<p>Другой важный шаг: нужно убедиться, что основной буфер СУБД, размер которого настраивается через innodb_buffer_pool_size, имеет максимально доступный объём. Чем больше объём этого буфера, тем больше «горячих», часто требуемых данных, может в нём уместиться. Идеально, если вся СУБД умещается в оперативной памяти целиком. На практике, однако, это редко достижимо, т.к. таблицы истории и тенденций в базе данных Zabbix могут достигать сотен гигабайт. В любом случае, если есть возможность, лучше увеличить объём оперативной памяти на сервере с СУБД.</p>
+
+		<p>Также стоит обратить внимание на размеры журналов innodb_log_file_size: Zabbix пишет много данных и размер этих файлов должен соответствовать объёму данных, которые записываются системой в секунду (лимит для этой опции - 2 гигабайта). Оборотной стороной больших журналов является более длительный запуск сервера MySQL.</p>
+
+		<p>Когда выполнены предыдущие рекомендации - на контроле есть только самое необходимое, данные снимаются с разумными интервалами времени, произведена оптимизация настроек - следующим этапом обычно идёт отключение HouseKeeper'а и секционирование таблиц истории и тенденций. Понять, о том что настало время отключать HouseKeeper, можно обратившись ко внутреннему мониторингу Zabbix. Если на графиках процесс HouseKeeper почти постоянно используется на 100%, а увеличение настроек HouseKeepingFrequency и HouseKeeperDelete не приводят к желаемому эффекту, значит пора. Zabbix не имеет официальной поддержки секционирования таблиц, однако можно найти готовые инструкции для его настройки.</p>
+
+		<p>Ранее я использовал для разбивки таблиц на секции вот эту статью на wiki-странице Zabbix: <a href="https://zabbix.org/wiki/Docs/howto/mysql_partitioning">Docs/howto/mysql partitioning</a>, однако впоследствии стал пользоваться вот этой статьёй: <a href="https://zabbix.org/wiki/Docs/howto/mysql_partition">Docs/howto/mysql partition</a>. У второй статьи есть два преимущества:</p>
+
+		<ol>
+			<li>при её использовании в базе данных Zabbix не нужно создавать дополнительную нестандартную таблицу manage_partitions,</li>
+
+			<li>при её использовании имеется возможность делить таблицы не только на секции месячного или суточного размера, но и на секции произвольного размера, в том числе более мелкого.</li>
+		</ol>
+
+		<p>Наконец, в интернете <a href="https://support.zabbix.com/browse/ZBXNEXT-2363">можно</a> <a href="https://www.linux.org.ru/forum/admin/13545067?cid=13635465">встретить</a> <a href="https://www.linux.org.ru/news/opensource/14508212?cid=14513389">советы</a> по смене движка таблиц истории и тенденций с родного для MySQL движка InnoDB на движок TokuDB с технологией «фрактальных индексов». Также вместе с этим движком рекомендуют использовать «кластерные индексы», когда индексы хранятся вместе с данными, и сжатие данных в таблицах.</p>
+
+		<p>Изначально TokuDB был ответвлением MySQL, в котором фирма Tokutek реализовала собственную технологию «фрактальных индексов». Позже исходные тексты TokuDB стали доступны под свободной лицензией и на их основе был реализован плагин, пригодный подключению как к оригинальной СУБД MySQL, так и к её ответвлениям - MariaDB и Percona.</p>
+
+		<h2>1. Включение плагина TokuDB в MariaDB</h2>
+
+		<p>Мне удавалось успешно настраивать TokuDB на Debian Stretch и Debian Buster. Установку и настройку MariaDB оставим за скобками нашего обсуждения. Будем считать, что система мониторинга уже развёрнута и использует MariaDB, а таблицы истории и тенденций пока что хранятся в таблицах формата InnoDB.</p>
+
+		<p>Первым делом установим пакет с плагином, который добавляет в MariaDB поддержку формата хранения таблиц TokuDB:</p>
+
+		<pre class="console"># apt-get install mariadb-plugin-tokudb</pre>
+
+		<p>Вместе с пакетом будет установлен дополнительный файл конфигурации /etc/mysql/mariadb.conf.d/tokudb.cnf, в котором указан путь к библиотеке libjemalloc. В случае с Debian Stretch это будет путь /usr/lib/x86_64-linux-gnu/libjemalloc.so.1 В случае с Debian Buster это будет путь /usr/lib/x86_64-linux-gnu/libjemalloc.so.2 Прежде чем продолжать, стоит удостовериться, что этот файл действительно сущетсвует в системе, т.к. при обновлении операционной системы до свежего релиза в файле конфигурации мог остаться устаревший путь. В Debian Stretch этот файл устанавливается с пакетом libjemalloc1, а в Debian Buster - пакетом libjemalloc2. Необходимо установить соответствующий пакет и исправить путь к файлу в файле конфигурации.</p>
+
+		<p>Теперь нужно убедиться, что в системе отключена прозрачная поддержка огромных страниц (Transparent Hugepages). Для этого запускаем следующую команду:</p>
+
+		<pre class="console">$ cat /sys/kernel/mm/transparent_hugepage/enabled</pre>
+
+		<p>Если команда поругалась на отсутствие файла, значит прозрачная поддержка огромных страниц уже отключена и делать больше ничего не нужно. Также ничего не нужно делать, если команда вывела следующее:</p>
+
+		<pre class="console">always madvise [never]</pre>
+
+		<p>Если же команда вывела приведённый ниже текст, то прозрачная поддержка огромных страниц включена и её необходимо отключить:</p>
+
+		<pre class="console">[always] madvise never</pre>
+
+		<p>Открываем файл /etc/default/grub, находим переменную GRUB_CMDLINE_LINUX и добавляем в список опций опцию transparent_hugepage=never. В результате должно получиться что-то такое:</p>
+
+		<pre class="code">GRUB_CMDLINE_LINUX="ipv6.disable=1 transparent_hugepage=never"</pre>
+
+		<p>Теперь нужно обновить конфигурацию загрузчика следующей командой:</p>
+
+		<pre class="console"># update-grub</pre>
+
+		<p>Осталось перезагрузить систему и убедиться в том, что прозрачная поддержка огромных страниц действительно отключилась.</p>
+
+		<p>Все описанные выше действия, необходимые для включения плагина TokuDB, можно найти в официальной документации MariaDB, на странице <a href="https://mariadb.com/kb/en/installing-tokudb/">Installing TokuDB</a>.</p>
+
+		<h2>2. Создание новых таблиц истории и тенденций</h2>
+
+		<p>Если база данных только создана и не содержит исторических данных и данных тенденций, то можно просто удалить существующие таблицы:</p>
+
+		<pre class="code">DROP TABLE history;
+DROP TABLE history_uint;
+DROP TABLE history_str;
+DROP TABLE history_log;
+DROP TABLE history_text;
+DROP TABLE trends;
+DROP TABLE trends_uint;</pre>
+
+		<p>Если же нужно выполнить миграцию существующей инсталляции Zabbix, тогда лучше сначала переименовать существующие таблицы истории и тенденций:</p>
+
+		<pre class="code">RENAME TABLE history TO history_bak;
+RENAME TABLE history_uint TO history_uint_bak;
+RENAME TABLE history_str TO history_str_bak;
+RENAME TABLE history_log TO history_log_bak;
+RENAME TABLE history_text TO history_text_bak;
+RENAME TABLE trends TO trends_bak;
+RENAME TABLE trends_uint TO trends_uint_bak;</pre>
+
+		<p>Вместо прежних таблиц нужно будет создать новые пустые таблицы истории и тенденций, сначала без разбивки на секции, с помощью следующих SQL-запросов:</p>
+
+		<pre class="code">CREATE TABLE `history` (
+        `itemid`                 bigint unsigned                           NOT NULL,
+        `clock`                  integer         DEFAULT '0'               NOT NULL,
+        `value`                  double(16,4)    DEFAULT '0.0000'          NOT NULL,
+        `ns`                     integer         DEFAULT '0'               NOT NULL
+) ENGINE=TokuDB COMPRESSION=TOKUDB_LZMA;
+CREATE INDEX `history_1` ON `history` (`itemid`,`clock`) CLUSTERING=yes;
+
+CREATE TABLE `history_uint` (
+        `itemid`                 bigint unsigned                           NOT NULL,
+        `clock`                  integer         DEFAULT '0'               NOT NULL,
+        `value`                  bigint unsigned DEFAULT '0'               NOT NULL,
+        `ns`                     integer         DEFAULT '0'               NOT NULL
+) ENGINE=TokuDB COMPRESSION=TOKUDB_LZMA;
+CREATE INDEX `history_uint_1` ON `history_uint` (`itemid`,`clock`) CLUSTERING=yes;
+
+CREATE TABLE `history_str` (
+        `itemid`                 bigint unsigned                           NOT NULL,
+        `clock`                  integer         DEFAULT '0'               NOT NULL,
+        `value`                  varchar(255)    DEFAULT ''                NOT NULL,
+        `ns`                     integer         DEFAULT '0'               NOT NULL
+) ENGINE=TokuDB COMPRESSION=TOKUDB_LZMA;
+CREATE INDEX `history_str_1` ON `history_str` (`itemid`,`clock`) CLUSTERING=yes;
+
+CREATE TABLE `history_log` (
+        `itemid`                 bigint unsigned                           NOT NULL,
+        `clock`                  integer         DEFAULT '0'               NOT NULL,
+        `timestamp`              integer         DEFAULT '0'               NOT NULL,
+        `source`                 varchar(64)     DEFAULT ''                NOT NULL,
+        `severity`               integer         DEFAULT '0'               NOT NULL,
+        `value`                  text                                      NOT NULL,
+        `logeventid`             integer         DEFAULT '0'               NOT NULL,
+        `ns`                     integer         DEFAULT '0'               NOT NULL
+) ENGINE=TokuDB COMPRESSION=TOKUDB_LZMA;
+CREATE INDEX `history_log_1` ON `history_log` (`itemid`,`clock`) CLUSTERING=yes;
+
+CREATE TABLE `history_text` (
+        `itemid`                 bigint unsigned                           NOT NULL,
+        `clock`                  integer         DEFAULT '0'               NOT NULL,
+        `value`                  text                                      NOT NULL,
+        `ns`                     integer         DEFAULT '0'               NOT NULL
+) ENGINE=TokuDB COMPRESSION=TOKUDB_LZMA;
+CREATE INDEX `history_text_1` ON `history_text` (`itemid`,`clock`) CLUSTERING=yes;
+
+CREATE TABLE `trends` (
+        `itemid`                 bigint unsigned                           NOT NULL,
+        `clock`                  integer         DEFAULT '0'               NOT NULL,
+        `num`                    integer         DEFAULT '0'               NOT NULL,
+        `value_min`              double(16,4)    DEFAULT '0.0000'          NOT NULL,
+        `value_avg`              double(16,4)    DEFAULT '0.0000'          NOT NULL,
+        `value_max`              double(16,4)    DEFAULT '0.0000'          NOT NULL,
+        PRIMARY KEY (itemid,clock) CLUSTERING=yes
+) ENGINE=TokuDB COMPRESSION=TOKUDB_LZMA;
+
+CREATE TABLE `trends_uint` (
+        `itemid`                 bigint unsigned                           NOT NULL,
+        `clock`                  integer         DEFAULT '0'               NOT NULL,
+        `num`                    integer         DEFAULT '0'               NOT NULL,
+        `value_min`              bigint unsigned DEFAULT '0'               NOT NULL,
+        `value_avg`              bigint unsigned DEFAULT '0'               NOT NULL,
+        `value_max`              bigint unsigned DEFAULT '0'               NOT NULL,
+        PRIMARY KEY (itemid,clock) CLUSTERING=yes
+) ENGINE=TokuDB COMPRESSION=TOKUDB_LZMA;</pre>
+
+		<p>Эти таблицы пока не разбиты на секции, но уже используют движок TokuDB, сжатие данных по алгоритму LZMA и используют кластерные индексы - индексы, хранящиеся вместе с индексируемыми данными.</p>
+
+		<h2>3. Разбивка таблиц на секции</h2>
+
+		<p>Разбивку таблиц на секции я проводил в соответствии со статьёй <a href="https://zabbix.org/wiki/Docs/howto/mysql_partition">Docs/howto/mysql partition</a>.</p>
+
+		<p>Я подготовил скрипт, который выводит команды, необходимые для разбивки таблиц истории и тенденций на необходимые секции. Настройки начальной и конечной дат, а также размер каждой секции, задаются прямо в тексте скрипта:</p>
+
+		<pre class="code">#!/usr/bin/python
+# -*- coding: UTF-8 -*-
+
+from datetime import datetime, timedelta
+from pytz import timezone
+
+def table_partitions(table, start, stop, step):
+    print 'ALTER TABLE `%s` PARTITION BY RANGE (`clock`) (' % table
+
+    dt = start
+    while dt &lt; stop:
+        name = dt.strftime('%Y%m%d%H%M')
+        ts = dt.strftime('%s')
+        dt += step
+        print 'PARTITION p%s VALUES LESS THAN (%s) ENGINE = TokuDB,' % (name, ts)
+
+    name = dt.strftime('%Y%m%d%H%M')
+    ts = dt.strftime('%s')
+    print 'PARTITION p%s VALUES LESS THAN (%s) ENGINE = TokuDB' % (name, ts)
+    print ');'
+
+tz = timezone('UTC')
+# Для таблиц тенденций trends и trends_uint
+start = datetime(2018, 9, 10, 0, 0, 0, tzinfo=tz)
+stop = datetime(2019, 9, 22, 0, 0, 0, tzinfo=tz)
+step = timedelta(days=1)
+table_partitions('trends', start, stop, step)
+table_partitions('trends_uint', start, stop, step)
+
+# Для таблиц истории history и history_uint
+start = datetime(2019, 6, 10, 0, 0, 0, tzinfo=tz)
+stop = datetime(2019, 9, 22, 0, 0, 0, tzinfo=tz)
+step = timedelta(hours=6)
+table_partitions('history', start, stop, step)
+table_partitions('history_uint', start, stop, step)
+
+# Для таблиц истории history_str, history_text и history_log
+start = datetime(2019, 9, 3, 0, 0, 0, tzinfo=tz)
+stop = datetime(2019, 9, 22, 0, 0, 0, tzinfo=tz)
+step = timedelta(days=1)
+table_partitions('history_str', start, stop, step)
+table_partitions('history_text', start, stop, step)
+table_partitions('history_log', start, stop, step)</pre>
+
+		<p>Запускаем скрипт, сохраняем выведенные им команды в файл:</p>
+
+		<pre class="console">$ ./partitions.py &gt; partitions.sql</pre>
+
+		<p>Затем подключаемся клиентом MySQL к базе данных zabbix:</p>
+
+		<pre class="console">$ mysql -uzabbix -p zabbix</pre>
+
+		<p>И выполняем в нём команды из файла partitions.sql:</p>
+
+		<pre class="console">MariaDB [zabbix]&gt; SOURCE partitions.sql</pre>
+
+		<p>После выполнения команд таблицы будут разбиты на секции в соответствии с настройками, прописанными в скрипте partitions.py</p>
+
+		<h2>4. Перенос имеющихся данных в новые таблицы</h2>
+
+		<p>Можно было бы перенести данные из старых таблиц в новые простыми SQL-запросами вида INSERT INTO history_uint SELECT * FROM history_uint_bak, но такие запросы на время их работы будут полностью блокировать вставку новых данных в таблицу, поэтому надо переносить данные порциями. Я в этих целях пользуюсь командами следующего вида:</p>
+
+		<pre class="console">$ mysqldump -t -uroot -p zabbix trends_uint_bak | grep ^INSERT | sed 's/^INSERT INTO/INSERT IGNORE/g' | mysql -uroot -p zabbix
+$ mysqldump -t -uroot -p zabbix trends_bak | grep ^INSERT | sed 's/^INSERT INTO/INSERT IGNORE/g' | mysql -uroot -p zabbix
+$ mysqldump -t -uroot -p zabbix history_bak | grep ^INSERT | sed 's/^INSERT INTO/INSERT IGNORE/g' | mysql -uroot -p zabbix
+$ mysqldump -t -uroot -p zabbix history_str_bak | grep ^INSERT | sed 's/^INSERT INTO/INSERT IGNORE/g' | mysql -uroot -p zabbix
+$ mysqldump -t -uroot -p zabbix history_text_bak | grep ^INSERT | sed 's/^INSERT INTO/INSERT IGNORE/g' | mysql -uroot -p zabbix
+$ mysqldump -t -uroot -p zabbix history_log_bak | grep ^INSERT | sed 's/^INSERT INTO/INSERT IGNORE/g' | mysql -uroot -p zabbix</pre>
+
+		<p>Это не красивое решение, но оно меня вполне устраивает, т.к. не приводит к длительной блокировке таблиц.</p>
+
+		<p>После переноса данных в новые таблицы старые таблицы можно будет удалить:</p>
+
+		<pre class="code">DROP TABLE history_bak;
+DROP TABLE history_uint_bak;
+DROP TABLE history_str_bak;
+DROP TABLE history_log_bak;
+DROP TABLE history_text_bak;
+DROP TABLE trends_bak;
+DROP TABLE trends_uint_bak;</pre>
+
+		<h2>5. Настройки плагина TokuDB</h2>
+
+		<p>Просмотрев <a href="https://www.youtube.com/watch?v=RoniHeNHTtI">видеоролик с выступлением Владислава Лесина</a> - одного из нынешних разработчиков TokuDB, работающего над этим плагином в компании Percona - я составил для себя список настроек плагина, на которые следует обратить внимание:</p>
+
+		<h3>5.1. tokudb_fanout - максимальное количество дочерних узлов</h3>
+
+		<p>Чем меньше, тем больше памяти для сообщений, тем лучше для нагрузки по записи, тем хуже для нагрузке по выборке, тем хуже использование памяти.</p>
+
+		<h3>5.2. tokudb_block_size - размер узла в памяти</h3>
+
+		<p>По умолчанию - 4 мегабайта.</p>
+
+		<p>Большие значения лучше для медленных дисков (с последовательным доступом). 4 мегабайта - оптимальный выбор для вращающихся дисков.</p>
+
+		<p>Для быстрых дисков (с произвольным доступом, как у SSD) меньший размер блока може увеличить производительность.</p>
+
+		<h3>5.3. tokudb_read_block_size - размер базового узла</h3>
+
+		<p>По умолчанию - 64 килобайта.</p>
+
+		<p>Меньшие значения лучше для точечных чтений, но приводят к увеличению непоследовательных операций ввода-вывода.</p>
+
+		<h3>5.4. tokudb_row_format - алгоритм сжатия колонок</h3>
+
+		<p>Возможны следующие значения:</p>
+
+		<ul>
+			<li>tokudb_default, tokudb_zlib - среднее сжатие при средней нагрузке на процессор.</li>
+
+			<li>tokudb_snappy - хорошее сжатие при низкой нагрузке на процессор.</li>
+
+			<li>tokudb_fast, tokudb_quicklz - слабое сжатие при низкой нагрузке на процессор.</li>
+
+			<li>tokudb_small, tokudb_lzma - лучшее сжатие при высокой нагрузке на процессор.</li>
+
+			<li>tokudb_uncompressed - сжатие не используется.</li>
+		</ul>
+
+		<h3>5.5. tokudb_directio - использование прямого ввода-вывода</h3>
+
+		<p>Значение OFF позволяет использовать дисковый кэш операционной системы в качестве вторичного кэша для хранения сжатых узлов. Для ограничения использования памяти процессом mysqld нужно использовать cgroups.</p>
+
+		<p>В качестве пищи для размышлений можно принять во внимание настройки, использованные в тесте производительности TokuDB, описание которого доступно по ссылке <a href="https://github.com/Percona-Lab/benchmark-docs/blob/master/benchmarks/mysql-linkbench-smperf01.rst">LinkeBench MySQL</a>:</p>
+
+		<pre class="code">tokudb_cache_size = 8G ; default = 12G ?
+tokudb_directio = OFF
+tokudb_empty_scan = disabled ; default - rl
+tokudb_read_block_size = 16K ; default - 64K
+tokudb_commit_sync = ON
+tokudb_checkpointing_period = 900 ; default = 60
+tokudb_block_size = 4M
+tokudb_cleaner_iterations = 10000 ; default = 5
+tokudb_fanout = 128 ; default = 16</pre>
+
+		<p>Я ограничился указанием подходящего значения tokudb_cache_size и изменением следующих настроек:</p>
+
+		<pre class="code">tokudb_directio = ON
+tokudb_row_format = tokudb_lzma
+tokudb_empty_scan = disabled</pre>
+
+		<h2>6. Решение проблем</h2>
+
+		<p>После обновления версии MariaDB пакетами из репозитория по неизвестным причинам планировщик перестаёт выполнять задачу по обслуживанию секций таблиц: не удаляет устаревшие секции и, что гораздо хуже, не создаёт новые секции таблиц. Последнее приводит к тому, что сервер Zabbix не может вставить в таблицы новые данные. Проявляется это в том, что после полуночи в последних данных на графиках нет данных, а сервер Zabbix ругается в журнал ошибками следующего вида:</p>
+
+		<pre class="code">6619:20200604:000100.756 [Z3005] query failed: [1526] Table has no partition for value 1591210860 [insert into history
+(itemid,clock,ns,value) values (3827556,1591210860,519948235,0.012016),(3827601,1591210860,574265420,0.016382),
+(3827553,1591210860,683308669,7.549000),(3827616,1591210860,684083178,7.715000),(3827591,1591210860,684848189,3.199600),
+(3827583,1591210860,685585717,0.016474),(3827504,1591210860,689418268,24.000000),(3827564,1591210860,690132132,3.209600),
+(3827610,1591210860,690862622,0.014954),(1284053,1591210860,732901317,3.000000),(1283392,1591210860,737607405,23.000000),
+(352809,1591210860,737607405,35.000000),(1309072,1591210860,738428022,11.000000),(3827571,1591210860,740171802,7.187000),
+(1308475,1591210860,740185955,3.000000),(1292277,1591210860,743020934,1.000000),(3827619,1591210860,743278260,0.014760),
+(3827573,1591210860,743976749,3.254600),(3827598,1591210860,744811430,7.577000),(1284110,1591210860,745749025,21.000000),
+(3827580,1591210860,746661186,7.580000),(1279841,1591210860,747623084,5.000000),(3827607,1591210860,748043948,7.717000),
+(1282792,1591210860,749216640,15.000000);
+]</pre>
+
+		<p>Если новые секции таблиц не создаются автоматически, то первым делом вручную вызываем обслуживание таблиц, чтобы сервер Zabbix мог начать писать данные:</p>
+
+		<pre class="code">CALL partition_maintenance('zabbix', 'trends', 365, 24, 2);
+CALL partition_maintenance('zabbix', 'trends_uint', 365, 24, 2);
+CALL partition_maintenance('zabbix', 'history', 90, 6, 8);
+CALL partition_maintenance('zabbix', 'history_uint', 90, 6, 8);
+CALL partition_maintenance('zabbix', 'history_str', 7, 24, 2);
+CALL partition_maintenance('zabbix', 'history_text', 7, 24, 2);
+CALL partition_maintenance('zabbix', 'history_log', 7, 24, 2);</pre>
+
+		<p>Далее, чтобы в дальнейшем заработала автоматика, могут помочь следующие действия.</p>
+
+		<p>Сначала обновляем таблицы в базах данных до текущей версии MySQL:</p>
+
+		<pre class="console">$ mysql_upgrade --force -uroot -p mysql
+$ mysql_upgrade --force -uroot -p zabbix</pre>
+
+		<p>Затем пересоздаём запланированное задание:</p>
+
+		<pre class="code">USE `zabbix`;
+DELIMITER $$
+
+CREATE EVENT IF NOT EXISTS `e_part_manage`
+       ON SCHEDULE EVERY 1 DAY
+       STARTS '2019-04-04 04:00:00'
+       ON COMPLETION PRESERVE
+       ENABLE
+       COMMENT 'Управление созданием и удалением секций'
+       DO BEGIN
+              CALL partition_maintenance('zabbix', 'trends', 365, 24, 2);
+              CALL partition_maintenance('zabbix', 'trends_uint', 365, 24, 2);
+              CALL partition_maintenance('zabbix', 'history', 90, 6, 8);
+              CALL partition_maintenance('zabbix', 'history_uint', 90, 6, 8);
+              CALL partition_maintenance('zabbix', 'history_str', 7, 24, 2);
+              CALL partition_maintenance('zabbix', 'history_text', 7, 24, 2);
+              CALL partition_maintenance('zabbix', 'history_log', 7, 24, 2);
+       END$$
+
+DELIMITER ;</pre>
+
+		<p>И напоследок перезапускаем сервер MariaDB:</p>
+
+		<pre class="console"># systemctl restart mariadb</pre>
+
+		<p>Какое из приведённых решений помогает на самом деле, сказать точно не могу, т.к. я пробовал использовать каждый из советов поодиночке и не установил чёткой закономерности, какой из них помогает всегда. Иногда одно действие не лечит проблему и на следующий день можно заметить, что новые секции опять не создались.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=История и тенденции Zabbix в TokuDB">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

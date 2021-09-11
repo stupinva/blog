@@ -1,0 +1,294 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="перевод,ssl,openssl,Джэми Нгуен" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-01-15 -->
+		<title>Джэми Нгуен. Файлы конфигурации корневого и промежуточного удостоверяющих центров, 2015</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Джэми Нгуен. Файлы конфигурации корневого и промежуточного удостоверяющих центров, 2015</h1>
+
+		<p>Перевод статей: <a href="https://jamielinux.com/docs/openssl-certificate-authority/appendix/root-configuration-file.html">Root CA configuration file</a>, <a href="https://jamielinux.com/docs/openssl-certificate-authority/appendix/intermediate-configuration-file.html">Intermediate CA configuration file</a></p>
+
+		<p>Автор: Джэми Нгуен (Jamie Nguyen)</p>
+
+		<p><a name="config-root"><b>Приложение А. Файл конфигурации корневого удостоверяющего центра</b></a></p>
+
+		<pre class="code"># Файл конфигурации OpenSSL для корневого удостоверяющего центра
+# Скопируйте в /root/ca/openssl.cnf
+
+[ca]
+# `man ca`
+default_ca = CA_default
+
+[CA_default]
+# Местонахождение каталогов и файлов
+dir              = /root/ca
+certs            = $dir/certs
+crl_dir          = $dir/crl
+new_certs_dir    = $dir/newcerts
+database         = $dir/index.txt
+serial           = $dir/serial
+RANDFILE         = $dir/private/.rand
+
+# Корневой ключ и корневой сертификат
+private_key      = $dir/private/ca.key.pem
+certificate      = $dir/certs/ca.cert.pem
+
+# Настройки списков отозванных сертификатов
+crlnumber        = $dir/crlnumber
+crl              = $dir/crl/ca.crl.pem
+crl_extensions   = crl_ext
+default_crl_days = 30
+
+# SHA-1 устарел, поэтому используем вместо него SHA-2
+default_md       = sha256
+
+name_opt         = ca_default
+cert_opt         = ca_default
+default_days     = 375
+preserve         = no
+policy           = policy_strict
+
+[policy_strict]
+# Корневой удостоверяющий центр должен подписывать только соответствующие промежуточные сертификаты
+# Обратитесь к разделу ФОРМАТ ПОЛИТИКИ из `man ca`
+countryName            = match
+stateOrProvinceName    = match
+organizationName       = match
+organizationalUnitName = optional
+commonName             = supplied
+emailAddress           = optional
+
+[policy_loose]
+# Разрешим промежуточному удостоверяющему центру подписывать более широкий диапазон сертификатов
+# Обратитесь к разделу ФОРМАТ ПОЛИТИКИ из `man ca`
+countryName            = optional
+stateOrProvinceName    = optional
+localityName           = optional
+organizationName       = optional
+organizationalUnitName = optional
+commonName             = supplied
+emailAddress           = optional
+
+[req]
+# Опции утилиты `req` (`man req`)
+default_bits       = 2048
+distinguished_name = req_distinguished_name
+string_mask        = utf8only
+
+# SHA-1 устарел, поэтому используем вместо него SHA-2
+default_md         = sha256
+
+# Расширения, добавляемые при использовании опции -x509
+x509_extensions    = v3_ca
+
+[req_distinguished_name]
+# Обратитесь к <a href="https://en.wikipedia.org/wiki/Certificate_signing_request">https://en.wikipedia.org/wiki/Certificate_signing_request</a>
+countryName                    = Название страны (двухбуквенный код)
+stateOrProvinceName            = Название штата или провинции
+localityName                   = Название местности
+0.organizationName             = Название организации
+organizationalUnitName         = Название подразделения организации
+commonName                     = Общее имя
+emailAddress                   = Адрес электронной почты
+
+# На выбор, можно указать несколько значений по умолчанию
+countryName_default            = GB
+stateOrProvinceName_default    = England
+localityName_default           =
+0.organizationName_default     = Alice Ltd
+organizationalUnitName_default =
+emailAddress_default           =
+
+[v3_ca]
+# Расширения для типичного удостоверяющего центра (`man x509v3_config`)
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints       = critical, CA:true
+keyUsage               = critical, digitalSignature, cRLSign, keyCertSign
+
+[v3_intermediate_ca]
+# Расширения для типичного промежуточного удостоверяющего центра (`man x509v3_config`)
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints       = critical, CA:true, pathlen:0
+keyUsage               = critical, digitalSignature, cRLSign, keyCertSign
+
+[usr_cert]
+# Расширения для клиентских сертификатов (`man x509v3_config`)
+basicConstraints       = CA:FALSE
+nsCertType             = client, email
+nsComment              = "Сертификат клиента создан OpenSSL"
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer
+keyUsage               = critical, nonRepudiation, digitalSignature, keyEncipherment
+extendedKeyUsage       = clientAuth, emailProtection
+
+[server_cert]
+# Расширения для сертификатов серверов (`man x509v3_config`)
+basicConstraints       = CA:FALSE
+nsCertType             = server
+nsComment              = "Сертификат сервера создан OpenSSL"
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer:always
+keyUsage               = critical, digitalSignature, keyEncipherment
+extendedKeyUsage       = serverAuth
+
+[crl_ext]
+# Расширение для списков отозванных сертификатов (`man x509v3_config`)
+authorityKeyIdentifier = keyid:always
+
+[ocsp]
+# Расширение для подписи сертификатов OCSP (`man ocsp`)
+basicConstraints       = CA:FALSE
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer
+keyUsage               = critical, digitalSignature
+extendedKeyUsage       = critical, OCSPSigning</pre>
+
+		<p><a name="config-intermediate"><b>Приложение Б. Файл конфигурации промежуточного удостоверяющего центра</b></a></p>
+
+		<pre class="code"># Файл конфигурации промежуточного удостоверяющего центра
+# Скопируйте в /root/ca/intermediate/openssl.cnf
+
+[ca]
+# `man ca`
+default_ca = CA_default
+
+[CA_default]
+# Местонахождение каталогов и файлов
+dir              = /root/ca/intermediate
+certs            = $dir/certs
+crl_dir          = $dir/crl
+new_certs_dir    = $dir/newcerts
+database         = $dir/index.txt
+serial           = $dir/serial
+RANDFILE         = $dir/private/.rand
+
+# Промежуточный ключ и промежуточный сертификат
+private_key      = $dir/private/intermediate.key.pem
+certificate      = $dir/certs/intermediate.cert.pem
+
+# Настройки списков отозванных сертификатов
+crlnumber        = $dir/crlnumber
+crl              = $dir/crl/intermediate.crl.pem
+crl_extensions   = crl_ext
+default_crl_days = 30
+
+# SHA-1 устарел, поэтому используем вместо него SHA-2
+default_md       = sha256
+
+name_opt         = ca_default
+cert_opt         = ca_default
+default_days     = 375
+preserve         = no
+policy           = policy_loose
+
+[policy_strict]
+# Корневой удостоверяющий центр должен подписывать только соответствующие промежуточные сертификаты
+# Обратитесь к разделу ФОРМАТ ПОЛИТИКИ из `man ca`
+countryName            = match
+stateOrProvinceName    = match
+organizationName       = match
+organizationalUnitName = optional
+commonName             = supplied
+emailAddress           = optional
+
+[policy_loose]
+# Разрешим промежуточному удостоверяющему центру подписывать более широкий диапазон сертификатов
+# Обратитесь к разделу ФОРМАТ ПОЛИТИКИ из `man ca`
+countryName            = optional
+stateOrProvinceName    = optional
+localityName           = optional
+organizationName       = optional
+organizationalUnitName = optional
+commonName             = supplied
+emailAddress           = optional
+
+[req]
+# Опции утилиты `req` (`man req`)
+default_bits       = 2048
+distinguished_name = req_distinguished_name
+string_mask        = utf8only
+
+# SHA-1 устарел, поэтому используем вместо него SHA-2
+default_md         = sha256
+
+# Расширения, добавляемые при использовании опции -x509
+x509_extensions    = v3_ca
+
+[req_distinguished_name]
+# Обратитесь к <a href="https://en.wikipedia.org/wiki/Certificate_signing_request">https://en.wikipedia.org/wiki/Certificate_signing_request</a>
+countryName                    = Название страны (двухбуквенный код)
+stateOrProvinceName            = Название штата или провинции
+localityName                   = Название местности
+0.organizationName             = Название организации
+organizationalUnitName         = Название подразделения организации
+commonName                     = Общее имя
+emailAddress                   = Адрес электронной почты
+
+# На выбор, можно указать несколько значений по умолчанию
+countryName_default            = GB
+stateOrProvinceName_default    = England
+localityName_default           =
+0.organizationName_default     = Alice Ltd
+organizationalUnitName_default =
+emailAddress_default           =
+
+[v3_ca]
+# Расширения для типичного удостоверяющего центра (`man x509v3_config`)
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints       = critical, CA:true
+keyUsage               = critical, digitalSignature, cRLSign, keyCertSign
+
+[v3_intermediate_ca]
+# Расширения для типичного промежуточного удостоверяющего центра (`man x509v3_config`)
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints       = critical, CA:true, pathlen:0
+keyUsage               = critical, digitalSignature, cRLSign, keyCertSign
+
+[usr_cert]
+# Расширения для клиентских сертификатов (`man x509v3_config`)
+basicConstraints       = CA:FALSE
+nsCertType             = client, email
+nsComment              = "Сертификат клиента создан OpenSSL"
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer
+keyUsage               = critical, nonRepudiation, digitalSignature, keyEncipherment
+extendedKeyUsage       = clientAuth, emailProtection
+
+[server_cert]
+# Расширения для сертификатов серверов (`man x509v3_config`)
+basicConstraints       = CA:FALSE
+nsCertType             = server
+nsComment              = "Сертификат сервера создан OpenSSL"
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer:always
+keyUsage               = critical, digitalSignature, keyEncipherment
+extendedKeyUsage       = serverAuth
+
+[crl_ext]
+# Расширение для списков отозванных сертификатов (`man x509v3_config`)
+authorityKeyIdentifier = keyid:always
+
+[ocsp]
+# Расширение для подписи сертификатов OCSP (`man ocsp`)
+basicConstraints       = CA:FALSE
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer
+keyUsage               = critical, digitalSignature
+extendedKeyUsage       = critical, OCSPSigning</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Джэми Нгуен. Файлы конфигурации корневого и промежуточного удостоверяющих центров, 2015">Написать автору перевода</a></p>
+
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

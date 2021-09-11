@@ -1,0 +1,173 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="torrent,clutch,debian,linux" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2008-07-31 -->
+		<title>Настройка веб-интерфейса Clutch</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка веб-интерфейса Clutch</h1>
+
+		<p>В предыдущей статье я описал настройку торрент-клиента transmission-daemon, в этой статье я опишу как я настраивал веб-интерфейс к transmission-daemon.</p>
+
+		<p>Первым делом устанавливаем веб-сервер lighttpd, php и php-расширение json.</p>
+
+		<pre class="console"># apt-get install lighttpd php5-cgi php5-json</pre>
+
+		<p>Включаем модуль fastcgi веб-сервера lighttpd:</p>
+
+		<pre class="console"># lighty-enable-mod fastcgi</pre>
+
+		<p>Заменяем в конфигурации модуля /etc/lighttpd/conf-enabled/10-fastcgi.conf интерпретатор PHP4 на PHP5:</p>
+
+		<pre class="code">fastcgi.server = (
+  ".php" =&gt; 
+  (
+    (
+      "bin-path" =&gt; "/usr/bin/<b>php5</b>-cgi",
+      "socket" =&gt; "/tmp/php.socket",
+      "max-procs" =&gt; 2,
+      "idle-timeout" =&gt; 20,
+      "bin-environment" =&gt;
+      ( 
+        "PHP_FCGI_CHILDREN" =&gt; "4",
+        "PHP_FCGI_MAX_REQUESTS" =&gt; "10000"
+      ),
+      "bin-copy-environment" =&gt;
+      (
+        "PATH",
+        "SHELL",
+        "USER"
+      ),
+      "broken-scriptfilename" =&gt; "enable",
+      "check-local" =&gt; "disable"
+    )
+  )
+)</pre>
+
+		<p>Перезапускаем веб-сервер:</p>
+
+		<pre class="console"># /etc/init.d/lighttpd restart</pre>
+
+		<p>При перезапуске сервер ругается, что расширение json уже загружено!</p>
+
+		<p>Комментируем строчку, отвечающую за загрузку расширения json в файле /etc/php5/cgi/php.ini:</p>
+
+		<pre class="code">;extensions=json.so</pre>
+
+		<p>Снова перезапускаем веб-сервер:</p>
+
+		<pre class="console"># /etc/init.d/lighttpd restart</pre>
+
+		<p>Переходим в каталог /root, качаем дистрибутив Clutch:</p>
+
+		<pre class="console"># cd /root/
+# wget http://clutchbt.com/Files/Clutch-0.4.tar.gz</pre>
+
+		<p>Распаковываем дистрибутив:</p>
+
+		<pre class="console"># tar xzvf Clutch-0.4.tar.gz</pre>
+
+		<p>Меняем владельца и группу на пользователя и группу, под которыми работает веб-сервер:</p>
+
+		<pre class="console"># chown -R www-data:www-data Clutch-0.4</pre>
+
+		<p>Переходим в каталог, где хранится файл настройки сокета для связи с transmission-daemon:</p>
+
+		<pre class="console"># cd Clutch-0.4/remote/data/</pre>
+
+		<p>Прописываем в файле socket полный путь к сокету transmission-daemon:</p>
+
+		<pre class="code">/tmp/transmission.socket</pre>
+
+		<p>Переходим в каталог веб-сервера:</p>
+
+		<pre class="console"># cd /var/www/</pre>
+
+		<p>Делаем линк на веб-интерфейс:</p>
+
+		<pre class="console"># ln -s clutch /root/Clutch-0.4</pre>
+
+		<p>Пробуем зайти в браузере по адресу: http://localhost/clutch/</p>
+
+		<p>Видим, что веб-интерфейс открывается, но java-скрипты не работают.</p>
+
+		<p>Я потратил довольно много времени на проверки, всё ли я сделал правильно. Сделал страницу phpinfo.php с содержимым "<? phpinfo(); ?>" Попробовал в браузере открыть эту страницу: расшинения json и sockets были включены. Попробовал прикинуться веб-сервером с помощью команды su - www-data и проверить, имею ли я доступ к сокету transmission-daemon, имею ли я доступ на запись в каталог /root/Clutch-0.4/remote/data/.</p>
+
+		<p>Потом я решил проверить работоспособность самого веб-интерфейса Clutch с помощью расширения Firebug для Firefox увидел, что Firebug ругается на ошибку в одном из java-скриптов.</p>
+
+		<p>Я решил скачать самую свежую версию Clutch прямо из svn-репозитория проекта. Установил subversion:</p>
+
+		<pre class="console"># apt-get install subversion</pre>
+
+		<p>Перешёл в каталог /root/ и скачал репозиторий:</p>
+
+		<pre class="console"># cd /root/
+# svn co http://svn.recurser.com/transmission/trunk clutch</pre>
+
+		<p>Заглянул в каталог /root/clutch и увидел, что туда скачался интерфейс cocoa для MacOSX, исходники веб-сервера lighttpd, и нужный мне web-интерфейс.</p>
+
+		<p>Скопировал нужный мне раздел с web-интерфейсом</p>
+
+		<pre class="console"># cp clutch/branches/rpc/web/ clutch-web</pre>
+
+		<p>Далее опять поменял владельца:</p>
+
+		<pre class="console"># chown -R www-data:www-data clutch-web</pre>
+
+		<p>Отредактировал файл clutch-web/remote/data/socket:</p>
+
+		<pre class="code">/tmp/transmission.socket</pre>
+
+		<p>В каталоге /var/www удалил прежнюю ссылку, добавил новую:</p>
+
+		<pre class="console"># rm clutch
+# ln -d /root/clutch-web clutch</pre>
+
+		<p>Попробовал зайти через веб-интерфейс по адресу http://localhost/clutch/ снова. И, о чудо, он наконец заработал.</p>
+
+		<img src="clutch.png" />
+
+		<p>Тарболл с веб-интерфейсом можно скачать здесь: <a href="clutch-web.tgz">clutch-web.tgz</a></p>
+
+		<p>Осталось защитить веб-интерфейс паролем, чтобы разные злобные буратины не хозяйничали на моём веб-интерфейсе.</p>
+
+		<p>Подключаем к веб-серверу модуль auth:</p>
+
+		<pre class="console"># lighty-enable-mod auth</pre>
+
+		<p>В конфигурации модуля /etc/lighttpd/conf-enabled/10-auth.conf прописываем:</p>
+
+		<pre class="code">auth.backend = "htdigest"
+auth.backend.htdigest.userfile = "/etc/lighttpd/htdigest" 
+
+auth.require  = (
+  "/clutch" =&gt; 
+  ( 
+    "method" =&gt; "digest",
+    "realm" =&gt; "Clutch",
+    "require" =&gt; "user=admin"
+  )
+)</pre>
+
+		<p>И с помощью скрипта lightdigest.sh, взятого с сайта lighttpd, устанавливаем пароль для пользователя admin и рилма Clutch:</p>
+
+		<pre class="console"># lightdigest.sh -u admin -p password -r Clutch</pre>
+
+		<p>Скрипт для генерирования файла htdigest можно взять здесь: <a href="lightdigest.sh">lightdigest.sh</a></p>
+
+		<p>Ну вот, пожалуй, и всё!</p>
+
+		<p>Дополнение от 8 октября 2009 года:</p>
+
+		<p>Transmission всех версий выше 1.22 имеет новый способ управления. Теперь для управления демоном используется не сокет-файл, а HTTP-сервер, работающий по умолчанию на TCP-порту 9091. Сервер поддерживает digest-авторизацию, управление осуществляется с помощью какой-то разновидности протокола RPC. Также на этом HTTP-сервере имеется встроенный Web-клиент для управления Transission, старый знакомый Clutch, который доступен при подключении браузером к серверу. Никаких особых настроек не требуется, в squeeze демон снабжён init-сценарием для запуска.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка веб-интерфейса Clutch">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

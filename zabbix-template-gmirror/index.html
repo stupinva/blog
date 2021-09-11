@@ -1,0 +1,49 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="gmirror,zabbix,geom,freebsd,raid" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-05-07 -->
+		<title>Контроль программного RAID-массива FreeBSD через Zabbix</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Контроль программного RAID-массива FreeBSD через Zabbix</h1>
+
+		<p>Совсем короткая статья про контроль программных RAID-массивов FreeBSD, созданных средствами gmirror. На этот раз кроме установленного и настроенного в системе Zabbix-агента не понадобится более никаких дополнительных пакетов.</p>
+
+		<p>Впишем в файл конфигурации Zabbix-агента /usr/local/etc/zabbix24/zabbix_agentd.conf всего одну строчку:</p>
+
+		<pre class="code">UserParameter=raid,/sbin/gmirror status -s 2&gt;/dev/null | fgrep -vc COMPLETE</pre>
+
+		<p>Команда gmirror status с ключом -s выводит состояние каждого диска, состоящего в каком-либо RAID-массиве, в одной строке. Команда fgrep -vc COMPLETE считает количество строчек, в которых нет статуса COMPLETE, который соответствует исправному состоянию диска в массиве. В итоге, если элемент данных raid равен нулю, то все RAID-массивы исправны.</p>
+
+		<p>После внесения изменений в конфигурацию Zabbix-агента, не забудьте его перезапустить:</p>
+
+		<pre class="console"># /etc/init.d/zabbix-agent restart</pre>
+
+		<p>Я подготовил два шаблона для контроля параметров исправности RAID-массивов:</p>
+
+		<ul>
+			<li><a href="Template_App_RAID_gmirror.xml">Template_App_RAID_gmirror.xml</a> - шаблон с элементами данных типа "Zabbix-агент",</li>
+
+			<li><a href="Template_App_RAID_gmirror_Active.xml">Template_App_RAID_gmirror_Active.xml</a> - шаблон с элементами данных типа "Zabbix-агент (активный)".</li>
+		</ul>
+
+		<p>В шаблоне есть всего один элемент данных, контролирующий количество неисправных элементов RAID-массивов:</p>
+
+		<img src="gmirror_item.png" />
+
+		<p>И всего один триггер, который срабатывает при наличии хотя бы одного неисправного элемента хотя бы одного RAID-массива:</p>
+
+		<img src="gmirror_trigger.png" />
+
+		<p>По сути, оба шаблона полностью аналогичны шаблонам для контроля программных RAID-массивов Linux и отличаются от них только именами.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Контроль температуры с датчиков sysctl во FreeBSD через Zabbix">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

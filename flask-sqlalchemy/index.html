@@ -1,0 +1,199 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="sqlal,python,orm,перевод,flask,sqlalchemy" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-06-02 -->
+		<title>Армин Роначер. SQLAlchemy во Flask, 2012</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Армин Роначер. SQLAlchemy во Flask, 2012</h1>
+
+		<p>Перевод статьи: <a href="http://flask.pocoo.org/docs/patterns/sqlalchemy/">SQLAlchemy in Flask</a></p>
+
+		<p>Автор: Армин Роначер (Armin Ronacher)</p>
+
+		<p>Многие люди предпочитают использовать <a href="http://www.sqlalchemy.org/">SQLAlchemy</a> для доступа к базам данных. В этом случае для написания приложений на Flask больше подходят пакеты вместо модулей, так как в этом случае можно поместить модели в отдельный модуль (<a href="http://flask.pocoo.org/docs/patterns/packages/#larger-applications">Большие приложения</a>). Хотя это и не является необходимым, это имеет смысл.</p>
+
+		<p>Есть четыре обычных способа использования SQLAlchemy. Остановимся на каждом из них подробнее:</p>
+
+		<h2>1. Расширение Flask-SQLAlchemy</h2>
+
+		<p>Поскольку SQLAlchemy - это обобщённый слой абстракции над базами данных и объектно-реляционное отображение, требующее предварительной настройки, существует расширение Flask, делающее всё необходимое за вас. Если нужно быстро начать работу, рекомендуем воспользоваться им.</p>
+
+		<p>Расширение <a href="http://packages.python.org/Flask-SQLAlchemy/">Flask-SQLAlchemy</a> можно скачать из <a href="http://pypi.python.org/pypi/Flask-SQLAlchemy">PyPI</a>.</p>
+
+		<h2>2. Declarative</h2>
+
+		<p>Расширение declarative в SQLAlchemy - это один из наиболее частых способов использования SQLAlchemy. Оно позволяет вам определять таблицы и модели одновременно, примерно так, как это делается в Django. В дополнение к следующему тексту рекомендуется обратиться к официальной документации по расширению <a href="http://www.sqlalchemy.org/docs/orm/extensions/declarative.html">declarative</a>.</p>
+
+		<p>Вот пример модуля database.py для приложения:</p>
+
+		<pre class="code">from sqlalchemy import create_engine
+from sqlalchemy.orm import scoped_session, sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
+
+engine = create_engine('sqlite:////tmp/test.db', convert_unicode=True)
+db_session = scoped_session(sessionmaker(autocommit=False,
+                                         autoflush=False,
+                                         bind=engine))
+Base = declarative_base()
+Base.query = db_session.query_property()
+
+def init_db():
+    # Здесь нужно импортировать все модули, где могут быть определены модели,
+    # которые необходимым образом могут зарегистрироваться в метаданных. 
+    # В противном случае их нужно будет импортировать до вызова init_db()
+    import yourapplication.models
+    Base.metadata.create_all(bind=engine)</pre>
+
+		<p>Для определения собственных моделей наследуйте от класса Base, который создан вышеприведённым кодом. Если вы удивлены, почему в этом примере не нужно заботиться о потоках (как мы делали в примере для SQLite3 с объектом g выше), то это потому что SQLAlchemy делает это самостоятельно при помощи scoped_session.</p>
+
+		<p>Чтобы использовать SQLAlchemy в приложении декларативным образом, необходимо поместить в модуль вашего приложения следующий код. Flask автоматически удалит сеанс базы данных в конце запроса:</p>
+
+		<pre class="code">from yourapplication.database import db_session
+
+@app.teardown_request
+def shutdown_session(exception=None):
+    db_session.remove()</pre>
+
+		<p>Вот пример модели (поместите его, например, в models.py):</p>
+
+		<pre class="code">from sqlalchemy import Column, Integer, String
+from yourapplication.database import Base
+
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True)
+    name = Column(String(50), unique=True)
+    email = Column(String(120), unique=True)
+
+    def __init__(self, name=None, email=None):
+        self.name = name
+        self.email = email
+
+    def __repr__(self):
+        return '&lt;User %r&gt;' % (self.name)</pre>
+
+		<p>Для создания базы данных можно воспользоваться функцией init_db:</p>
+
+		<pre class="console">&gt;&gt;&gt; from yourapplication.database import init_db
+&gt;&gt;&gt; init_db()</pre>
+
+		<p>Вот так можно добавить новые записи в базу данных:</p>
+
+		<pre class="console">&gt;&gt;&gt; from yourapplication.database import db_session
+&gt;&gt;&gt; from yourapplication.models import User
+&gt;&gt;&gt; u = User('admin', 'admin@localhost')
+&gt;&gt;&gt; db_session.add(u)
+&gt;&gt;&gt; db_session.commit()</pre>
+
+		<p>Пример запроса:</p>
+
+		<pre class="console">&gt;&gt;&gt; User.query.all()
+[&lt;User u'admin'&gt;]
+&gt;&gt;&gt; User.query.filter(User.name == 'admin').first()
+&lt;User u'admin'&gt;</pre>
+
+		<h2>3. Ручное объектно-реляционное отображение</h2>
+
+		<p>Ручное объектно-реляционное отображение имеет некоторые преимущества и недостатки по сравнению с декларативным подходом, рассмотренным выше. Главное отличие заключается в том, что таблицы и классы определяются раздельно, а затем создаётся их взаимное отображение. Этот подход более гибок, однако и более трудоёмок. В целом он работает подобно декларативному подходу, поэтому убедитесь в том, что поделили ваше приложение на несколько модулей в пакете.</p>
+
+		<p>Вот пример модуля database.py:</p>
+
+		<pre class="code">from sqlalchemy import create_engine, MetaData
+from sqlalchemy.orm import scoped_session, sessionmaker
+
+engine = create_engine('sqlite:////tmp/test.db', convert_unicode=True)
+metadata = MetaData()
+db_session = scoped_session(sessionmaker(autocommit=False,
+                                         autoflush=False,
+                                         bind=engine))
+def init_db():
+    metadata.create_all(bind=engine)</pre>
+
+		<p>Как и в декларативном случае, вам необходимо закрывать сеанс после каждого запроса. Поместите следующие строки в модуль вашего приложения:</p>
+
+		<pre class="code">from yourapplication.database import db_session
+
+@app.teardown_request
+def shutdown_session(exception=None):
+    db_session.remove()</pre>
+
+		<p>Вот пример таблицы и модели (поместите их в models.py):</p>
+
+		<pre class="code">from sqlalchemy import Table, Column, Integer, String
+from sqlalchemy.orm import mapper
+from yourapplication.database import metadata, db_session
+
+class User(object):
+    query = db_session.query_property()
+
+    def __init__(self, name=None, email=None):
+        self.name = name
+        self.email = email
+
+    def __repr__(self):
+        return '&lt;User %r&gt;' % (self.name)
+
+users = Table('users', metadata,
+    Column('id', Integer, primary_key=True),
+    Column('name', String(50), unique=True),
+    Column('email', String(120), unique=True)
+)
+mapper(User, users)</pre>
+
+		<p>Запрос и вставка записей делается точно так же, как в примере выше.</p>
+
+		<h2>4. Слой абстракции над SQL</h2>
+
+		<p>Если вы хотите использовать только слой абстракции к базам данных (и SQL), вам потребуется только объект engine:</p>
+
+		<pre class="code">from sqlalchemy import create_engine, MetaData
+
+engine = create_engine('sqlite:////tmp/test.db', convert_unicode=True)
+metadata = MetaData(bind=engine)</pre>
+
+		<p>Теперь можно объявить таблицы в коде, как в примере выше или автоматически загрузить их:</p>
+
+		<pre class="code">users = Table('users', metadata, autoload=True)</pre>
+
+		<p>Чтобы вставить данные, вы можете воспользоваться методом insert. Прежде чем совершить транзакцию, необходимо сначала получить подключение:</p>
+
+		<pre class="console">&gt;&gt;&gt; con = engine.connect()
+&gt;&gt;&gt; con.execute(users.insert(), name='admin', email='admin@localhost')</pre>
+
+		<p>SQLAlchemy автоматически подтвердит транзакцию.</p>
+
+		<p>Для выполнения запросов можно воспользоваться напрямую объектом engine, либо использовать подключение:</p>
+
+		<pre class="console">&gt;&gt;&gt; users.select(users.c.id == 1).execute().first()
+(1, u'admin', u'admin@localhost')</pre>
+
+		<p>С результатом запроса можно обращаться как со словарём:</p>
+
+		<pre class="console">&gt;&gt;&gt; r = users.select(users.c.id == 1).execute().first()
+&gt;&gt;&gt; r['name']
+u'admin'</pre>
+
+		<p>В метод execute() можно также передавать строки с выражениями SQL:</p>
+
+		<pre class="console">&gt;&gt;&gt; engine.execute('select * from users where id = :1', [1]).first()
+(1, u'admin', u'admin@localhost')</pre>
+
+		<p>За более подробной информацией о SQLAlchemy обратитесь к <a href="http://sqlalchemy.org/">вебсайту</a>.</p>
+
+		<h2>5. Примечания переводчика</h2>
+
+		<p>В сети можно найти учебник по использованию SQLAlchemy: <a href="https://ru.wikibooks.org/wiki/SQLAlchemy">SQLAlchemy - викиучебник</a>.</p>
+
+		<p><a href="https://flask-russian-docs.readthedocs.org/ru/latest/patterns/sqlalchemy.html">Этот</a> и другие переводы можно найти на <a href="https://flask-russian-docs.readthedocs.org/">сайте проекта перевода документации по Flask</a>. Автор проекта - Виталий Кузьмин aka ferm32.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Армин Роначер. SQLAlchemy во Flask, 2012">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

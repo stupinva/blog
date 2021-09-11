@@ -1,0 +1,74 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="pppd,megafon,3g,usb-modeswitch,chat" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2012-07-07 -->
+		<title>Настройка 3G-модема E352 от Мегафон в Debian Wheezy</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка 3G-модема E352 от Мегафон в Debian Wheezy</h1>
+
+		<p>Технологии беспроводного доступа в интернет очень удобны своей мобильностью, однако они по-прежнему уступают проводным технологиям по скорости и надёжности. Дома удобнее и дешевле пользоваться услугами проводных провайдеров, однако проводные провайдеры обходят стороной частные дома и дома с малым количеством квартир. В таких случаях не остаётся ничего лучшего, чем воспользоваться технологиями беспроводного доступа. Мне повезло и я могу пользоваться услугами проводного провайдера. Однако, получилось так, что в мои руки попал 3G-модем от Мегафона, который я незамедлительно решил опробовать на своём домашнем компьютере под Debian.</p>
+
+		<p>Если окинуть взглядом просторы интернета, то практически на поверхности можно легко найти описание процедуры настройки 3G-модема E352 от Мегафона. Процедура проста до безобразия:</p>
+
+		<p>1. Ставим пакеты usb-modeswitch и ppp:</p>
+
+		<pre class="console"># apt-get install usb-modeswitch ppp</pre>
+
+		<p>2. Создаём файл настройки для демона PPP в файле /etc/ppp/peers/megafon-3g:</p>
+
+		<pre class="code">connect "usr/sbin/chat -f /etc/chatscripts/megafon-3g" /dev/ttyUSB0
+crtscts
+noauth
+usepeerdns
+defaultroute
+user ""
+password ""</pre>
+
+		<p>3. Создаём скрипт /etc/chatscripts/megafon-3g для программы chatscript:</p>
+
+		<pre class="code">TIMEOUT 35
+ECHO ON
+ABORT '\nBUSY\r'
+ABORT '\nERROR\r'
+ABORT '\nNO ANSWER\r'
+ABORT '\nNO CARRIER\r'
+ABORT '\nNO DIALTONE\r'
+ABORT '\nRINGING\r\n\r\nRINGING\r'
+ABORT '\nUsername/pASSWORD Incorrect\r'
+''  \rAT
+OK  'AT+CGDCONT=1,"IP","internet"'
+OK  ATD*99***1#CONNECT  ""</pre>
+
+		<p>4. Пробуем установить подключение:</p>
+
+		<pre class="console"># pon megafon-3g</pre>
+
+		<p>Если подключение установлено, светодиод на модеме перестанет мигать зелёным цветом и загорится голубым цветом, как на фотографии:</p>
+
+		<img src="e352.jpg" />
+
+		<p>5. Если модем будет постоянно включен, а при каждой загрузке необходимо автоматически устанавливать подключение, в файл /etc/network/interfaces прописываем следующие строки:</p>
+
+		<pre class="code">auto megafon-3g
+iface megafon-3g inet ppp
+  provider megafon-3g</pre>
+
+		<p>Скорость, судя по интернет-пузомерке <a href="http://internet.yandex.ru">internet.yandex.ru</a> для беспроводной сети, по моему мнению, очень даже приличная:</p>
+
+		<img src="megafon-3g.png" />
+
+		<p>Входящая - 943 Кбит/с, исходящая - 663 Кбит/с.</p>
+
+		<p>Ещё одним приятным бонусом является наличие у этого модема разъёма для карт microSD - модем может выполнять функции флешки или адаптера для карт microSD.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка 3G-модема E352 от Мегафон в Debian Wheezy">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

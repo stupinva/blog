@@ -1,0 +1,53 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="postfix,mail,linux,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-09-22 -->
+		<title>Простейший почтовый релей на основе Postfix</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Простейший почтовый релей на основе Postfix</h1>
+
+		<p>Системным администраторам довольно часто приходится решать одну довольно простую задачу - настроить сбор писем-отчётов с подопечных серверов на свой почтовый ящик. Для подобных целей существует довольно много различных программ, умеющих в том числе аутентифицироваться на почтовом сервере. Некоторые из них даже поддерживают собственную очередь писем, а некоторые при первой же ошибке отправки почты через почтовый сервер сразу же удаляют письмо, просто сообщая об ошибке в журнал.</p>
+
+		<p>Однако, для этого можно воспользоваться и почтовым сервером Postfix. Он обладает модульной структурой, а потому хорошо масштабируется и может использоваться как для построения крупных многодоменных почтовых систем с вирутальными учётными записями, поддержкой шифрования, фильтрации вирусов, защитой от спама, так и для создания простейших почтовых релеев. То что нам нужно.</p>
+
+		<p>Установим пакет с Postfix:</p>
+
+		<pre class="console"># apt-get install postfix</pre>
+
+		<p>И отредактируем файл конфигурации Postfix /etc/postfix/main.cf, задав в нём следующие минимальные настройки:</p>
+
+		<pre class="code">myhostname = server.example.net
+mydomain = example.net
+inet_protocols = ipv4
+inet_interfaces = 127.0.0.1
+mydestination = $myhostname, localhost.$mydomain, localhost
+mynetworks = 127.0.0.0/8
+relayhost = [mail.example.net]
+masquerade_domains = example.net
+
+alias_maps = hash:/etc/aliases
+alias_database = hash:/etc/aliases</pre>
+
+		<p>Этот файл задаёт имя сервера (myhostname), с которого будет отправляться почта, его почтовый домен (mydomain), почтовый сервер, принимающий почту (relayhost), и домен, которым будут дополняться локальные учётные записи (masquerade_domains).</p>
+
+		<p>Этот почтовый сервер будет принимать почту только на локальном интерфейсе.</p>
+
+		<p>Перезапустим почтовый сервер:</p>
+
+		<pre class="console"># /etc/init.d/postfix restart</pre>
+
+		<p>Для использования в собственных скриптах можно использовать как команду sendmail из состава Postfix, так и почтовый клиент, запускаемый из командной строки. Например, команду mail из пакета bsd-mailx. Установить её можно как обычно:</p>
+
+		<pre class="console"># apt-get install bsd-mailx</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Простейший почтовый релей на основе Postfix">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

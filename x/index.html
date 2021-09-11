@@ -1,0 +1,251 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="gtf,ddcprobe,xresprobe,X-Window,xserver-xorg-core" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2012-05-20 -->
+		<title>Настройка X-сервера</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка X-сервера</h1>
+
+		<p>Файл конфигурации моего X-сервера подвергался многократным доработкам. Большинство доработок приведено здесь. Из не уместившегося здесь, остались установка фирменного драйвера от nvidia и настройка xinerama для подключения телевизора. Настройка Xinerama описана в этой заметке: <a href="../xinerama/">Xinerama: монитор и телевизор</a>, а установка фирменного драйвера от nvidia описана здесь: <a href="http://gq.net.ru/2007/05/05/installing-ati-or-nvidia-drivers-into-debian-etch/">Установка проприетарных драйверов ATI/nVidia в Debian GNU/Linux (Etch)</a>.</p>
+
+		<h2>1. Получение заготовки файла конфигурации</h2>
+
+		<p>Для начала запустим X-сервер в режиме автоматического конфигурирования:</p>
+
+		<pre class="console"># X -configure</pre>
+
+		<p>X-сервер протестирует всё доступное оборудование и запишет файл конфигурации в /root/xorg.conf.new. Скопируем его в каталог /etc/X11 под именем xorg.conf:</p>
+
+		<pre class="console"># cp /root/xorg.conf.new /etc/X11/</pre>
+
+		<p>Теперь можно отключить взаимодействие X-сервера с HAL. Для этого в файле /etc/X11/xorg.conf нужно прописать секцию ServerFlags и две опции:</p>
+
+		<pre class="code">Section "ServerFlags"
+  Option "AutoAddDevices" "False"
+  Option "AllowEmptyInput" "False"
+EndSection</pre>
+
+		<p>Чтобы X-сервер перезапускался при нажатии комбинации клавиш Ctrl+Alt+Backspace, можно добавить ту же секцию следующую опцию:</p>
+
+		<pre class="code">Option "DontZap" "False"</pre>
+
+		<h2>2. Русская раскладка</h2>
+
+		<p>Теперь нужно русифицировать клавиатуру.</p>
+
+		<p>Если вы отключили HAL, то раскладки клавиатуры настраиваются в файле /etc/X11/xorg.conf. Для этого в секцию InputDevice с настройками клавиатуры нужно добавить следующие строки:</p>
+
+		<pre class="code">Option      "XkbRules" "xorg"
+Option      "XkbModel" "pc104"
+Option      "XkbLayout" "us,ru"
+Option      "XkbOptions" "grp:alt_shift_toggle,grp_led:caps"
+Option      "XkbVariant" ",winkeys"
+Option      "AutoRepeat" "250 30"</pre>
+
+		<p>Если HAL включен, то нужно создать файл /etc/hal/fdi/policy/10-keymap.fdi со следующим текстом:</p>
+
+		<pre class="code">&lt;?xml version="1.0" encoding="UTF-8"?"?&gt;
+&lt;deviceinfo version="0.2"&gt;
+  &lt;device&gt;
+    &lt;match key="info.capabilities" contains="input.keymap"&gt;
+      &lt;append key="info.callouts.add" type="strlist"&gt;hal-setup-keymap&lt;/append&gt;
+    &lt;/match&gt;
+    &lt;match key="info.capabilities" contains="input.keys"&gt;
+      &lt;merge key="input.xkb.rules" type="string"&gt;base&lt;/merge&gt;
+      &lt;merge key="input.xkb.model" type="string"&gt;keyboard&lt;/merge&gt;
+      &lt;match key="/org/freedesktop/Hal/devices/computer:system.kernel.name" string="Linux"&gt;
+      &lt;merge key="input.xkb.model" type="string"&gt;evdev&lt;/merge&gt;
+      &lt;merge key="input.xkb.layout" type="string"&gt;us,ru&lt;/merge&gt;
+      &lt;merge key="input.xkb.variant" type="string"&gt;,winkeys&lt;/merge&gt;
+      &lt;merge key="input.xkb.options" type="string"&gt;grp:alt_shift_toggle&lt;/merge&gt;
+      &lt;merge key="input.xkb.options" type="string"&gt;grp_led:caps&lt;/merge&gt;
+    &lt;/match&gt;
+  &lt;/device&gt;
+&lt;/deviceinfo&gt;</pre>
+
+		<p>Настройки клавиатуры в варианте для HAL пригодятся на случай, если в ручной конфигурации допущены какие-то ошибки. В этом случае X-сервер переключится в режим самоконфигурации и подхватит настройки клавиатуры, заданные для HAL.</p>
+
+		<p>Оба варианта настроек задают две раскладки: американскую английскую и русскую раскладку, которая принята в Windows (то есть на подавляющем большинстве современных серийных клавиатур). Переключателем раскладки будет комбинация одновременно нажатых клавиш Alt и Shift. Индикатором раскладки - светодиод клавиши CapsLock.</p>
+
+		<h2>3. Настройка монитора</h2>
+
+		<p>Все настройки монитора указываются в секции Monitor.</p>
+
+		<p>Обычно все современные мониторы умеют отдавать всю информацию о поддерживаемых ими режимах видеокарте по протоколу DDC и поэтому обычно ручная настройка режимов не требуется.</p>
+
+		<p>Мой монитор LG Flatron L1730S выдаёт по DDC вполне рабочие режимы, но они не совпадают с режимами, заявленными в документации. Среди режимов DDC нет режима с разрешением 1280x1024 при частоте кадровой развёртки 75 Герц.</p>
+
+		<p>Узнать информацию, которую монитор отдаёт видеокарте по протоколу DDC, можно с помощью команды ddcprobe из пакета xresprobe.</p>
+
+		<p>Значения частот вертикальной и горизонтальной развёртки можно прописать в качестве начальных:</p>
+
+		<pre class="code">HorizSync    30.0 - 83.0
+VertRefresh  56.0 - 75.0</pre>
+
+		<p>Теперь, чтобы добавить поддержку недостающих режимов, воспользуемся программой gtf из пакета xserver-xorg-core.</p>
+
+		<p>Запускаем команду, указывая желаемое разрешение:</p>
+
+		<pre class="console">$ gtf 1280 1024 75 -x</pre>
+
+		<p>Она выдаст строку Modeline для этого режима, которую нужно будет включить в эту же секцию:</p>
+
+		<pre class="console"># 1280x1024 @ 75.00 Hz (GTF) hsync: 80.17 kHz; pclk: 138.54 MHz
+Modeline "1280x1024_75.00" 138.54 1280 1368 1504 1728 1024 1025 1028 1069 -HSync +Vsync</pre>
+
+		<p>То же самое нужно повторить для всех остальных желаемых режимов.</p>
+
+		<p>Максимальное значение hsync из всех Modeline'ов укажем в настройках частоты горизонтальной развёртки:</p>
+
+		<pre class="code">HorizSync    30.0 - 83.0
+VertRefresh  56.0 - 75.0</pre>
+
+		<p>Однако если всё определилось правильно, или вы иногда меняете монитор на другой, то лучше там ничего не указывать.</p>
+
+		<p>Для включения режима энергосбережения монитора нужно указать опцию DPMS:</p>
+
+		<pre class="code">Option "DPMS"</pre>
+
+		<p>Правильные размеры видимой части экрана в миллиметрах можно измерить линейкой и указать в этом же разделе:</p>
+
+		<pre class="code">DisplaySize      340   270</pre>
+
+		<h2>4. Настройка экрана</h2>
+
+		<p>При переключении разрешения экрана по Ctrl-Alt-+ и Ctrl-Alt-- вас может утомить листать большое количество режимов. Большинство режимов имеют очень низкую глубину цвета. Самой высокой глубиной цвета является 24-битная. Для этого в секции Screen удалим все подсекции Display, в которых опция Depth принимает значения, отличные от 24. Также полезно в секции Screen указать предпочтительную глубину цвета в 24 бита. В результате секция примет следующий вид. Здесь же можно указать доступные Modeline'ы, расчитанные с помощью программы gtf:</p>
+
+		<pre class="code">Section "Screen"
+  Identifier "Screen0"
+  Device     "Card0"
+  Monitor    "Monitor0"
+  DefaultDepth  24
+    SubSection "Display"
+      Viewport 0 0
+      Depth     24
+      Modes "1280x1024_75.00" "1024x768_75.00" "800x600_75.00" "640x480_75.00"
+    EndSubSection
+EndSection</pre>
+
+		<h2>5. Другие примеры настройки X-сервера через HAL</h2>
+
+		<p>Другие примеры настройки X-сервера через HAL можно найти в каталоге /usr/share/hal/fdi/. Например, упомянутый пример настройки раскладок клавиатуры находится в файле /usr/share/hal/fdi/policy/10osvendor/10-keymap.fdi</p>
+
+		<h2>6. Пример моего конфигурационного файла X-сервера</h2>
+
+		<pre class="code">Section "ServerFlags"
+        Option "AutoAddDevices" "False"
+        Option "AllowEmptyInput" "False"
+        Option "DontZap" "False"
+EndSection
+
+Section "ServerLayout"
+        Identifier     "X.org Configured"
+        Screen      0  "Screen0" 0 0
+        InputDevice    "Mouse0" "CorePointer"
+        InputDevice    "Keyboard0" "CoreKeyboard"
+EndSection
+
+Section "Files"
+        RgbPath      "/etc/X11/rgb"
+        ModulePath   "/usr/lib/xorg/modules"
+        FontPath     "/usr/share/fonts/X11/misc"
+        FontPath     "/usr/share/fonts/X11/Type1"
+        FontPath     "/var/lib/defoma/x-ttcidfont-conf.d/dirs/TrueType"
+EndSection
+
+Section "Module"
+        Load  "dri"
+        Load  "GLcore"
+        Load  "glx"
+        Load  "dbe"
+        Load  "record"
+        Load  "extmod"
+        Load  "xtrap"
+EndSection
+
+Section "InputDevice"
+        Identifier  "Keyboard0"
+        Driver      "kbd"
+        Option      "XkbRules" "xorg"
+        Option      "XkbModel" "pc104"
+        Option      "XkbLayout" "us,ru"
+        Option      "XkbOptions" "grp:alt_shift_toggle"
+        Option      "XkbVariant" ",winkeys"
+        Option      "AutoRepeat" "250 30"
+EndSection
+
+Section "InputDevice"
+        Identifier  "Mouse0"
+        Driver      "mouse"
+        Option      "Protocol" "auto"
+        Option      "Device" "/dev/input/mice"
+        Option      "ZAxisMapping" "4 5 6 7"
+EndSection
+
+Section "Monitor"
+        DisplaySize  338 270 # mm
+        Identifier   "Monitor0"
+        VendorName   "LG"
+        ModelName    "Flatron L1730S"
+ ### Comment all HorizSync and VertRefresh values to use DDC:
+        HorizSync    30.0 - 80.2
+        VertRefresh  56.0 - 75.0
+        Option       "DPMS"
+        # 1280x1024 @ 75.00 Hz (GTF) hsync: 80.17 kHz; pclk: 138.54 MHz
+        Modeline "1280x1024_75.00"  138.54  1280 1368 1504 1728  1024 1025 1028 1069  -HSync +Vsync
+        # 1024x768 @ 75.00 Hz (GTF) hsync: 60.15 kHz; pclk: 81.80 MHz
+        Modeline "1024x768_75.00"  81.80  1024 1080 1192 1360  768 769 772 802  -HSync +Vsync
+        # 800x600 @ 75.00 Hz (GTF) hsync: 47.02 kHz; pclk: 48.91 MHz
+        Modeline "800x600_75.00"  48.91  800 840 920 1040  600 601 604 627  -HSync +Vsync
+        # 640x480 @ 75.00 Hz (GTF) hsync: 37.65 kHz; pclk: 30.72 MHz
+        Modeline "640x480_75.00"  30.72  640 664 728 816  480 481 484 502  -HSync +Vsync
+EndSection
+
+Section "Device"
+        ### Available Driver options are:-
+        ### Values: &lt;i&gt;: integer, &lt;f&gt;: float, &lt;bool&gt;: "True"/"False",
+        ### &lt;string&gt;: "String", &lt;freq&gt;: "&lt;f&gt; Hz/kHz/MHz"
+        ### [arg]: arg optional
+        #Option     "SWcursor"                  # [&lt;bool&gt;]
+        #Option     "HWcursor"                  # [&lt;bool&gt;]
+        #Option     "NoAccel"                   # [&lt;bool&gt;]
+        #Option     "ShadowFB"                  # [&lt;bool&gt;]
+        #Option     "UseFBDev"                  # [&lt;bool&gt;]
+        #Option     "Rotate"                    # [&lt;str&gt;]
+        #Option     "VideoKey"                  # &lt;i&gt;
+        #Option     "FlatPanel"                 # [&lt;bool&gt;]
+        #Option     "FPDither"                  # [&lt;bool&gt;]
+        #Option     "CrtcNumber"                # &lt;i&gt;
+        #Option     "FPScale"                   # [&lt;bool&gt;]
+        #Option     "FPTweak"                   # &lt;i&gt;
+        #Option     "DualHead"                  # [&lt;bool&gt;]
+        Identifier  "Card0"
+        Driver      "nvidia"
+        VendorName  "nVidia Corporation"
+        BoardName   "NV43 [GeForce 6600]"
+        BusID       "PCI:5:0:0"
+EndSection
+
+Section "Screen"
+        Identifier "Screen0"
+        Device     "Card0"
+        Monitor    "Monitor0"
+        DefaultDepth    24
+        SubSection "Display"
+                Viewport   0 0
+                Depth     24
+                Modes "1280x1024_75.00" "1024x768_75.00" "800x600_75.00" "640x480_75.00"
+        EndSubSection
+EndSection</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка X-сервера">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

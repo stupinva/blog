@@ -1,0 +1,182 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="lvm,preseed,raid1,Эндрю Гамильтон,ubuntu,debian,linux,перевод,lvm2,raid" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-10-08 -->
+		<title>Эндрю Гамильтон. Заметки по использованию expert_recipe в файлах автоматизации установки Debian/Ubuntu, 2012</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Эндрю Гамильтон. Заметки по использованию expert_recipe в файлах автоматизации установки Debian/Ubuntu, 2012</h1>
+
+		<p>Перевод статьи: <a href="https://cptyesterday.wordpress.com/2012/06/17/notes-on-using-expert_recipe-in-debianubuntu-preseed-files/">Notes on using expert_recipe in Debian/Ubuntu Preseed Files</a></p>
+
+		<p>Автор: Эндрю Гамильтон (Andrew Hamilton)</p>
+
+		<p>При работе с IaaS всегда необходим лёгкий доступ к "голому железу". Так, в <a href="http://www.eucalyptus.com/">Eucalyptus</a> используются <a href="http://wiki.debian.org/DebianInstaller/Preseed">файлы автоматизации настройки</a> серверов <a href="http://www.debian.org/">Debian</a> и <a href="http://www.ubuntu.com/">Ubuntu</a> для тестирования программного обеспечения, оказания поддержи потребителям и обучения новых пользователей. Временами бывает нужно выполнить сложную настройку серверов и это не всегда простая задача.</p>
+
+		<p>Поначалу файл автоматизации установки со сложным разбиением разделов partman-auto/expert_recipe кажется пугающим. Может возникнуть множество вопросов о некоторых загадочных настройках. Документация Debian на первый взгляд не выглядит особо полезной, однако по мере понимания устройства файла автоматизации, она становится гораздо понятнее. При добавлении RAID и LVM, d-i partman-auto/expert_recipe может создать более сложную последовательность подготовки диска, что является очень мощной функцией для автоматизации установки операционной системы.</p>
+
+		<p>Базовая схема разбиения диска /dev/sda при помощи директивы автоматизации установки partman-auto/expert_recipe показана ниже:</p>
+
+		<pre class="code">d-i partman-auto/disk string /dev/sda
+d-i partman-auto/method string regular
+d-i partman-auto/expert_recipe string root :: \
+    19000 50 20000 ext3 \
+        $primary{ } $bootable{ } method{ format } \
+        format{ } use_filesystem{ } filesystem{ ext3 } \
+        mountpoint{ / } \
+    . \
+    2048 90 2048 linux-swap \
+        $primary{ } method{ swap } format{ } \
+    . \
+    100 100 10000000000 ext3 \
+        $primary{ } method{ format } format{ } \
+        use_filesystem{ } filesystem{ ext3 } \
+        mountpoint{ /srv/extra } \
+    .
+d-i partman-auto/choose_recipe select root
+d-i partman-partitioning/confirm_write_new_label boolean true
+d-i partman/choose_partition select Finish partitioning and write changes to disk
+d-i partman/confirm boolean true</pre>
+
+		<p>Основная часть, на которой я сосредоточусь - это строка partman-auto/expert_recipe. (Примечание: Она выглядит как несколько строк, но на самом деле является одной строкой с заэкранированными переводами строк.) В примере выше создаются три первичных раздела:</p>
+
+		<ul>
+			<li>/ - корневой раздел,</li>
+
+			<li>swap - раздел подкачки и</li>
+
+			<li>/srv/extra - дополнительный раздел.</li>
+		</ul>
+
+		<p>Директива partman-auto/expert_recipe разобрана ниже.</p>
+
+		<pre class="code">d-i partman-auto/expert_recipe string root ::</pre>
+
+		<p>Первая часть этой строки сообщает установщику Debian, что для разбивки диска, указанного в строке d-i partman-auto/disk, в менеджере разделов partman будет использоваться функция "expert_recipe". Далее установщику Debian сообщается, что директива ожидает строковое значение. Наконец, строке рецепта назначается имя "root". Имя рецепта используется в директиве d-i partman-auto/choose_recipe select root, чтобы сообщить ей, какой из рецептов нужно использовать. Знаки :: сообщают установщику Debian, что далее следует рецепт разбивки разделов.</p>
+
+		<p>Теперь рассмотрим, как будет создаваться один из разделов.</p>
+
+		<pre class="code">19000 50 20000 ext3 \
+        $primary{ } $bootable{ } method{ format } \
+        format{ } use_filesystem{ } filesystem{ ext3 } \
+        mountpoint{ / } \
+    . \</pre>
+
+		<p>Первая часть приведённого выше рецепта раздела состоит из трёх чисел. Числа указывают минимальный размер раздела в мегабайтах (19000), приоритет получения максимального размера (меньшие числа указывают на более высокий приоритет) (30) и максимальный размер создаваемого раздела. Оба значения размера задаются в мегабайтах (20000). Следующее слово указывает формат создаваемого раздела.</p>
+
+		<p>Следующие три строки сообщают менеджеру разделов partman, что этот раздел должен быть первичным, раздел должен быть помечен как загрузочный, раздел должен быть отформатирован, формат файловой системы должен быть ext3 и, наконец, что точкой монтирования этого раздела должен быть "/". Последняя строка с одной точкой сообщает менеджеру разделов partman, что это конец определения этого раздела. Если далее текст продолжается, то менеджер разделов partman понимает, что далее следуют определения других разделов, но если был найден перевод строки, то он понимает, что рецепт разбивки разделов завершился.</p>
+
+		<p>К несчастью, часть expert_recipe менеджера разделов partman может обрабатывать только рецепты для одного диска. Существует несколько обходных решений, основанных на том, что в команде preseed/late_command можно использовать sfdisk, который может выполнить дополнительные действия над другими дисками. Если expert_recipe используется для настройки LVM, тогда можно использовать несколько дисков, как это показано ниже.</p>
+
+		<p>Ниже приводится более сложный пример настройки массива RAID 1 на дисках /dev/sda и /dev/sdb с созданием LVM поверх массива RAID.</p>
+
+		<pre class="code">d-i partman-auto/disk string /dev/sda /dev/sdb
+d-i partman-auto/method string raid
+d-i partman-lvm/device_remove_lvm boolean true
+d-i partman-md/device_remove_md boolean true
+d-i partman-lvm/confirm boolean true
+d-i partman-auto/choose_recipe select boot-root
+d-i partman-auto-lvm/new_vg_name string vg00
+d-i partman-auto/expert_recipe string \
+    boot-root :: \
+        1024 30 1024 raid \
+            $lvmignore{ } \
+            $primary{ } method{ raid } \
+        . \
+        1000 35 100000000 raid \
+            $lvmignore{ } \
+            $primary{ } method{ raid } \
+        . \
+        19000 50 20000 ext4 \
+            $defaultignore{ } \
+            $lvmok{ } \
+            lv_name{ root } \
+            method{ format } \
+            format{ } \
+            use_filesystem{ } \
+            filesystem{ ext4 } \
+            mountpoint{ / } \
+        . \
+        2048 60 2048 swap \
+            $defaultignore{ } \
+            $lvmok{ } \
+            lv_name{ swap } \
+            method{ swap } \
+            format{ } \
+        .
+d-i partman-auto-raid/recipe string \
+    1 2 0 ext2 /boot \
+        /dev/sda1#/dev/sdb1 \
+    . \
+    1 2 0 lvm - \
+        /dev/sda2#/dev/sdb2 \
+    .
+d-i mdadm/boot_degraded boolean false
+d-i partman-md/confirm boolean true
+d-i partman-partitioning/confirm_write_new_label boolean true
+d-i partman/choose_partition select Finish partitioning and write changes to disk
+d-i partman/confirm boolean true
+d-i partman-md/confirm_nooverwrite boolean true
+d-i partman/confirm_nooverwrite boolean true</pre>
+
+		<p>В этих строчках сообщается о необходимости настроить RAID-массив:</p>
+
+		<pre class="code">d-i partman-auto/method string raid
+d-i partman-md/confirm boolean true</pre>
+
+		<p>В первую очередь менеджер разделов partman использует директиву partman-auto-raid/recipe. Строка рецепта в ней определяет, что RAID-массив должен быть настроен на дисках /dev/sda и /dev/sdb. Например, мы создаём массив RAID 1 для LVM на дисках /dev/sda и /dev/sdb, воспользовавшись следующими настройками:</p>
+
+		<pre class="code">1 2 0 lvm - \
+        /dev/sda2#/dev/sdb2 \
+    .</pre>
+
+		<p>Первое число указывает уровень RAID (1), второе число указывает количество устройств, используемых в массиве RAID (2), а третье число указывает количество запасных дисков, доступных RAID-массиву (0). Далее задаётся тип раздела на RAID-массиве (lvm), "-" указывает точку монтирования массива. Поскольку на этом RAID-массиве создаётся LVM, то точки монтирования нет. Используемые массивом разделы на дисках перечисляются через знак "#". Аналогично примеру разбивки разделов, указанному выше, определение массива завершается точкой, а любой следующий далее текст будет рассматриваться как другой массив. Перевод строки сообщит менеджеру разделов partman, что рецепт закончился.</p>
+
+		<p>Строка partman-auto/expert_recipe используется для определения разделов, создаваемых на массиве RAID. Выше создаются на RAID-массиве создаются два раздела: раздел /boot и раздел LVM. Затем в рецепте определяются два логических тома - "/" и swap, которые будут созданы на LVM.</p>
+
+		<p>Далее следует определение раздела RAID:</p>
+
+		<pre class="code">1024 30 1024 raid \
+            $lvmignore{ } \
+            $primary{ } method{ raid } \
+        . \</pre>
+
+		<p>Выше описан RAID-массив размером 1 гигабайт с высочайшим приоритетом и типом раздела "raid". Поскольку этот раздел имеет высочайший приоритет, им будут созданы /dev/sda1 и /dev/sda2, которые будут использоваться операционной системой как "/boot", как это уже было описано при объяснении директивы partman-auto-raid/recipe. Флаг $lvmignore{ } используется для того, чтобы гарантировать, что менеджер разделов partman при создании логических томов LVM не воспримет этот раздел как описание логического тома. Далее разделы RAID определяются как первичные и указывается, что при создании этих разделов нужно использовать метод, создающий массивы RAID.</p>
+
+		<p>Чтобы установщик Debian обрабатывал определения разделов LVM, нужно указать следующее:</p>
+
+		<pre class="code">d-i partman-lvm/confirm boolean true
+d-i partman-auto-lvm/new_vg_name string vg00
+d-i partman-auto-lvm/guided_size string 30GB</pre>
+
+		<p>Убедитесь, что значение “guide_size”, указанное выше, больше или равно размеру всех создаваемых логических томов. Чтобы создать логический том, определите его в рецепте:</p>
+
+		<pre class="code">19000 50 20000 ext4 \
+            $defaultignore{ } \
+            $lvmok{ } \
+            lv_name{ root } \
+            method{ format } \
+            format{ } \
+            use_filesystem{ } \
+            filesystem{ ext4 } \
+            mountpoint{ / } \
+        . \</pre>
+
+		<p>Выше приведено описание логического тома размером от 19 до 20 гигабайт с файловой системой ext4. Флаг $defaultignore{ } используется для того, чтобы менеджер разделов partman не обрабатывал это описание при создании физических разделов на дисках. Далее при помощи флага $lvmok{ } указывается, что менеджер разделов partman должен использовать это определение тома при создании логических томов, а флаг $lv_name{ root } сообщает, что созданный том должен иметь имя "root". Остальные флаги уже были описаны в примерах выше и сообщают менеджеру разделов partman, что логический том должен быть отформатирован и что точкой монтирования должен быть "/".</p>
+
+		<p>Выше приведён полный пример, который можно доработать для получения необходимых результатов и поместить в файл автоматизации установки. К счастью этот пример partman-auto/expert_recipe пригодится и при стандартной установке, и при установке с использованием RAID и LVM.</p>
+
+		<p>Обновление: Я добавил полные примеры файлов автоматизации установки на <a href="http://github.com/">GitHub</a>. Посмотрите их в моём репозитории <a href="https://github.com/ahamilton55/Blog-Scripts">Blog Scripts</a>.</p>
+
+		<p>Ещё одно обновление: Я написал ещё одну заметку об использовании файла автоматизации установки в Ubuntu Lucid и Debian Squeeze, где используется разбивка разделов в формате GPT (для дисков размером 2 и более терабайт). Прочитать её можно здесь: <a href="../preseed-full/">Совместное использование expert_recipe, mdraid, LVM, GPT и GRUB2 в Ubuntu Lucid и Debian Squeeze</a>.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Эндрю Гамильтон. Заметки по использованию expert_recipe в файлах автоматизации установки Debian/Ubuntu, 2012">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

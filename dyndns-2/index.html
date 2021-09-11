@@ -1,0 +1,53 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="dns,dyndns,linux,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2011-07-21 -->
+		<title>Настройка DynDNS</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка DynDNS</h1>
+
+		<p>Давно не приходилось пользоваться DynDNS, а потому не заметил, что у ddclient поменялся формат файла конфигурации. Теперь в файле конфигурации можно указывать несколько записей для обновления и мне теперь больше не нужны трюки, к которым я прибегал в заметке <a href="../dyndns-1/">Настройка DynDNS на Debian</a>.</p>
+
+		<p>Всё стало очень просто, как и должно быть. Файл конфигурации /etc/ddclient.conf:</p>
+
+		<pre class="code">pid=/var/run/ddclient.pid
+
+protocol=dyndns2, \
+  server=members.dyndns.org, \
+  login=username, \
+  password='mypassword', \
+  use=if, \
+  if=eth0, \
+  ufadeb.homelinux.org
+
+protocol=dyndns2, \
+  server=members.dyndns.org, \
+  login=username, \
+  password='mypassword', \
+  use=if, \
+  if=ppp0, \
+  stupin.homelinux.org</pre>
+
+		<p>Файл настройки параметров демона /etc/default/ddclient:</p>
+
+		<pre class="code">run_ipup="false"
+run_daemon="true"
+daemon_interval="60"</pre>
+
+		<p>Затем я запустил демона с помощью команды</p>
+
+		<pre class="console">/etc/init.d/ddclient start</pre>
+
+		<p>и всё заработало.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка DynDNS">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

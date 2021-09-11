@@ -1,0 +1,204 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="mod_proxy,flup,python,lighttpd,mod_fastcgi,tilestache,fastcgi,tilestache-server,wsgi" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2012-10-21 -->
+		<title>Настройка тайлового сервера TileStache</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка тайлового сервера TileStache</h1>
+
+		<p>Ещё один тайловый сервер, который я нашёл в дистрибутиве Debian - это TileStache. Он, как и TileLite, тоже написан на Python. Это ещё один комбайн "всё в одном": он поддерживает отрисовку тайлов с помощью Mapnik, кэширование тайлов, в том числе сторонних, и содержит встроенный веб-сервер (по сути он им и является). В отличие от TileLite, этот тайловый сервер может обслуживать несколько слоёв сразу, в том числе, может брать тайлы слоя из стороннего тайлового сервера.</p>
+
+		<h2>1. Настройка в режиме самостоятельного веб-сервера</h2>
+
+		<p>Итак, ставим его:</p>
+
+		<pre class="console"># apt-get install tilestache</pre>
+
+		<p>Создаём сценарий инициализации /etc/init.d/tilestache:</p>
+
+		<pre class="code">#!/bin/sh
+
+### BEGIN INIT INFO
+# Provides:          tilestache
+# Required-Start:    $all
+# Required-Stop:     $all
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: starts TileStache server
+# Description:       starts TileStache server using start-stop-daemon
+### END INIT INFO
+
+PATH=/sbin:/bin:/usr/sbin:/usr/bin
+NAME=tilestache
+PID=/var/run/tilestache.pid
+DAEMON=/usr/bin/tilestache-server
+DAEMON_OPTS="--config /etc/tilestache.cfg -p 8000"
+
+test -x $DAEMON || exit 0
+
+set -e
+
+case "$1" in
+  start)
+        echo "Starting $NAME: "
+        start-stop-daemon --start --make-pidfile --background --pidfile $PID --exec $DAEMON -- $DAEMON_OPTS
+        echo "done."
+        ;;
+  stop)
+        echo "Stopping $NAME: "
+        start-stop-daemon --stop --pidfile $PID --retry 5
+        rm -f $PID
+        echo "done."
+        ;;
+  restart)
+        echo "Stopping $NAME: "
+        start-stop-daemon --stop --pidfile $PID --retry 5
+        rm -f $PID
+        echo "done..."
+        sleep 1
+        echo "Starting $NAME: "
+        start-stop-daemon --start --make-pidfile --background --pidfile $PID --exec $DAEMON -- $DAEMON_OPTS
+        echo "done."
+        ;;
+  *)
+        echo "Usage: /etc/init.d/$NAME {start|stop|restart}" &gt;&amp;2
+        exit 1
+        ;;
+esac
+
+exit 0</pre>
+
+		<p>И прописываем в автозапуск:</p>
+
+		<pre class="console"># update-rc.d tilestache defaults</pre>
+
+		<p>Копируем пример настройки сервера из файла /usr/share/doc/tilestache/examples/tilestache.cfg в файл /etc/tilestache.cfg и правим его до следующего вида:</p>
+
+		<pre class="code">{
+  "cache":
+  {
+    "name": "Disk",
+    "path": "/var/lib/tilestache",
+    "umask": "0000"
+  },
+  "layers": 
+  {
+    "osm":
+    {
+        "provider": {"name": "mapnik", "mapfile": "/etc/mapnik-osm-data/osm.xml"},
+        "projection": "spherical mercator"
+    } 
+  }
+}</pre>
+
+		<p>Создаём каталог для кэша тайлов:</p>
+
+		<pre class="console"># mkdir /var/lib/tilestache</pre>
+
+		<p>Осталось запустить TileStache:</p>
+
+		<pre class="console"># /etc/init.d/tilestache start</pre>
+
+		<h2>2. Настройка Lighttpd для проксирования запросов к TileStache</h2>
+
+		<p>Включаем модуль proxy веб-сервера Lighttpd:</p>
+
+		<pre class="console"># lighty-enable-mod proxy</pre>
+
+		<p>Настраиваем модуль на проксирование каталога /osm в файле конфигурации модуля proxy /etc/lighttpd/conf-enabled/10-proxy.conf:</p>
+
+		<pre class="code">server.modules   += ( "mod_proxy" )
+proxy.server = (
+  "/osm" =&gt;
+  (
+    (
+      "host" =&gt; "127.0.0.1",
+      "port" =&gt; 8000
+    )
+  )
+)</pre>
+
+		<p>Будьте внимательны, после строки /osm не должно быть косой черты, иначе тайловый сервер не будет работать должным образом.</p>
+
+		<p>Теперь ерезапустим Lighttpd:</p>
+
+		<pre class="console"># /etc/init.d/lighttpd restart</pre>
+
+		<h2>3. Настройка в режиме FastCGI для работы с Lighttpd</h2>
+
+		<p>Теперь повторим уже опробованную ранее на TileLite методику запуска тайлового сервера в режиме FastCGI.</p>
+
+		<p>Создадим каталог для настроек TileStache, перенесём в него наш конфиг и поставим flup:</p>
+
+		<pre class="console"># mkdir /etc/tilestache
+# mv /etc/tilestache.cfg /etc/tilestache
+# apt-get install python-flup</pre>
+
+		<p>В качестве образца для FastCGI-сервера возьмём файл /usr/bin/tilestache-server, скопировав его в каталог /etc/tilestache под именем tilestache.py:</p>
+
+		<pre class="console"># cp /usr/bin/tilestache-server /etc/tilestache/tilestache.py</pre>
+
+		<p>Отредактируем его до следующего состояния:</p>
+
+		<pre class="code">#!/usr/bin/python
+
+if __name__ == '__main__':
+    from flup.server.fcgi import WSGIServer
+    import TileStache
+
+    application = TileStache.WSGITileServer(config='/etc/tilestache/tilestache.cfg', autoreload=True)
+    WSGIServer(application).run()</pre>
+
+		<p>Дадим права на выполнение:</p>
+
+		<pre class="console"># chmod +x /etc/tilestache/tilestache.py</pre>
+
+		<p>И приступим к настройке модуля FastCGI в Lighttpd. Включим его:</p>
+
+		<pre class="console"># lighty-enable-mod fastcgi</pre>
+
+		<p>И настроим следующим образом:</p>
+
+		<pre class="code">$HTTP["url"] =~ "^/osm/" {
+  fastcgi.server +=
+  (
+    "" =&gt; 
+    (
+      (
+        "bin-path" =&gt; "/etc/tilestache/tilestache.py",
+        "socket" =&gt; "/tmp/tilestache.socket",
+        "max-procs" =&gt; 1,
+        "check-local" =&gt; "disable",
+      )
+    )
+  )
+}</pre>
+
+		<p>В отличие от TileLite, этот сервер может обслуживать несколько слоёв одновременно, поэтому имя слоя нужно передавать в ссылке на запрашиваемый тайл. Поэтому настройка столь необычна. Она передаёт на обслуживание FastCGI-процессу корень веб-сервера лишь в том случае, если запрошена страница, адрес которой начинается с /osm/, то есть - имени слоя. Если нужно настроить несколько слоёв, потребуется доработать регулярное выражение таким образом, чтобы оно совпадало с именем каждого из слоёв.</p>
+
+		<p>Поскольку теперь TileStache будет запускаться Lighttpd, настроим права на доступ к каталогу /var/lib/tilestache:</p>
+
+		<pre class="console"># chmod www-data:www-data /var/lib/tilestache</pre>
+
+		<p>Теперь остановим и отключим настроенный ранее TileStache, отключим модуль proxy и перезапустим веб-сервер:</p>
+
+		<pre class="console"># /etc/init.d/tilestache stop
+# update-rc.d tilestache disable
+# lighty-disable-mod proxy
+# /etc/init.d/lighttpd restart</pre>
+
+		<p>Нет в мире совершенства. Этот сервер хотя и настраивается легко и работает очень устойчиво, но работает во-первых очень медленно, а во-вторых, имеет утечки памяти. Поэтому для использования в нынешнем виде он не пригоден.</p>
+
+		<p>Количество, увы, не перешло в качество. Интересно, пользуются ли авторы своими творениями? Пользуются ли мэйнтейнеры из Debian GIS Project поддерживаемыми ими пакетами? Судя по отсутствию сценариев инициализации - нет. А если и пользуются, то скорее всего совместно с Apache и mod_wsgi. Но в таком случае я их не понимаю - раз уж от Apache никуда не деться, почему бы не воспользоваться mod_tile?</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка тайлового сервера TileStache">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

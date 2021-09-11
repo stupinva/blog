@@ -1,0 +1,176 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="nginx,spawn-fcgi,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2012-09-23 -->
+		<title>Настройка nginx</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка nginx</h1>
+
+		<p>Решил попробовать веб-сервер nginx вместо более привычного мне lighttpd. Разница между ними, на мой взгляд, как между правым и левым ботинком, но тем не менее, первый, судя по проникающему в мои уши информационному шуму, почему-то более популярен.</p>
+
+		<p>Поставим нужные нам пакеты nginx и spawn-fcgi:</p>
+
+		<pre class="console"># apt-get install nginx spawn-fcgi</pre>
+
+		<p>Главный файл конфигурации - /etc/nginx/nginx.conf. В нём много комментариев, но выжимку из него получить можно с помощью простой команды grep -vE "^\s*$|^\s*#" /etc/nginx/nginx.conf. После моей небольшой доработки, в которой я снизил количество процессов с 4 до 1, файл принял следующий вид:</p>
+
+		<pre class="code">user www-data;
+worker_processes 1;
+pid /var/run/nginx.pid;
+events {
+  worker_connections 768;
+}
+http {
+  sendfile on;
+  tcp_nopush on;
+  tcp_nodelay on;
+  keepalive_timeout 65;
+  types_hash_max_size 2048;
+  include /etc/nginx/mime.types;
+  default_type application/octet-stream;
+  access_log /var/log/nginx/access.log;
+  error_log /var/log/nginx/error.log;
+  gzip on;
+  gzip_disable "msie6";
+  include /etc/nginx/conf.d/*.conf;
+  include /etc/nginx/sites-enabled/*;
+}</pre>
+
+		<p>Система, на которой я настраиваю этот веб-сервер - домашняя и не предполагает высокой нагрузки. Больше в этом конфиге я ничего не менял.</p>
+
+		<p>Следующий интересующий меня файл - это, как ни странно, сценарий инициализации процесса spawn-fcgi, родственного веб-серверу lighttpd, который будет обслуживать php-страницы. Его я взял из своей заметки <a href="../lighttpd/">Шпаргалка по настройке веб-сервера Lighttpd</a> и доработал под мой случай. Поскольку веб-сервер будет работать с бэкэндом на одном компьютере, для общения между ними выгоднее использовать Unix-сокет, а не TCP-соединение. Также зададим 4 процесса-бэкэнда, так что одновременно может исполняться до 4 скриптов, формирующих страницы, запрошенные клиентами:</p>
+
+		<pre class="code">#!/bin/sh
+
+### BEGIN INIT INFO
+# Provides:          spawn-fcgi-php
+# Required-Start:    $all
+# Required-Stop:     $all
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: starts FastCGI for PHP
+# Description:       starts FastCGI for PHP using start-stop-daemon
+### END INIT INFO
+
+PATH=/sbin:/bin:/usr/sbin:/usr/bin
+NAME=spawn-fcgi-php
+PID=/var/run/spawn-fcgi-php.pid
+DAEMON=/usr/bin/spawn-fcgi
+#DAEMON_OPTS="-f /usr/bin/php-cgi -a 127.0.0.1 -p 8080 -u www-data -g www-data -P $PID"
+DAEMON_OPTS="-f /usr/bin/php-cgi -s /var/run/php.sock -F 4 -u www-data -g www-data -P $PID"
+
+test -x $DAEMON || exit 0
+
+set -e
+
+case "$1" in
+  start)
+    echo "Starting $NAME: "
+    start-stop-daemon --start --pidfile $PID --exec $DAEMON -- $DAEMON_OPTS
+    echo "done."
+    ;;
+  stop)
+    echo "Stopping $NAME: "
+    start-stop-daemon --stop  --pidfile $PID --retry 5
+    rm -f $PID
+    echo "done."
+    ;;
+  restart)
+    echo "Stopping $NAME: "
+    start-stop-daemon --stop  --pidfile $PID --retry 5
+    rm -f $PID
+    echo "done..."
+    sleep 1
+    echo "Starting $NAME: "
+    start-stop-daemon --start --pidfile $PID --exec $DAEMON -- $DAEMON_OPTS
+    echo "done."
+    ;;
+  *)
+    echo "Usage: /etc/init.d/$NAME {start|stop|restart}" &gt;&amp;2
+    exit 1
+    ;;
+esac
+
+exit 0</pre>
+
+		<p>Теперь добавим этот скрипт в автозагрузку и приступим к самому интересному - к собственно настройке веб-сервера:</p>
+
+		<pre class="console"># chmod +x /etc/init.d/spawn-fcgi-php
+# update-rc.d spawn-fcgi-php defaults</pre>
+
+		<p>Создадим в каталоге /etc/nginx/sites-available/ файл mysite со следующим содержимым:</p>
+
+		<pre class="code">server {
+  root /var/www/;
+  index index.php index.html index.htm;
+  server_name localhost;
+  location /osm/ {
+    proxy_pass http://127.0.0.1:8080/osm/ ;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  }
+  location / {
+    try_files $uri $uri/ / ;
+  }
+  location /doc/ {
+    alias /usr/share/doc/;
+    autoindex on;
+    allow 127.0.0.1;
+    allow ::1;
+    deny all;
+  }
+  location /postadmin/ {
+    auth_basic "postadmin";
+    auth_basic_user_file /etc/nginx/htpasswd;
+  }
+  location ~ \.php$ {
+    fastcgi_split_path_info ^(.+\.php)(/.+)$;
+    fastcgi_pass unix:/var/run/php.sock;
+    fastcgi_index index.php;
+    include fastcgi_params;
+  }
+}</pre>
+
+		<p>Этот файл показывает сразу несколько интересных (по крайней мере мне) примеров настройки. Из него видно, как создать псевдоним каталога, ограничить доступ по IP-адресам, ограничить доступ по паролю, обслуживать часть сайта, перенаправляя запросы другому веб-серверу, и исполнять php-скрипты, направляя запросы ранее настроенному процессу spawn-fcgi-php (аналогично spawn-fcgi можно использовать для управления другими fastcgi-процессами, например, написанными на Perl).</p>
+
+		<p>Переключим nginx на использование созданного файла конфигурации:</p>
+
+		<pre class="console"># unlink /etc/nginx/sites-enabled/default
+# ln -s /etc/nginx/sites-available/mysite /etc/nginx/sites-enabled/mysite</pre>
+
+		<p>Думаю, что настройки не нуждаются в особых пояснениях. Часть из них понятна без комментариев, а часть является чёрной магией, специфичной для nginx.</p>
+
+		<p>Создать файл паролей можно с помощью утилиты htpasswd из пакета apache2-utils:</p>
+
+		<pre class="console">$ htpasswd -c /etc/nginx/htpasswd stupin</pre>
+
+		<p>И запустим веб-сервер:</p>
+
+		<pre class="console"># /etc/init.d/nginx start</pre>
+
+		<p>По итогам настройки могу сделать следующие неутешительные для nginx выводы:</p>
+
+		<ol>
+			<li>Он не умеет самостоятельно порождать и прибивать локальные fastcgi-процессы, как это умеет делать lighttpd,</li>
+
+			<li>Он не поддерживает digest-авторизацию, что называется "из коробки". Существует модуль, поддерживающий digest-авторизацию, но он распространяется отдельно от nginx и не пакетирован в Debian.</li>
+
+			<li>Он не имеет родственного пакета, управляющего fastcgi-процессами, поэтому необходимый spawn-fcgi приходится брать из отдельного пакета, который изначально делался вместе с веб-сервером lighttpd.</li>
+
+			<li>Не то что бы это плохой веб-сервер, но мне он показался немного сыроват по сравнению с используемым мной lighttpd, которым я пользуюсь уже почти 5 лет. В плюс nginx'у можно записать лёгкость настройки.</li>
+		</ol>
+
+		<p>Интересно будет услышать мнение людей, использующих nginx, которым по каким-то разумным причинам не подошёл lighttpd.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка nginx">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,69 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="python,кэширование,google app engine,memcache,перевод,flask" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-07-28 -->
+		<title>Армин Роначер. Кэширование во Flask, 2012</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Армин Роначер. Кэширование во Flask, 2012</h1>
+
+		<p>Перевод статьи: <a href="http://flask.pocoo.org/docs/patterns/caching/">Caching</a></p>
+
+		<p>Автор: Армин Роначер (Armin Ronacher)</p>
+
+		<p>Когда приложение работает медленно, можно попробовать воспользоваться кэшированием. По крайней мере это самый простой способ ускорения программы. Как работает кэширование? Допустим, имеется функция, которая работает довольно долго, но результаты её работы будут пригодны для использования даже через 5 минут. Смысл в том, что на самом деле мы на некоторое время помещаем результаты расчётов в кэш.</p>
+
+		<p>Сам по себе Flask не умеет кэшировать, но Werkzeug, одна из библиотек, на которой он основан, имеет базовую поддержку кэширования. Библиотека поддерживает различные средства кэширования, но скорее всего вам захочется воспользоваться сервером memcached.</p>
+
+		<h2>1. Настройка кэша</h2>
+
+		<p>Объект кэша создаётся единожды и продолжает работать примерно так же, как это происходит с объектами Flask. Если речь идёт о сервере разработки, то можно создать объект SimpleCache, который представляет собой простейший кэш, хранящий элементы в памяти интерпретатора Python:</p>
+
+		<pre class="code">from werkzeug.contrib.cache import SimpleCache
+cache = SimpleCache()</pre>
+
+		<p>Для использования memcached нужно установить один из поддерживаемых модулей memcache (его можно взять на PyPI) и запустить где-нибудь сервер memcached. Теперь можно подключиться к серверу memcached:</p>
+
+		<pre class="code">from werkzeug.contrib.cache import MemcachedCache
+cache = MemcachedCache(['127.0.0.1:11211'])</pre>
+
+		<p>Если вы пользуетесь App Engine, можно легко подключиться к серверу memcache из App Engine:</p>
+
+		<pre class="code">from werkzeug.contrib.cache import GAEMemcachedCache
+cache = GAEMemcachedCache()</pre>
+
+		<h2>2. Использование кэша</h2>
+
+		<p>Как теперь воспользоваться этим кэшем? Имеется две очень важные операции: get() и set(). Вот как их использовать:</p>
+
+		<p>Чтобы получить элемент из кэша, вызовите get(), указав ей ключ - имя элемента. Если что-нибудь есть в кэше, оно будет возвращено. В противном случае функция вернёт None:</p>
+
+		<pre class="code">rv = cache.get('my-item')</pre>
+
+		<p>Чтобы добавить элемент в кэш, воспользуйтесь методом set(). Первый аргумент - это ключ, а второй - его значение. Также можно указать время кэширования, по истечении которого элемент будет автоматически удалён.</p>
+
+		<p>Вот полный пример того, как это обычно выглядит:</p>
+
+		<pre class="code">def get_my_item():
+    rv = cache.get('my-item')
+    if rv is None:
+        rv = calculate_value()
+        cache.set('my-item', rv, timeout=5 * 60)
+    return rv</pre>
+
+		<h2>3. Примечания переводчика</h2>
+
+		<p>Под App Engine подразумевается облачный сервис веб-приложений от Google: <a href="https://appengine.google.com/start">https://appengine.google.com/start</a>. Чуть подробнее о нём можно узнать из статьи на Википедии: <a href="http://ru.wikipedia.org/wiki/Google_App_Engine">Google App Engine</a>.</p>
+
+		<p><a href="https://flask-russian-docs.readthedocs.org/ru/latest/patterns/caching.html">Этот</a> и другие переводы можно найти на <a href="https://flask-russian-docs.readthedocs.org/">сайте проекта перевода документации по Flask</a>. Автор проекта - Виталий Кузьмин aka ferm32.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Армин Роначер. Кэширование во Flask, 2012">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

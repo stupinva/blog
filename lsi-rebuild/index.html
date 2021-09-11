@@ -1,0 +1,169 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="rs2wc040,stretch,debian,linux,megacli,rs2bl040,raid" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2018-09-23 -->
+		<title>Сборка RAID-массива на контроллере LSI MegaSAS в Linux</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Сборка RAID-массива на контроллере LSI MegaSAS в Linux</h1>
+
+		<p>В прошлом я уже писал ряд заметок про RAID-контроллеры семейства LSI MegaSAS - Intel RS2WC040 и Intel RSBL040, которые используются у меня на работе:</p>
+
+		<ul>
+			<li><a href="../rs2wc040-freebsd82/">Intel RS2WC040 во FreeBSD 8.2</a></li>
+
+			<li><a href="../lsi-freebsd/">Сборка RAID-массива на контроллере LSI MegaSAS во FreeBSD</a></li>
+
+			<li><a href="../lsi-raid-trouble/">Решение проблемы с остановкой загрузки из-за RAID-контроллера Intel RS2WC040</a></li>
+
+			<li><a href="../zabbix-template-lsi-freebsd/">Контроль аппаратного RAID-контроллера LSI MegaRAID SAS во FreeBSD через Zabbix</a></li>
+		</ul>
+
+		<p>Иногда приходится менять диски, подключенные к аппаратным RAID-контроллерам. Замену диска при помощи mfiutil во FreeBSD я уже описывал, а аналогичная задача в Linux решается при помощи утилиты megacli, которая доступна в стороннем репозитории. Процедура замены дисков у меня до автоматизма не доведена, т.к. менять их приходится не часто. Поэтому я завёл для себя страницу в wiki, в которой делал заметки, чтобы не пришлось вспоминать команды и последовательность действий в следующий раз. Несколько раз я исправлял ошибки в заметке и даже дополнил её описанием решения проблемы с добавлением диска, который ранее уже состоял в другом RAID-массиве. Наконец, заметка дозрела до состояния, пригодного к публикации.</p>
+
+		<h2>1. Установка утилиты</h2>
+
+		<p>Установить утилиту megacli в Debian можно из неофициального <a href="http://hwraid.le-vert.net/wiki/DebianPackages">репозитория HwRAID</a>. Например, чтобы подключить репозиторий в Debian Stretch, нужно добавить в файл /etc/apt/sources.list такую строчку:</p>
+
+		<pre class="code">deb http://hwraid.le-vert.net/debian stretch main</pre>
+
+		<p>Установим в систему GPG-ключ для проверки подлинности репозитория при помощи команды:</p>
+
+		<pre class="console"># wget -O - https://hwraid.le-vert.net/debian/hwraid.le-vert.net.gpg.key | apt-key add -</pre>
+
+		<p>Теперь можно обновить список пакетов, доступных для установки из репозиториев:</p>
+
+		<pre class="console"># apt-get update</pre>
+
+		<p>И установить утилиту mecacli для управления RAID-контроллером:</p>
+
+		<pre class="console"># apt-get install megacli</pre>
+
+		<h2>2. Просмотр информации о RAID-контроллере</h2>
+
+		<p>Чтобы просмотреть модель, серийный номер, настройки RAID-контроллера:</p>
+
+		<pre class="console"># megacli -AdpAllInfo -aAll</pre>
+
+		<h2>3. Диагностика</h2>
+
+		<p>Смотрим список и состояние RAID-массивов в поле Sate:</p>
+
+		<pre class="console"># megacli -LdInfo -Lall -aALL</pre>
+
+		<p>Если там Degraded, значит массив развалился. Смотрим, есть ли строчки Firmware state с состоянием Failed:</p>
+
+		<pre class="console"># megacli -PdList -a0</pre>
+
+		<p>Если есть, можно посмотреть состояние диск по SMART. Для этого в выводе команды смотрим идентификаторы дисков в поле Device Id. Дальше указывая эти идентификаторы можно увидеть состояние SMART каждого из дисков и определить его серийный номер:</p>
+
+		<pre class="console"># smartctl -a -d megaraid,4 /dev/sda
+# smartctl -a -d megaraid,5 /dev/sda
+# smartctl -a -d megaraid,7 /dev/sda
+# smartctl -a -d megaraid,6 /dev/sda</pre>
+
+		<h2>4. Диск исправен - запуск перестроения массива</h2>
+
+		<p>Если диск исправен, можно попробовать перестроить массив. Для этого находим значения полей Enclosure Device ID и Slot Number у неисправного диска и выполняем для него команду запуска перестроения массива. В примере ниже используются значения 252 и 3:</p>
+
+		<pre class="console"># megacli -PdRbld -Start -PhysDrv[252:3] -a0</pre>
+
+		<p>Наблюдать за состоянием перестроения массива можно при помощи команды:</p>
+
+		<pre class="console"># megacli -PdRbld -ShowProg -PhysDrv [252:3] -a0</pre>
+
+		<h2>5. Диск неисправен - замена диска</h2>
+
+		<p>Если диск неисправен, его нужно заменить. Помечаем его как отключенный:</p>
+
+		<pre class="console"># megacli -PdOffline -PhysDrv [252:3] -a0</pre>
+
+		<p>Затем - как отсутствующий в массиве:</p>
+
+		<pre class="console"># megacli -PdMarkMissing -PhysDrv [252:3] -a0</pre>
+
+		<p>И теперь - как подготовленный к удалению из системы:</p>
+
+		<pre class="console"># megacli -PdPrpRmv -PhysDrv [252:3] -a0</pre>
+
+		<p>Неисправный диск можно подсветить светодиодом:</p>
+
+		<pre class="console"># megacli -PdLocate -start -PhysDrv [252:3] -a0</pre>
+
+		<p>Если индикация не заработала, можно попробовать починить её при помощи следующей команды:</p>
+
+		<pre class="console"># megacli -AdpSetProp \{UseDiskActivityforLocate -1\} -aALL</pre>
+
+		<p>Заменяем диск (в случае SAS это можно сделать на горячую, если по светодиодным индикаторам видно, какой из дисков неактивен).</p>
+
+		<p>Когда новый диск вставлен, убираем подсветку светодиодом:</p>
+
+		<pre class="console"># megacli -PdLocate -stop -PhysDrv [252:3] -a0</pre>
+
+		<p>После замены диска смотрим, каких дисков не хватает в RAID-массиве:</p>
+
+		<pre class="console"># megacli -PdGetMissing -a0
+                                     
+    Adapter 0 - Missing Physical drives
+
+    No.   Array   Row   Size Expected
+    0     1       1     428199 MB
+
+Exit Code: 0x00</pre>
+
+		<p>Вставляем новый диск в пустующее место в массиве:</p>
+
+		<pre class="console"># megacli -PdReplaceMissing -PhysDrv [252:3] -array1 -row1 -a0</pre>
+
+		<p>Если диск не вставляется и выводится ошибка следующего вида:</p>
+
+		<pre class="console">Adapter: 0: Failed to replace Missing PD at Array 1, Row 1.
+
+FW error description: 
+ The specified device is in a state that doesn't support the requested command.  
+
+Exit Code: 0x32</pre>
+
+		<p>То можно проверить текущее состояние прошивки диска:</p>
+
+		<pre class="console"># megacli -PdInfo -PhysDrv [252:3] -a0</pre>
+
+		<p>Если в строке Firmware state отображается состояние JBOD, то исправить это состояние можно следующим образом:</p>
+
+		<pre class="console"># megacli -PdMakeGood -PhysDrv[252:3] -Force -a0</pre>
+
+		<p>Если же в строке Firmware state отображается состояние Unconfigured(good), Spun Up, но в строке Foreign State отображается состояние Foreign, то надо просканировать наличие дисков, переставленных из других RAID-контроллеров и снять у таких дисков отметку о других контроллерах:</p>
+
+		<pre class="console"># megacli -CfgForeign -Scan -aALL
+# megacli -CfgForeign -Сlear -aALL</pre>
+
+		<p>Включаем новый диск в работу массива:</p>
+
+		<pre class="console"># megacli -PdRbld -Start -PhysDrv [252:3] -a0</pre>
+
+		<p>Посмотреть продвижение процесса перестроения можно так:</p>
+
+		<pre class="console"># megacli -PdRbld -ShowProg -PhysDrv [252:3] -a0</pre>
+
+		<h2>6. Подробнее:</h2>
+
+		<ul>
+			<li><a href="http://skeletor.org.ua/?p=4093">Замена диска в MegaCli</a></li>
+
+			<li><a href="http://wiki.hetzner.de/index.php/LSI_RAID_Controller/ru">RAID-контроллер LSI</a></li>
+
+			<li><a href="http://erikimh.com/megacli-cheatsheet/">MegaCLI cheatsheet</a></li>
+
+			<li><a href="https://wiki.colobridge.net/%D0%BF%D0%BE%D0%BB%D0%B5%D0%B7%D0%BD%D0%BE%D0%B5/%D1%81%D0%BE%D0%B2%D0%B5%D1%82%D1%8B/%D1%83%D0%BF%D1%80%D0%B0%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D0%B5_raid_lsi_megaraid_%D1%81_%D0%BF%D0%BE%D0%BC%D0%BE%D1%89%D1%8C%D1%8E_megacli#%D0%B7%D0%B0%D0%BC%D0%B5%D0%BD%D0%B0_%D0%BD%D0%B5%D0%B8%D1%81%D0%BF%D1%80%D0%B0%D0%B2%D0%BD%D0%BE%D0%B3%D0%BE_%D0%B4%D0%B8%D1%81%D0%BA%D0%B0">Управление raid lsi megaraid с помощью megacli</a></li>
+		</ul>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Сборка RAID-массива на контроллере LSI MegaSAS в Linux">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

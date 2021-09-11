@@ -1,0 +1,755 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="python,django" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-07-02 -->
+		<title>Краткий учебник по Django</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Краткий учебник по Django</h1>
+
+		<p>Не так давно нашёл файл с записями, которые я делал в 2012 году, когда осваивал веб-фреймворк Django. Я подумал, что не стоит зря пропадать этим записям и решил выложить их здесь. Хотя в этом файле есть что дополнить, в процессе подготовки публикации радикальных правок в этот файл я вносить не стал, т.к. фреймворк очень большой и начав раскрывать частности, легко раздуть и без того большой файл до невероятных размеров.</p>
+
+		<h2>1. О терминологии веб-фреймворка Django</h2>
+
+		<ul>
+			<li><b>Проект</b> - совокупность приложений, имеющих общие настройки.</li>
+
+			<li><b>Приложение</b> - часть проекта, выполняющая определённую логически неделимую функцию. Состоит из представлений (views), шаблонов (templates) и моделей (models).</li>
+
+			<li><b>Шаблон</b> - шаблон HTML-страницы. В терминологии MVC шаблону соответствует представление.</li>
+
+			<li><b>Модель</b> - средство доступа к данным.</li>
+
+			<li><b>Представление</b> - связующий код между моделью и шаблоном. В терминологии MVC представлению соответствует контроллеру.</li>
+
+			<li><b>Маршрут</b> - соответствие между URL'ом и представлением (контроллером в терминологии MVC), отвечающим за этот URL.</li>
+		</ul>
+
+		<p>Программы, написанные с использованием Django, являются совокупностью отдельных приложений, объединённых в один проект. В отличие от многих других веб-фреймворков, в Django не используется архитектура MVC - Модель-Представление-Контроллер, вместо неё используется собственная архитектура MVT - Модель-Представление-Шаблон. Шаблон Django по функциям ближе всего к представлению в MVC, а представление Django по функциям ближе всего к контроллеру в MVC. Представления Django привязываются к определённому URL через маршруты.</p>
+
+		<h2>2. Установка Python и Django</h2>
+
+		<p>В Debian и производных от него дистрибутивах установить Python и Django можно из репозиториев:</p>
+
+		<pre class="console"># apt-get install python python-django</pre>
+
+		<h2>3. Создание проекта и приложения</h2>
+
+		<p>Создаём проект dj:</p>
+
+		<pre class="console">$ django-admin startproject dj</pre>
+
+		<p>Переходим в каталог проекта:</p>
+
+		<pre class="console">$ cd dj</pre>
+
+		<p>Смотрим содержимое каталога проекта:</p>
+
+		<pre class="console">$ find .
+.
+./manage.py
+./dj
+./dj/wsgi.py
+./dj/settings.py
+./dj/__init__.py
+./dj/urls.py</pre>
+
+		<p>Создаём в проекте новое приложение app:</p>
+
+		<pre class="console">$ ./manage.py startapp app</pre>
+
+		<p>В каталоге проекта появится новый каталог с именем app, созданный специально для размещения приложения:</p>
+
+		<pre class="console">$ find .
+.
+./manage.py
+./dj
+./dj/wsgi.py
+./dj/settings.py
+./dj/__init__.py
+./dj/urls.py
+./dj/settings.pyc
+./dj/__init__.pyc
+./app
+./app/tests.py
+./app/views.py
+./app/models.py
+./app/__init__.py</pre>
+
+		<h2>4. Создание представления</h2>
+
+		<p>Создадим новое представление hello в приложении app. Представление принимает в качестве аргумента объект HttpRequest и возвращает объект HttpResponse.</p>
+
+		<p>Откроем для редактирования файл app/views.py и придадим ему следующий вид:</p>
+
+		<pre class="code"># -*- coding: UTF-8 -*-
+from django.http import HttpResponse
+
+def hello(request):
+    return HttpResponse(u'Здравствуй, мир!')</pre>
+
+		<h2>5. Создание маршрута</h2>
+
+		<p>Теперь настроим маршрут, вызывающий это представление для url. Для этого откроем файл dj/urls.py и добавим в него пару строчек.</p>
+
+		<p>Первую строчку добавим в начало файла, после других строчек импорта. Строчка импортирует представление hello из приложения app:</p>
+
+		<pre class="code">from app.views import hello</pre>
+
+		<p>Теперь найдём функцию patterns, возвращаемое значение которой присваивается переменной urlpatterns, и впишем в аргументы функции следующую строчку:</p>
+
+		<pre class="code">('^hello/$', hello),</pre>
+
+		<p>В итоге у меня содержимое файла dj/urls.py приняло следующий вид:</p>
+
+		<pre class="code">from django.conf.urls import patterns, include, url
+from app.views import hello
+
+# Uncomment the next two lines to enable the admin:
+# from django.contrib import admin
+# admin.autodiscover()
+
+urlpatterns = patterns('',
+    # Examples:
+    # url(r'^$', 'dj.views.home', name='home'),
+    # url(r'^dj/', include('dj.foo.urls')),
+
+    # Uncomment the admin/doc line below to enable admin documentation:
+    # url(r'^admin/doc/', include('django.contrib.admindocs.urls')),
+
+    # Uncomment the next line to enable the admin:
+    # url(r'^admin/', include(admin.site.urls)),
+    ('^hello/$', hello),
+)</pre>
+
+		<p>В шаблоне url в конце обязательно должна быть косая черта, т.к. если клиент запросит страницу без косой черты в конце, Django автоматически добавит её и попытается найти представление, соответствующее этому URL. Нужно ли добавлять косую черту, регулируется настройкой APPEND_SLASH. Если установить её в False, то косая черта добавляться не будет. Шаблоном для корня сайта является '^$', то есть соответствие пустой строке.</p>
+
+		<h2>6. Включение приложения в проекте</h2>
+
+		<p>Чтобы в проекте использовалось наше приложение, его нужно подключить к проекту. Для этого закомментируем на время список стандартных приложений в файле dj/settings.py и пропишем наше приложение:</p>
+
+		<pre class="code">INSTALLED_APPS = (
+    #'django.contrib.auth',
+    #'django.contrib.contenttypes',
+    #'django.contrib.sessions',
+    #'django.contrib.sites',
+    #'django.contrib.messages',
+    #'django.contrib.staticfiles',
+    # Uncomment the next line to enable the admin:
+    # 'django.contrib.admin',
+    # Uncomment the next line to enable admin documentation:
+    # 'django.contrib.admindocs',
+    'app',
+)</pre>
+
+		<p>Также закомментируем в настройках подключение приложений-прослоек:</p>
+
+		<pre class="code">MIDDLEWARE_CLASSES = (
+    #'django.middleware.common.CommonMiddleware',
+    #'django.contrib.sessions.middleware.SessionMiddleware',
+    #'django.middleware.csrf.CsrfViewMiddleware',
+    #'django.contrib.auth.middleware.AuthenticationMiddleware',
+    #'django.contrib.messages.middleware.MessageMiddleware',
+    # Uncomment the next line for simple clickjacking protection:
+    # 'django.middleware.clickjacking.XFrameOptionsMiddleware',
+)</pre>
+
+		<h2>7. Запуск сервера разработчика</h2>
+
+		<p>Теперь настало время запустить сервер разработчика с только что созданным простейшим приложением:</p>
+
+		<pre class="console">$ ./manage.py runserver 0.0.0.0:8000</pre>
+
+		<p>Можно попытаться зайти в браузере на страницу /hello/. У меня ссылка для открытия страницы выглядела так:</p>
+
+		<p><a href="http://localhost:8000/hello/">http://localhost:8000/hello/</a></p>
+
+		<p>Итак, мы создали наш первый проект на Django, который при обращении к странице /hello/ выводит надпись "Здравствуй, мир!" Возможности Django в этом проекте практически не используются - мы не использовали ни моделей, ни шаблонов, но этот проект даёт общее представление о структуре программ, написанных с использованием Django.</p>
+
+		<h2>8. Использование шаблонов</h2>
+
+		<p>Для начала настроим каталог, в котором будут находиться шаблоны. Для этого отредактируем файл dj/settings.py и впишем в кортеж TEMPLATES_DIRS полный путь к каталогу с шаблонами.</p>
+
+		<p>После редактирования файла эта настройка в файле settings.py приняла следующий вид:</p>
+
+		<pre class="code">TEMPLATE_DIRS = (
+    # Put strings here, like "/home/html/django_templates" or "C:/www/django/templates".
+    # Always use forward slashes, even on Windows.
+    # Don't forget to use absolute paths, not relative paths.
+    "/home/stupin/dj/templates",
+)</pre>
+
+		<p>Не забывайте в конце одноэлементного кортежа поставить запятую, чтобы Python мог отличить кортеж от простого выражения в скобках.</p>
+
+		<p>Теперь создадим каталог для шаблонов:</p>
+
+		<pre style="background-color: black; color: white">$ mkdir templates</pre>
+
+		<p>И создадим в нём новый шаблон с именем time.tmpl и со следующим содержимым:</p>
+
+		<pre class="code">&lt;html&gt;
+  &lt;head&gt;
+    &lt;meta http-equiv=&quot;Content-Type&quot; content=&quot;text/html; charset=UTF-8&quot; /&gt;
+    &lt;title&gt;Текущее время&lt;/title&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;div align=&quot;center&quot;&gt;
+      Сейчас {{ time }}
+    &lt;/div&gt;
+  &lt;/body&gt;
+&lt;/html&gt;</pre>
+
+		<p>Теперь добавим в файл app/views.py импорт функции для загрузки и отрисовки шаблона:</p>
+
+		<pre class="code">from django.shortcuts import render_to_response</pre>
+
+		<p>И создадим представление current_datetime следующим образом:</p>
+
+		<pre class="code">def current_datetime(request):
+    return render_to_response('time.tmpl', {'time' : datetime.now()})</pre>
+
+		<p>Осталось настроить в файле urls.py маршрут к этому представлению:</p>
+
+		<pre class="code">('^time/$', current_datetime),</pre>
+
+		<p>Если сейчас попробовать открыть страницу <a href="http://localhost:800/time/">http://localhost:800/time/</a>, то можно увидеть текущее время на английском языке в часовом поясе Гринвичской обсерватории.</p>
+
+		<h2>9. Настройка часового пояса и языка</h2>
+
+		<p>Чтобы время отображалось правильно - в часовом поясе сервера, пропишем в файл настроек местный часовой пояс. Для этого откроем файл dj/settings.py и пропишем в переменную TIME_ZONE значение 'Asia/Yekaterinburg':</p>
+
+		<pre class="code">TIME_ZONE = 'Asia/Yekaterinburg'</pre>
+
+		<p>Чтобы время на странице отображалось в соответствии с правилами, принятыми в России, пропишем в файл настроек язык проекта. Откроем файл dj/settings.py и пропишем в переменную LANGUAGE_CODE значение 'ru-RU':</p>
+
+		<pre class="code">LANGUAGE_CODE = 'ru-RU'</pre>
+
+		<p>Теперь текущее время должно отображаться на русском языке в часовом поясе, по которому живёт Уфа :)</p>
+
+		<h2>10. Пример более сложного маршрута</h2>
+
+		<p>Попробуем добавить страницы, которые будут вычитать из текущего времени часы, фигурирующие в URL запрошенной страницы. Для этого в файл dj/urls.py добавим маршруты:</p>
+
+		<pre class="code">(r'^time/plus/(\d{1,2})$', hours_plus),
+(r'^time/minus/(\d{1,2})$', hours_minus),</pre>
+
+		<p>В каталоге с шаблонами templates разместим два новых шаблона.</p>
+
+		<p>Файл templates/time_minus.tmpl со следующим содержимым:</p>
+
+		<pre class="code">&lt;html&gt;
+  &lt;head&gt;
+    &lt;meta http-equiv=&quot;Content-Type&quot; content=&quot;text/html; charset=UTF-8&quot; /&gt;
+    &lt;title&gt;Прошлое время&lt;/title&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;div align="center"&gt;
+      {{ delta }} часов назад было {{ time }}
+    &lt;/div&gt;
+  &lt;/body&gt;
+&lt;/html&gt;</pre>
+
+		<p>Файл templates/time_plus.tmpl со следующим содержимым:</p>
+
+		<pre class="code">&lt;html&gt;
+  &lt;head&gt;
+    &lt;meta http-equiv=&quot;Content-Type&quot; content=&quot;text/html; charset=UTF-8&quot; /&gt;
+    &lt;title&gt;Будущее время&lt;/title&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;div align="center"&gt;
+      Через {{ delta }} часов будет {{ time }}
+    &lt;/div&gt;
+  &lt;/body&gt;
+&lt;/html&gt;</pre>
+
+		<p>В файл app/views.py пропишем два представления, которые будут использовать два новых шаблона:</p>
+
+		<pre class="code">def hours_plus(request, delta):
+    try:
+      delta = int(delta)
+    except ValueError:
+      raise Http404()
+    time = datetime.now() + timedelta(hours=delta)
+    return render_to_response('time_plus.tmpl', {'delta' : delta,
+                                                 'time' : time})
+
+def hours_minus(request, delta):
+    try:
+      delta = int(delta)
+    except ValueError:
+      raise Http404()
+    time = datetime.now() - timedelta(hours=delta)
+    return render_to_response('time_minus.tmpl', {'delta' : delta,
+                                                  'time' : time})</pre>
+
+		<p>Файл app/views.py целиком примет следующий вид:</p>
+
+		<pre class="code"># -*- coding: UTF-8 -*-
+from django.http import HttpResponse, Http404
+from django.shortcuts import render_to_response
+from datetime import datetime, timedelta
+
+def hello(request):
+    return HttpResponse(u'Здравствуй, мир!')
+
+def current_datetime(request):
+    return render_to_response('time.tmpl', {'time' : datetime.now()})
+
+def hours_plus(request, delta):
+    try:
+      delta = int(delta)
+    except ValueError:
+      raise Http404()
+    time = datetime.now() + timedelta(hours=delta)
+    return render_to_response('time_plus.tmpl', {'delta' : delta,
+                                                 'time' : time})
+
+def hours_minus(request, delta):
+    try:
+      delta = int(delta)
+    except ValueError:
+      raise Http404()
+    time = datetime.now() - timedelta(hours=delta)
+    return render_to_response('time_minus.tmpl', {'delta' : delta,
+                                                  'time' : time})</pre>
+
+		<p>Теперь можно перейти по ссылкам <a href="http://localhost:8000/time/plus/1">http://localhost:8000/time/plus/1</a> или <a href="http://localhost:8000/time/plus/2">http://localhost:8000/time/plus/2</a> и увидеть получающиеся страницы.</p>
+
+		<h2>11. Более сложные шаблоны</h2>
+
+		<p>Условие:</p>
+
+		<pre class="code">{% if today_is_weekend %}
+    &lt;p&gt;Сегодня выходной!&lt;/p&gt;
+{% endif %}</pre>
+
+		<p>Условие с двумя вариантами:</p>
+
+		<pre class="code">{% if today_is_weekend %}
+    &lt;p&gt;Сегодня выходной!&lt;/p&gt;
+{% else %}
+    &lt;p&gt;Пора работать.&lt;/p&gt;
+{% endif %}</pre>
+
+		<p>Ложным значениями являются: пустой список [], пустой кортеж (), пустой словарь {}, ноль - 0, объект None и объект False.</p>
+
+		<p>Можно использовать сочетания условий при помощи and и or, причём and имеет более высокий приоритет. Скобки в условиях не поддерживаются, без них можно обойтись с помощью вложенных условий. Также возможно использовать операторы ==, !=, &lt;, &gt;, &gt;=, &lt;= и in для вычисления условий, по смыслу совпадающих с условными операторами в самом Python.</p>
+
+		<p>Циклы для перебора значений из списка:</p>
+
+		<pre class="code"></pre>
+
+		<pre class="code">{% for athlete in athlete_list %}
+  &lt;li&gt;{{ athlete.name }}&lt;/li&gt;
+{% endfor %}</pre>
+
+		<p>Можно перебирать значения из списка в обратном порядке:</p>
+
+		<pre class="code">{% for athlete in athlete_list reversed %}
+...
+{% endfor %}</pre>
+
+		<p>Внутри циклов существуют следующие переменные:</p>
+
+		<ul>
+			<li>{{ forloop.counter }} - номер итерации, начиная с 1,</li>
+
+			<li>{{ forloop.counter0 }} - номер итерации, начиная с 0,</li>
+
+			<li>{{ forloop.revcounter }} - количество оставшихся итераций, включая текущую. Внутри первой итерации равно количеству элементов, на последней итерации - 1,</li>
+
+			<li>{{ forloop.revcounter }} - количество оставшихся итераций. Внутри первой итерации содержит количество элементов за минус единицей, на последней итерации - 0,</li>
+
+			<li>{% if forloop.first %} - условие выполняется на первой итерации,</li>
+
+			<li>{% if forloop.last %} - условие выполняется на последней итерации,</li>
+
+			<li>forloop.parentloop - ссылка на объект родительского цикла.</li>
+		</ul>
+
+		<p>Комментарии в шаблоне:</p>
+
+		<pre class="code">{# Это комментарий #}</pre>
+
+		<p>или</p>
+
+		<pre class="code">{% comment %}
+Многострочный
+комментарий.
+{% endcomment %}</pre>
+
+		<h2>12. Включение подшаблонов</h2>
+
+		<p>В шаблон можно включать другой шаблон, в качестве фрагмента. Таким образом можно повторно использовать одни и те же фрагменты в разных шаблонах, а также для удобства разбивать большие сложные шаблоны на небольшие фрагменты.</p>
+
+		<p>Включение подшаблона из файла:</p>
+
+		<pre class="code">{% include "includes/nav.html" %}</pre>
+
+		<p>Включение подшаблона из переменной:</p>
+
+		<pre class="code">{% include template_name %}</pre>
+
+		<h2>13. Наследование шаблонов</h2>
+
+		<p>Наследование шаблонов - очень удобная концепция, которая встречается не во всех шаблонизаторах. В шаблонизаторе Django такая поддержка наследования шаблонов имеется. Наследование позволяет определить определить в базовом шаблоне общий дизайн для множества страниц. При этом в страницах-наследницах переопределяются отдельные блоки базовой страницы. В этих блоках будет выводиться содержимое, специфичное конкретно для этой страницы.</p>
+
+		<p>Продолжим эксперименты с нашим тестовым проектом, добавив в него базовый шаблон.</p>
+
+		<p>Базовый шаблон base.tmpl:</p>
+
+		<pre class="code">&lt;html&gt;
+  &lt;head&gt;
+    &lt;meta http-equiv=&quot;Content-Type&quot; content=&quot;text/html; charset=UTF-8&quot; /&gt;
+    &lt;title&gt;{% block title %}{% endblock %}&lt;/title&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;h1&gt;Бесполезный сайт с часами&lt;/h1&gt;
+
+    {% block content %}{% endblock %}
+
+    {% block footer %}
+    &lt;hr&gt;
+    &lt;p&gt;Благодарим за посещение нашего сайта.&lt;/p&gt;
+    {% endblock %}
+  &lt;/body&gt;
+&lt;/html&gt;</pre>
+
+		<p>В базовом шаблоне помечаются блоки, в которых прописывается часть шаблона, специфичная для этой страницы.</p>
+
+		<p>Производный шаблон. Для примера приведу только содержимое шаблона time_plus.tmpl:</p>
+
+		<pre class="code">{% extends "base.tmpl" %}
+
+{% block title %}Будущее время{% endblock %}
+
+{% block content %}
+&lt;p&gt;Через {{ delta }} часов будет {{ time }}&lt;/p&gt;
+{% endblock %}</pre>
+
+		<p>В производном шаблоне указывается базовый шаблон и переопределяется содержимое блоков базового шаблона. Шаблоны других страниц можно отредактировать сходным образом, чтобы и они использовали дизайн, общий для всех страниц.</p>
+
+		<h2>14. Настройка базы данных MySQL</h2>
+
+		<p>После того, как мы рассмотрели шаблоны Django, пришло время заняться моделями Django. Но прежде чем приступить непосредственно к изучению моделей, нужно установить необходимые модули, выставить настройки как в самой СУБД, так и в проекте Django.</p>
+
+		<p>Установим модуль для доступа к базе данных MySQL из Python (разработчики фреймворка Django рекомендуют использовать PostgreSQL, но мы воспользуемся MySQL, поддержка которого тоже имеется):</p>
+
+		<pre class="console"># apt-get install python-mysqldb</pre>
+
+		<p>Настроим кодировку сервера MySQL и порядок сортировки. Для этого в файле /etc/mysql/my.cnf в секцию [mysqld] впишем следующие настройки:</p>
+
+		<pre class="code">character_set_server=utf8
+collation_server=utf8_unicode_ci</pre>
+
+		<p>Перезапустим сервер базы данных:</p>
+
+		<pre class="console"># /etc/init.d/mysql restart</pre>
+
+		<p>В результате вышеописанных действий должен получиться такой результат:</p>
+
+		<pre class="console">mysql&gt; show variables like 'coll%';
++----------------------+-----------------+
+| Variable_name        | Value           |
++----------------------+-----------------+
+| collation_connection | utf8_general_ci |
+| collation_database   | utf8_unicode_ci |
+| collation_server     | utf8_unicode_ci |
++----------------------+-----------------+
+3 rows in set (0.00 sec)
+
+mysql&gt; show variables like 'char%';
++--------------------------+----------------------------+
+| Variable_name            | Value                      |
++--------------------------+----------------------------+
+| character_set_client     | utf8                       |
+| character_set_connection | utf8                       |
+| character_set_database   | utf8                       |
+| character_set_filesystem | binary                     |
+| character_set_results    | utf8                       |
+| character_set_server     | utf8                       |
+| character_set_system     | utf8                       |
+| character_sets_dir       | /usr/share/mysql/charsets/ |
++--------------------------+----------------------------+
+8 rows in set (0.00 sec)</pre>
+
+		<p>Создадим базу данных для проекта:</p>
+
+		<pre class="code">CREATE USER app@localhost IDENTIFIED BY "app_password";
+CREATE DATABASE app;
+GRANT ALL ON app.* TO app@localhost;</pre>
+
+		<p>Пропишем в файл настроек проекта dj/settings.py настройки подключения к базе данных:</p>
+
+		<pre class="code">DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.mysql', # Add 'postgresql_psycopg2', 'mysql', 'sqlite3' or 'oracle'.
+        'NAME': 'app',                        # Or path to database file if using sqlite3.
+        'USER': 'app',                        # Not used with sqlite3.
+        'PASSWORD': 'app_password',           # Not used with sqlite3.
+        'HOST': '',                           # Set to empty string for localhost. Not used with sqlite3.
+        'PORT': '',                           # Set to empty string for default. Not used with sqlite3.
+    }
+}</pre>
+
+		<p>Проверяем правильность настройки:</p>
+
+		<pre class="console">$ ./manage.py shell</pre>
+
+		<p>Если всё правильно, то откроется отладочная оболочка Python. Попробуем ввести следующие команды:</p>
+
+		<pre class="console">from django.db import connection
+cursor = connection.cursor()</pre>
+
+		<p>Если сообщений об ошибках не было, значит всё настроено правильно.</p>
+
+		<h2>15. Создание моделей</h2>
+
+		<p>Каждая модель Django описывают одну таблицу в базе данных. В Django имеется система отображения таблиц в объекты - ORM - Object-Relational Mapping - объектно-реляционное отображение. ORM позволяет манипулировать единичными строками таблиц как объектами Python, а также осуществлять операции массовой выборки, обновления и удаления строк.</p>
+
+		<p>В качестве примера, рассмотрим адресный справочник домов в городах. Откроем файл app/models.py и приведём его к следующему виду:</p>
+
+		<pre class="code"># -*- coding: UTF-8 -*-
+from django.db import models
+
+class City(models.Model):
+    country = models.ForeignKey(Country)
+    title = models.CharField(max_length=150)
+
+class Street(models.Model):
+    city = models.ForeignKey(City)
+    title = models.CharField(max_length=150)
+
+class Area(models.Model):
+    city = models.ForeignKey(City)
+    title = models.CharField(max_length=150)
+
+class House(models.Model):
+    area = models.ForeignKey(Area)
+    street = models.ForeignKey(Street)
+    house = models.IntegerField()
+    frac = models.CharField(max_length=30)
+    comment = models.CharField(max_length=100)</pre>
+
+		<p>Мы описали объекты, составляющие адресный справочник, и описали взаимоотношения между ними через внешние ключи - ForeignKey. В городе имеются улицы и районы, а каждый дом находится на одной улице и принадлежит одному из районов города.</p>
+
+		<p>В Django есть не только текстовые поля и внешние ключи. Имеются числовые поля, списковые поля, логические поля, поля для связей один-к-одному и для связей многие-ко-многим. У полей можно прописать значения по умолчанию, разрешить или запретить использовать значение NULL и запретить или разрешить вводить в строковые поля пустые строки. У поля можно прописать его имя в базе данных, выставить признак - нужно ли создавать индекс по этому полю, можно прописать текстовое описание поля, которое будет использоваться в веб-интерфейсе администратора и в объектах форм Django. У классов моделей, в свою очередь, можно тоже указывать их текстовые описания, прописывать составные индексы, ограничения уникальности записей и т.п. Создание моделей - это обширная тема, рассмотреть которую сколь-нибудь подробно в рамках этого небольшого учебника вряд ли получится.</p>
+
+		<p>Теперь мы можем проверить правильность синтаксиса и логики моделей:</p>
+
+		<pre class="console">$ ./manage.py validate</pre>
+
+		<p>Чтобы увидеть команды SQL для создания структуры базы данных, требуемой для моделей из приложения app, введём следующую команду:</p>
+
+		<pre class="console">$ ./manage.py sqlall app</pre>
+
+		<p>Чтобы выполнить эти операторы SQL и создать в базе данных таблицы, соответствующие моделям, нужно выполнить следующую команду:</p>
+
+		<pre class="console">$ ./manage.py syncdb</pre>
+
+		<p>Можно войти в базу данных клиентом и увидеть созданную структуру таблиц и их взаимосвязи.</p>
+
+		<p>Для входа в базу данных с настройками проекта, можно воспользоваться следующей командой:</p>
+
+		<pre class="console">$ ./manage.py dbshell</pre>
+
+		<h2>16. Создание записей в таблицах</h2>
+
+		<p>Откроем оболочку Python:</p>
+
+		<pre class="console">$ ./manage.py shell</pre>
+
+		<p>Импортируем описание моделей:</p>
+
+		<pre class="console">from address.models import *</pre>
+
+		<p>Создадим объект "город":</p>
+
+		<pre class="console">c = City(title=u'Уфа')</pre>
+
+		<p>И сохраним его в базу данных:</p>
+
+		<pre class="console">c.save()</pre>
+
+		<p>Теперь создадим объект "улица" в этом городе:</p>
+
+		<pre class="console">s = Street(title=u'ул. Карла Маркса', city=c)</pre>
+
+		<p>И сохраним объект с улицей:</p>
+
+		<pre class="console">s.save()</pre>
+
+		<p>Если нужно отредактировать объект, то можно прописать в него новое свойство и сохранить:</p>
+
+		<pre class="console">c.title = u'г. Уфа'
+c.save()</pre>
+
+		<p>Недостаток такого рода редактирования объектов заключается в том, что в базе данных обновляются все поля в отредактированной строке таблицы, а не только то поле, которое действительно было изменено. Для раздельного редактирования полей строк можно воспользоваться массовым редактированием, о котором будет рассказано далее.</p>
+
+		<h2>17. Извлечение записей из таблиц</h2>
+
+		<p>Откроем оболочку Python:</p>
+
+		<pre class="console">$ ./manage.py shell</pre>
+
+		<p>Импортируем описание модели:</p>
+
+		<pre class="console">from address.models import *</pre>
+
+		<p>Загрузим все объекты типа "город":</p>
+		
+		<pre class="console">c = City.objects.all()</pre>
+
+		<p>Загрузим объект "город", имеющий имя "г. Уфа":</p>
+
+		<pre class="console">c = City.objects.filter(title=u'г. Уфа')</pre>
+
+		<p>И убедимся, что загрузился именно он:</p>
+
+		<pre class="console">print c</pre>
+
+		<p>Выбор списка объектов:</p>
+
+		<ul>
+			<li>Obj.objects.all() - отобрать как список все объекты типа Obj,</li>
+
+			<li>Obj.objects.filter(field='') - отобрать как список объекты, у которых поле field имеет указанное значение,</li>
+
+			<li>Obj.objects.filter(field1='', field2='') - отобрать как список объекты, у которых оба поля одновременно имеют указанные значения,</li>
+
+			<li>Obj.objects.filter(field__contains='') - отобрать как список объекты, у которых в указанном поле содержится указанное значение,</li>
+
+			<li>Obj.objects.filter(field__icontains='') - отобрать как список объекты, у которых в указанном поле содержится указанное значение без учёта регистра,</li>
+
+			<li>Obj.objects.filter(field__iexact='') - отобрать как список объекты, у которых указанное поле совпадает с указанным значением без учёта регистра,</li>
+
+			<li>Obj.objects.filter(field__startswith='') - отобрать как список объекты, у которых указанное поле начинается с указанного значения,</li>
+
+			<li>Obj.objects.filter(field__istartswith='') - отобрать как список объекты, у которых указанное поле начинается с указанного значения без учёта регистра,</li>
+
+			<li>Obj.objects.filter(field__endswith='') - отобрать как список объекты, у которых указанное поле заканчивается указанным значением,</li>
+
+			<li>Obj.objects.filter(field__iendswith='') - отобрать как список объекты, у которых указанное поле заканчивается указанным значением без учёта регистра.</li>
+		</ul>
+
+		<p>Условия в фильтре можно комбинировать между собой не только указывая их через запятую, но создавая каскады фильтров:</p>
+
+		<pre class="code">Obj.objects.filter(field1__iendswith='a').filter(field2='b')</pre>
+
+		<p>Чтобы отобрать объекты, не подходящие под указанное условие, можно воспользоваться методом фильтрации exclude. Например, следующее выражение отберёт те записи, у которых начало первого поля без учёта регистра совпадает с a, а второе поле не равно b:</p>
+
+		<pre class="code">Obj.objects.filter(field1__iendswith='a').exclude(field2='')</pre>
+
+		<p>Выбор одного объекта осуществляется точно таким же способом, как выбор списка, за исключением того, что вместо метода filter используется метод get:</p>
+
+		<pre class="code">Obj.objects.get(field='')</pre>
+
+		<p>Если ни один объект не был найден, будет сгенерировано исключение Obj.DoesNotExist. Если указанным критериям соответствует несколько записей, то будет сгенерировано исключение Obj.MultipleObjectsReturned.</p>
+
+		<p>Как и в случае выборки списка объектов, можно комбинировать фильтры друг с другом. Но для выборки одного объекта последним методом в цепочке должен быть get. Например, вот так:</p>
+
+		<pre class="code">Obj.objects.filter(field1__iendswith='a').exclude(field2='').get()</pre>
+
+		<p>Или, что то же самое, вот так:</p>
+
+		<pre class="code">Obj.objects.exclude(field2='').get(field1__iendswith='a')</pre>
+
+		<p>В Django версий 1.6 и более поздних имеется метод first(), не принимающий аргументов, который возвращает первую запись из списка, если она есть. В противном случае возвращается None. Стоит учитывать, что этот метод никак не обрабатывает случаи, когда условию соответствует несколько записей сразу.</p>
+
+		<p>Сортировка данных:</p>
+
+		<ul>
+			<li>Obj.objects.order_by("field") - сортировка по одному полю,</li>
+
+			<li>Obj.objects.order_by("-field") - сортировка по одному полю в обратном порядке,</li>
+
+			<li>Obj.objects.order_by("field1", "field2") - сортировка по двум полям.</li>
+		</ul>
+
+		<p>Сортировку по умолчанию можно настроить в свойствах объекта модели, добавив вложенный класс со свойством ordering, которому присвоен список полей для сортировки:</p>
+
+		<pre class="code">    class Meta:
+        ordering = ["field"]</pre>
+
+		<p>Можно комбинировать методы:</p>
+
+		<pre class="code">Obj.objects.filter(field="").order_by("-field")</pre>
+
+		<p>Можно выбирать необходимый фрагмент списка объектов. Например, вот этот запрос вернёт два первых объекта:</p>
+
+		<pre class="code">Obj.objects.filter(field="").order_by("-field")[0:2]</pre>
+
+		<p>Массовое обновление объектов осуществляется следующим образом:</p>
+
+		<pre class="code">Obj.objects.filter(id=52).update(field='')</pre>
+
+		<p>Запрос возвращает количество обновлённых строк таблицы.</p>
+
+		<p>Удалить один объект можно следующим образом:</p>
+
+		<pre class="code">o = Obj.objects.get(field='')
+o.delete()</pre>
+
+		<p>Удалить объекты массово можно так:</p>
+
+		<pre class="code">Obj.objects.filter(field='').delete()</pre>
+
+		<h2>18. Активация интерфейса администратора</h2>
+
+		<p>Пожалуй самая приятная особенность фреймворка Django - это встроенный веб-интерфейс администратора, который позволяет манипулировать записями на уровне отдельных таблиц. В большинстве случаев веб-интерфейс администратора позволяет сэкономить время на реализации большого количество весьма однообразных функций. Даже если понадобится сделать нечто необычное, веб-интерфейс поддаётся очень глубокой и тонкой настройке через объекты административного интерфейса, объекты форм, дополнительные действия и т.д. И лишь в совсем редких случаях может понадобиться реализовывать собственные страницы для манипуляции объектами приложения.</p>
+
+		<p>Для включения интерфейса администрирования нужно внести изменения в файл настроек dj/settings.py:</p>
+
+		<ol>
+			<li>Вписать в INSTALLED_APPS приложения django.contrib.admin, django.contrib.auth, django.contrib.sessions и django.contrib.contenttypes,</li>
+			<li>Вписать в MIDDLEWARE_CLASSES приложения-прослойки django.middleware.common.CommonMiddleware, django.contrib.sessions.middleware.SessionMiddleware, django.contrib.auth.middleware.AuthenticationMiddleware и django.contrib.messages.middleware.MessageMiddleware.</li>
+		</ol>
+
+		<p>Вносим изменения в базу данных, чтобы в ней создались таблицы, необходимые для работы интерфейса администрирования:</p>
+
+		<pre class="console">$ ./manage.py syncdb</pre>
+
+		<p>Если при этом отказаться от создания суперпользователя, то потом его можно создать с помощью команды:</p>
+
+		<pre class="console">$ ./manage.py createsuperuser</pre>
+
+		<p>Теперь в начало файла dj/urls.py добавим использование модуля и его инициализацию:</p>
+
+		<pre class="code">from django.contrib import admin
+admin.autodiscover()</pre>
+
+		<p>И пропишем маршрут к интерфейсу администрирования:</p>
+
+		<pre class="console">urlpatterns = patterns('',
+    # ...
+    (r'^admin', include(admin.site.urls)),
+    # ...
+)</pre>
+
+		<p>Для того, чтобы объекты можно было редактировать прямо из интерфейса администратора, нужно создать в каталоге приложения app файл admin.py со следующим содержимым:</p>
+
+		<pre class="console">from app.models import *
+from django.contrib import admin
+
+admin.site.register(City)
+admin.site.register(Area)
+admin.site.register(Street)
+admin.site.register(House)</pre>
+
+		<p>После этого можно перейти по ссылке <a href="http://localhost:8000/admin/">http://localhost:8000/admin/</a>, войти под учётными данными, указанными команде createsuperuser, и пользоваться интерфейсом администрирования для добавления, редактирования и удаления записей в таблицах.</p>
+
+		<p>Как уже было сказано, интерфейс администрирования поддаётся глубокой и тонкой настройке, но его настройка выходит за рамки этого учебника.</p>
+
+		<p>За рамками этого учебника также остались подробности описания моделей, выражения Q и F для конструирования более сложных запросов, не рассмотрены формы и модельные формы, не рассмотрена миграция структуры базы данных при изменении моделей и многое другое.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Краткий учебник по Django">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

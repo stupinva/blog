@@ -1,0 +1,299 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="patch,jessie,zabbix,debian,linux,troubleshooting,nut" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2015-09-27 -->
+		<title>NUT и APC Smart-UPS 1500VA</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>NUT и APC Smart-UPS 1500VA</h1>
+
+		<p>Благодаря Курбан-байраму на этой неделе появилось немного времени попробовать разобраться с ошибкой сегментации памяти в драйвере usbhid-ups из системы NUT.</p>
+
+		<h2>1. Настройка драйвера NUT</h2>
+
+		<p>Ставим nut-server и nut-client из репозитория:</p>
+
+		<pre class="console"># apt-get install nut-server nut-client</pre>
+
+		<p>На странице руководства usbhid-ups описаны настройки, позволяющие привязать драйвер к строго определённому устройству. Можно указать настройки vendor, vendorid, product, productid, bus, serial.</p>
+
+		<p>Ищем идентификатор производителя и модели нашего ИБП при помощи <span class="console">lsusb</span>. У меня ИБП в выводе этой программы выглядит так:</p>
+
+		<pre class="console">Bus 004 Device 006: ID 051d:0002 American Power Conversion Uninterruptible Power Supply</pre>
+
+		<p>Теперь при помощи команды <span class="console">lsusb -vd 051d:0002</span> посмотрим другую информацию об ИБП. Я нашёл там серийный номер - он полезен, если к компьютеру подключено два ИБП одной и той же модели.</p>
+
+		<p>Используя полученную информацию, настроим драйвер в файле /etc/nut/ups.conf:</p>
+
+		<pre class="code">[apc1500]
+        driver = usbhid-ups
+        port = auto
+        vendorid = 051d
+        productid = 0002
+        serial = AS0508120261</pre>
+
+		<p>Теперь драйвер можно попробовать запустить вручную следующей командой:</p>
+
+		<pre class="console"># /lib/nut/usbhid-ups -a apc1500</pre>
+
+		<p>В Debian Jessie программа завершается ошибкой сегментации. В Debian Stretch эта ошибка уже исправлена, поэтому в случае Debian Jessie можно сразу перейти к разделу "Исправление прав доступа к устройству" ниже.</p>
+
+		<h2>2. Поиск неисправности в драйвере NUT</h2>
+
+		<p>Найти ошибку мне удалось с помощью программы ltrace. Запустим драйвер под управлением этой программы:</p>
+
+		<pre class="console"># ltrace /lib/nut/usbhid-ups -a apc1500</pre>
+
+		<p>Последние строчки вывода ltrace выглядят следующим образом:</p>
+
+		<pre class="code">strlen("Back-UPS ES 525")                                                                        = 15
+strncmp(nil, "Back-UPS ES 525", 15 &lt;no return ...&gt;
+--- SIGSEGV (Segmentation fault) ---
++++ killed by SIGSEGV +++</pre>
+
+		<p>Как видно, ошибка сегментации происходит потому, что происходит попытка сравнить строки. Первый аргумент функции сравнения строк strncmp имеет значение NULL. Используя это значение как указатель на область памяти, функция пытается обратиться по адресу, которого нет в адресном пространстве программы. Модуль управления памяти (MMU) генерирует прерывание о недоступности страницы, управление передаётся ядру операционной системы. Операционная система ищет затребованную память в каталоге страниц перемещённых в раздел подкачки и в списке файлов, отображаемых в память. Страницу не удаётся найти ни там ни там и ядро операционной системы завершает программу.</p>
+
+		<h2>3. Исправление неисправности</h2>
+
+		<p>Скачаем и распакуем исходные тексты системы NUT:</p>
+
+		<pre class="console"># cd /root
+# apt-get source nut-server</pre>
+
+		<p>Перейдём в каталог с распакованными файлами и поищем в них строку "Back-UPS ES 525":</p>
+
+		<pre class="console"># cd nut-2.7.2
+# grep -R "Back-UPS ES 525" *
+drivers/apc-hid.c: /* Back-UPS ES 525 overflows on ReportID 0x0c
+drivers/apc-hid.c: "Back-UPS ES 525",</pre>
+
+		<p>Строка используется в файле drivers/apc-hid.c. Откроем его и посмотрим, можно ли исправить проблему. Проблема находится в функции general_apc_check:</p>
+
+		<pre class="code">static void *general_apc_check(USBDevice_t *device)
+{
+        int i = 0;
+
+        /* Some models of Back-UPS overflow on some ReportID.
+         * This results in some data not being exposed and IO errors on
+         * WIN32, causing endless reconnection or driver's failure */
+
+        while( tweak_max_report[i] != NULL ) {
+                if(!strncmp(device-&gt;Product, tweak_max_report[i],
+                        strlen(tweak_max_report[i]))) {
+                        max_report_size = 1;
+                        return NULL;
+                }
+                i++;
+        }
+        return NULL;
+}</pre>
+
+		<p>То есть ошибка сегментации памяти происходит из-за попытки обратиться к области памяти, на которую указывает device-&gt;Product. Исправим это, пропуская цикл, если значение этого указателя равно NULL:</p>
+
+		<pre class="code">static void *general_apc_check(USBDevice_t *device)
+{
+        int i = 0;
+
+        /* Some models of Back-UPS overflow on some ReportID.
+         * This results in some data not being exposed and IO errors on
+         * WIN32, causing endless reconnection or driver's failure */
+
+<b>        if (device-&gt;Product == NULL) {
+                return NULL;
+        }</b>
+        while( tweak_max_report[i] != NULL ) {
+                if(!strncmp(device-&gt;Product, tweak_max_report[i],
+                        strlen(tweak_max_report[i]))) {
+                        max_report_size = 1;
+                        return NULL;
+                }
+                i++;
+        }
+        return NULL;
+}</pre>
+
+		<p>Узаконим это изменение. Во-первых, внесём новую запись в changelog:</p>
+
+		<pre class="console"># dch -i</pre>
+
+		<p>В открывшемся редакторе добавляем запись:</p>
+
+		<pre class="code">nut (2.7.2-4.1) UNRELEASED; urgency=medium
+
+  * Fixed segmentation fault in function general_apc_check
+
+ -- Vladimir Stupin &lt;vladimir@stupin.su&gt;  Thu, 24 Sep 2015 13:48:20 +0500</pre>
+
+		<p>Теперь фиксируем изменения в исходном тексте при помощи команды:</p>
+
+		<pre class="console"># dpkg-source --commit</pre>
+
+		<p>Патч назовём general_apc_check_segfault_fixed, в заголовок впишем комментарии к патчу:</p>
+
+		<pre class="code">Description: Fixed segmentation fault in function general_apc_check
+ Fixed segmentation fault in function general_apc_check
+ .
+ nut (2.7.2-4.1) UNRELEASED; urgency=medium
+ .
+   * Fixed segmentation fault in function general_apc_check
+Author: Vladimir Stupin &lt;vladimir@stupin.su&gt;</pre>
+
+		<p>Осталось собрать новые пакеты. Установим зависимости, необходимые для сборки, а затем соберём пакеты:</p>
+
+		<pre class="console"># apt-get build-dep nut-server
+# dpkg-buildpackage -us -uc -rfakeroot</pre>
+
+		<p>В каталоге выше, на одном уровне с nut-2.7.2 появятся новые файлы:</p>
+
+		<pre class="console">libups-nut-perl_2.7.2-4.1_all.deb
+nut_2.7.2-4.1_all.deb
+nut_2.7.2-4.1_amd64.changes
+nut_2.7.2-4.1.debian.tar.xz
+nut_2.7.2-4.1.dsc
+nut_2.7.2.orig.tar.gz
+nut-cgi_2.7.2-4.1_amd64.deb
+nut-client_2.7.2-4.1_amd64.deb
+nut-doc_2.7.2-4.1_all.deb
+nut-ipmi_2.7.2-4.1_amd64.deb
+nut-monitor_2.7.2-4.1_all.deb
+nut-powerman-pdu_2.7.2-4.1_amd64.deb
+nut-server_2.7.2-4.1_amd64.deb
+nut-snmp_2.7.2-4.1_amd64.deb
+nut-xml_2.7.2-4.1_amd64.deb
+python-nut_2.7.2-4.1_all.deb</pre>
+
+		<p>Установим собранные нами пакеты nut-server и nut-client:</p>
+
+		<pre class="console"># dpkg -i nut-server_2.7.2-4.1_amd64.deb nut-client_2.7.2-4.1_amd64.deb</pre>
+
+		<p>Попробуем запустить исправленный драйвер:</p>
+
+		<pre class="console"># /lib/nut/usbhid-ups -a apc1500</pre>
+
+		<p>На этот раз ошибки сегментации нет, а драйвер самостоятельно завершает работу, сообщая об ошибке:</p>
+
+		<pre class="console">Can't claim USB device [051d:0002]: could not detach kernel driver from interface 0: Operation not permitted</pre>
+
+		<h2>4. Исправление прав доступа к устройству</h2>
+
+		<p>Как выяснилось, дело в правах доступа к файлу устройства /dev/bus/usb/004/007, под которым доступен ИБП. К этому устройству должен иметь доступ пользователь или группа nut. Применим решение, найденное в обсуждении <a href="http://askubuntu.com/questions/113994/trouble-starting-network-ups-tools-with-a-eaton-3s-ups">Trouble starting Network UPS Tools with a Eaton 3S UPS</a>. Для этого создадим файл /etc/udev/rules.d/90-nut-ups.rules со следующим содержимым:</p>
+
+		<pre class="code">ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="051d", ATTR{idProduct}=="0002", MODE="0660", GROUP="nut"</pre>
+
+		<p>Чтобы настройки вступили в силу, перезагрузим udevd:</p>
+
+		<pre class="console"># /etc/init.d/udev reload</pre>
+
+		<p>Теперь отсоединим USB-кабель, которым ИБП соединён с компьютером, и вставим его обратно. Права доступа должны исправиться.</p>
+
+		<h2>5. Настройка сервера NUT</h2>
+
+		<p>Откроем файл с настройками NUT-сервера /etc/nut/upsd.conf и впишем в него строчку:</p>
+
+		<pre class="code">LISTEN 127.0.0.1 3493</pre>
+
+		<p>Откроем файл со списком пользователей NUT-сервера /etc/nut/upsd.users:</p>
+
+		<pre class="code">[admin]
+        password = admin_password
+        actions = SET
+        instcmds = ALL
+
+[upsmon]
+        password = upsmon_password
+        upsmon master</pre>
+
+		<p>Откроем файл /etc/nut/nut.conf и заменим режим работы NUT-сервера с none на standalone:</p>
+
+		<pre class="code">MODE=standalone</pre>
+
+		<p>Теперь включим и запустим NUT-сервер:</p>
+
+		<pre class="console"># systemctl enable nut-server.service
+# systemctl start nut-server.service</pre>
+
+		<p>Запустился ли NUT-сервер, можно посмотреть при помощи следующей команды:</p>
+
+		<pre class="console"># systemctl status nut-server.service</pre>
+
+		<h2>6. Настройка клиента мониторинга NUT</h2>
+
+		<p>Простейший клиент позволяет просматривать текущие параметры ИБП:</p>
+
+		<pre class="console">$ upsc apc1500</pre>
+
+		<p>Посмотреть значение какого-то одного конкретного параметра можно указав дополнительно его имя:</p>
+
+		<pre class="console">$ upsc apc1500 ups.beeper.status</pre>
+
+		<p>Кроме того, имеется более сложный клиент, который позволяет не только просматривать настройки, но и выполнять команды. Список доступных команд можно увидеть вот так:</p>
+
+		<pre class="console">$ upscmd -l -u admin -p admin_password apc1500</pre>
+
+		<p>Например, вот так можно отключить на ИБП звуковой сигнал:</p>
+
+		<pre class="console">$ upscmd -u admin -p admin_password apc1500 beeper.disable</pre>
+
+		<p>Можно убедиться в том, что звуковой сигнал действительно отключен:</p>
+
+		<pre class="console">$ upsc apc1500 ups.beeper.status</pre>
+
+		<p>Кроме поддержки моделей ИБП разных производителей, NUT выгодно отличается от apcupsd именно возможностью выполнять команды на ИБП. Можно, например, с помощью соответствующей команды протестировать всю процедуру отключения системы.</p>
+
+		<p>Однако, мы отклонились от темы. Настроим клиент мониторинга, который будет заниматься слежением за состоянием ИБП и правильным завершением работы при отсутствии электричества и полном разряде батарей. Откроем файл /etc/nut/upsmon.conf и впишем в него следующие настройки:</p>
+
+		<pre class="code"># Описание ИБП, за которым нужно наблюдать
+MONITOR apc1500@localhost 1 upsmon upsmon_password master
+
+# Команда, которую нужно выполнить перед пропаданием питания от ИБП
+SHUTDOWNCMD "/sbin/shutdown -h +0"</pre>
+
+		<p>Команда нужна именно такая, чтобы компьютер включился при подаче питания. Для этого в BIOS выставляется соответствующая настройка, которая либо всегда при появлении электричества подаёт его на блок питания, либо помнит последнее состояние и подаёт питание, если до пропадания электричества компьютер был включен. Если вам интересно узнать назначение остальных настроек, можете почитать одну из моих прошлых заметок <a href="../nut-eaton/">NUT и Eaton Powerware 5110</a>, в которой система NUT разобрана досконально.</p>
+
+		<p>Осталось включить и запустить клиента мониторинга NUT:</p>
+
+		<pre class="console"># systemctl enable ups-monitor.service
+# systemctl start ups-monitor.service</pre>
+
+		<p>Так же, как и в случае с NUT-сервером, можно проверить состояние клиента мониторинга:</p>
+
+		<pre class="console"># systemctl status ups-monitor.service</pre>
+
+		<h2>7. Настройка Zabbix</h2>
+
+		<p>Предполагается, что на компьютере уже установлен и настроен Zabbix-агент. Добавим в конфигурацию агента "пользовательский параметр". Сделать этом можно либо напрямую отредактировав файл /etc/zabbix/zabbix_agentd.conf, либо создав новый файл в каталоге /etc/zabbix/zabbix_agentd.d/ специально для этого пользовательского параметра. Впишем строчку:</p>
+
+		<pre class="code">UserParameter=nut[*],/bin/upsc $1@$2 $3 2&gt;/dev/null</pre>
+
+		<p>Перезапустим Zabbix-агента, чтобы новые настройки вступили в силу:</p>
+
+		<pre class="console"># systemctl restart zabbix-agent.service</pre>
+
+		<p>Я подготовил два варианта шаблонов - <a href="Template_App_APC_Smart_UPS_1500VA_nut.xml">один</a> с элементами данных "Zabbix-агент", а <a href="Template_App_APC_Smart_UPS_1500VA_nut_active.xml">второй</a> - с элементами данных "Zabbix-агент (активный)".</p>
+
+		<p>Поскольку к NUT можно подключить несколько ИБП, в шаблонах предусмотрены макросы, в которых указывается конкретный ИБП, данные с которого нужно снимать. Если ИБП один, можно присоединить шаблон прямо к узлу Zabbix, соответствующему компьютеру, к которому подключен ИБП. Если ИБП несколько, то удобнее будет создать отдельные узлы Zabbix, соответствующие каждому из наблюдаемых ИБП. Макросы узла Zabbix выглядят вот так:</p>
+
+		<img src="zabbix_apc_nut_macro.png" />
+
+		<p>Снимаемые с ИБП данные выглядят следующим образом:</p>
+
+		<img src="zabbix_apc_nut_history.png" />
+
+		<p>Наконец, в шаблоне имеются следующие триггеры:</p>
+
+		<img src="zabbix_apc_nut_triggers.png" />
+
+		<p>Дополнительно на узле Zabbix, соответствующем компьютеру, к которому подключены ИБП, можно поставить на контроль наличие работающих процессов upsd и upsmon.</p>
+
+		<p>Примеры использования графического клиента NUT и настройки веб-клиента NUT можно посмотреть в прошлой заметке, посвящённой настройке NUT: <a href="../nut-eaton/">NUT и Eaton Powerware 5110</a>.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=NUT и APC Smart-UPS 1500VA">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,124 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="Реми ван Элст,openssl,tls,перевод,ssl,ejabberd" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-09-17 -->
+		<title>Реми ван Элст. SSL-сертификат для ejabberd, 2013</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Реми ван Элст. SSL-сертификат для ejabberd, 2013</h1>
+
+		<p>Перевод статьи: <a href="https://raymii.org/s/tutorials/Ejabberd_SSL_Certificate.html">Ejabberd SSL Certificate</a></p>
+
+		<p>Автор: Реми ван Элст (Remy van Elst)</p>
+
+		<p>В этом руководстве показано, как настроить SSL-сертификат для использования с ejabberd. Руководство охватывает вопросы создания запроса на подпись сертификата - Certificate Signing Request, подготовку сертификата для использования в ejabberd и установку сертификата.</p>
+
+		<p>В этом руководстве подразумевается использование уже настроенного ejabberd. Руководство протестировано в Debian и Ubuntu, но должно подойти для любого сервера ejabberd.</p>
+
+		<h2>1. Введение</h2>
+
+		<p>Для получения SSL-сертификата для сервера ejabberd нужно несколько вещей:</p>
+
+		<ul>
+			<li>Создать запрос на подпись сертификата - Certificate Signing Request (CSR) и приватный ключ,</li>
+
+			<li>Передать запрос на подпись сертификата в удостоверяющий центр, дать ему подписать его и забрать оттуда готовый сертификат.</li>
+
+			<li>Объединить сертификат, приватный ключ (и цепочку сертификатов) в PEM-файл, совместимый с ejabberd,</li>
+
+			<li>Установить сертификат в ejabberd.</li>
+		</ul>
+
+		<p>При помощи сертификата можно защитить XMPP-подключения и содержимое переговоров. Таким образом другим становится значительно сложнее прослушивать переговоры. В сочетании с включенным протоколом OTR это позволит создать сверхзащищённый канал для переговоров.</p>
+
+		<h2>2. Создание запроса на подпись сертификата</h2>
+
+		<p>Создадим каталог для хранения всех необходимых файлов и перейдём в него:</p>
+
+		<pre class="console">mkdir -p ~/Certificates/xmpp
+cd ~/Certificates/xmpp</pre>
+
+		<p>Теперь воспользуемся OpenSSL для создания приватного ключа и запроса на подпись сертификата - CSR. При помощи первой команды это можно сделать интерактивно, а при помощи второй - не интерактивно. Убедитесь, что задали правильное значение в поле Общее имя - Common Name (CN). В нём должен быть указан URL XMPP-сервера:</p>
+
+		<p>Интерактивная команда:</p>
+
+		<pre class="console">openssl req -nodes -newkey rsa:2048 -keyout private.key -out CSR.csr</pre>
+
+		<p>Не интерактивная команда:</p>
+
+		<pre class="console">openssl req -nodes -newkey rsa:2048 -keyout private.key -out CSR.csr -subj "/C=NL/ST=State/L=City/O=Company Name/OU=Department/CN=chat.example.org"</pre>
+
+		<p>В результате работы команды появятся два файла: CSR.csr и private.key. Теперь нужно передать запрос на подпись сертификата - CSR в удостоверяющий центр. Это может быть любой удостоверяющий центр. У меня есть успешный опыт использования Xolphin, но это могут быть другие удостоверяющие центры, например, Digicert и Verisign.</p>
+
+		<p>Как только вы передадите запрос на подпись сертификата и получите сертификат, можно продолжать дальше.</p>
+
+		<h2>3. Создание сертификата для ejabberd</h2>
+		
+		<p>Как только у вас появятся все необходимые файлы (приватный ключ, сертификат, цепочка сертификатов), поместите их в каталог и продолжайте. Нужно объединить эти файлы в один файл ejabberd.pem.</p>
+
+		<p>Они должны располагаться в следующем порядке:</p>
+
+		<ul>
+			<li>Приватный ключ,</li>
+
+			<li>Сертификат,</li>
+
+			<li>Цепочка сертификатов.</li>
+		</ul>
+
+		<p>Замените имена файлов в следующей команде на ваши и создайте PEM-файл:</p>
+
+		<pre class="console">cat private.key &gt;&gt; ejabberd.pem
+cat certificate.pem &gt;&gt; ejabberd.pem
+cat chain-1.pem &gt;&gt; ejabberd.pem
+cat chain-2.pem &gt;&gt; ejabberd.pem</pre>
+
+		<p>Если всё сделано, то продолжим.</p>
+
+		<h2>4. Установка сертификата в ejabberd</h2>
+
+		<p>Скопируйте сертификат на все ваши серверы ejabberd:</p>
+
+		<pre class="console">scp ejabberd.pem user@srv1.example.org:</pre>
+
+		<p>Поместите сертификат в каталог /etc/ejabberd:</p>
+
+		<pre class="console">cp ejabberd.pem /etc/ejabberd/ejabberd.pem</pre>
+
+		<p>Теперь отредактируем файл конфигурации ejabberd так, чтобы он указывал на новый сертификат:</p>
+
+		<pre class="console">vim /etc/ejabberd/ejabberd.cfg</pre>
+
+		<p>Проверьте, что файл конфигурации указывает на сертификат. При необходимости исправьте:</p>
+
+		<pre class="code">[...]
+{listen, [
+  {5222, ejabberdc2s, [ {access, c2s}, {shaper, c2sshaper}, {maxstanzasize, 65536},
+         starttls, {certfile, "/etc/ejabberd/ejabberd.pem"}]},
+[...]
+{s2susestarttls, true}.
+{s2s_certfile, "/etc/ejabberd/ejabberd.pem"}.
+[...]</pre>
+
+		<p>После этого перезапустите ejabberd:</p>
+
+		<pre class="console">/etc/init.d/ejabberd restart</pre>
+
+		<p>Теперь можно воспользоваться любым XMPP-клиентом, чтобы подключиться к SSL/TLS и убедиться, что он работает.</p>
+
+		<h2>5. Примечания переводчика</h2>
+
+		<p>Как и в случае со статьёй "Заметки о Dockerfile", сейчас не помню - с чего вдруг я решил перевести эту статью.</p>
+
+		<p>Сейчас смотрю и недоумеваю от количества воды в ней. Ну да ладно, "пусть будет". Возможно я решил её перевести для комплекта с предыдущим переводом про настройку ejabberd.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Реми ван Элст. SSL-сертификат для ejabberd, 2013">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

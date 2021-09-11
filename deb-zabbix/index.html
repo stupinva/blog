@@ -1,0 +1,71 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="zabbix,linux,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-08-25 -->
+		<title>Сборка deb-пакета с Zabbix 2 для Debian Wheezy</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Сборка deb-пакета с Zabbix 2 для Debian Wheezy</h1>
+
+		<p>Ответ на вопрос, почему Zabbix'а нет в Debian Wheezy довольно прост - способ разработки Zabbix не соответствует правилам Debian Stable, т.к. разработчики Zabbix устраняют уязвимости программного обеспечения только в следующих версиях, не бэкпортируя заплатки в старые версии. Более подробно об этом написано тут: <a href="http://workaround.org/debian/why-is-there-no-zabbix-in-debian-wheezy">Why is there no Zabbix in Debian Wheezy?</a></p>
+
+		<p>Включаем в /etc/apt/sources строчку с репоизториями Jessie:</p>
+
+		<pre class="code">deb-src http://mirror.ufanet.ru/debian testing main contrib non-free</pre>
+
+		<p>Обновляем репозитории, скачиваем исходники пакета, ставим необходимое для сборки и собираем пакет:</p>
+
+		<pre class="console"># apt-get update
+# apt-get sources zabbix
+# apt-get install build-essential:native automake1.9 dh-autoreconf libcurl4-gnutls-dev libgcrypt11-dev libiksemel-dev libldap2-dev libmysqlclient-dev libopenipmi-dev libpq-dev libsnmp-dev libsqlite3-dev libssh2-1-dev
+# cd zabbix-2.0.6+dfsg
+# dpkg-buildpackage -us -uc -rfakeroot</pre>
+
+		<p>В каталоге выше - собранные deb-пакеты с Zabbix.</p>
+
+		<p>Установка Zabbix-агента:</p>
+
+		<pre class="console"># apt-get install libcurl3-gnutls libldap-2.4-2 ucf</pre>
+
+		<p>Установка веб-интерфейса Zabbix вместе с веб-сервером Lighttpd и SpawnFCGI:</p>
+
+		<pre class="console"># apt-get install spawn-fcgi lighttpd gamin
+# apt-get install ucf php5 php5-mysql php5-gd ttf-dejavu-core</pre>
+
+		<p>После чего нужно включить модули веб-сервера lighttpd:</p>
+
+		<pre class="console"># lighty-enable-mod fastcgi
+# lighty-enable-mod fastcgi-php</pre>
+
+		<p>Прописать псевдонимы для каталога с PHP-файлами веб-интерфейса в новом файле /etc/lighttpd/conf-available/20-zabbix.conf:</p>
+
+		<pre class="code">alias.url += (
+  "/zabbix/" =&gt; "/usr/share/zabbix/"
+)</pre>
+
+		<p>И включить только что созданный "модуль" Lighttpd с веб-интерфейсом Zabbix:</p>
+
+		<pre class="console"># lighty-enable-mod zabbix</pre>
+
+		<p>Осталось лишь перезапустить веб-сервер:</p>
+
+		<pre class="console"># /etc/init.d/lighttpd restart</pre>
+
+		<p>Установка Zabbix-сервера, использующего MySQL:</p>
+
+		<pre class="console"># apt-get install libcurl3-gnutls libiksemel3 libldap-2.4-2 libopenipmi0 libsnmp15 libssh2-1 ucf</pre>
+
+		<p>О процедуре дальнейшей настройки сервера Zabbix и веб-интерфейса Zabbix можно почитать в одной из моих прошлых заметок: <a href="../zabbix/">Установка системы мониторинга Zabbix</a>.</p>
+
+		<p>P.S. Как я узнал некоторое время спустя, этот пакет уже бэкпортирован и доступен в репозитории wheezy-backports.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Сборка deb-пакета с Zabbix 2 для Debian Wheezy">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

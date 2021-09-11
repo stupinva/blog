@@ -1,0 +1,78 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="bash,перевод,alsa" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2010-08-04 -->
+		<title>Митч Фрэзер. Изменение громкости из сценария Bash, 2008</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Митч Фрэзер. Изменение громкости из сценария Bash, 2008</h1>
+
+		<p>Перевод статьи: <a href="http://www.linuxjournal.com/content/change-volume-bash-script">Change Volume From a Bash Script</a></p>
+
+		<p>24 сентября 2008, Митч Фрэзер (Mitch Frazier)</p>
+
+		<p>Если вы пользуетесь звуковой системой ALSA, вы можете воспользоваться функциями, содержащимися в представленном сценарии, для получения и установки громкости звука вашей системы. Вы можете использовать его, если у вас запущен сторожевой сценарий и вы хотите увеличить громкость сигнала во время тревоги, а затем вернуть громкость обратно к предыдущему уровню.</p>
+
+		<p>Функция get просто использует amixer для вывода информации о канале управления миксером "Master" и затем использует grep для вырезания нужного значения из выведенной информации.</p>
+
+		<p>Функция set также использует amixer для задания громкости. Она использует опцию "cset" программы amixer.</p>
+
+		<p>Сценарий следующий:</p>
+
+		<pre class="code">#!/bin/bash
+#
+
+#####################################################################
+# Получить текущую громкость.
+function get_volume()
+{
+  mixer=$(amixer get Master | grep 'Front Left:')
+  echo $mixer | cut -d ' ' -f 4
+}
+
+#####################################################################
+# Задать громкость.
+function set_volume()
+{
+  amixer cset iface=MIXER,name="Master Playback Volume" $1 &gt;/dev/null
+}
+
+if [[ $(basename $0 .sh) == 'sound' ]]; then
+  sound_file=~/Documents/sounds/notify.wav
+  if [[ "$1" ]]; then
+    sound_file="$1";
+  fi
+
+  ovol=$(get_volume)
+  echo "Текущая громкость: $ovol"
+  aplay $sound_file
+  sleep 2
+
+  vol=40
+  echo "Воспроизведение на громкости: $vol"
+  set_volume $vol
+  aplay $sound_file
+  sleep 2
+
+  echo "Возвращение к громкости: $ovol"
+  set_volume $ovol
+  aplay $sound_file
+fi
+
+# vim: tabstop=4: shiftwidth=4: noexpandtab:
+# kate: tab-width 4; indent-width 4; replace-tabs false;</pre>
+
+		<p>Если вы сохраните этот сценарий под именем sound.sh и запустите его самого, передав имя звукового файла, сценарий воспроизведёт файл на текущей громкости, затем поднимет громкость и воспроизведёт его снова, и наконец, восстановит громкость и воспроизведёт его последний раз. Если вы откроете средство управления миксером перед запуском сценария, вы должны увидеть как громкость главного канала изменяется под действием сценария. Вы можете изменить значение громкости в строке vol=40 на значение, которое вам нужно.</p>
+
+		<p><i>Митч Фрэзер (Mitch Frazier) является помощником редактора в Linux Journal и веб-редактором в linuxjournal.com.</i></p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Митч Фрэзер. Изменение громкости из сценария Bash, 2008">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

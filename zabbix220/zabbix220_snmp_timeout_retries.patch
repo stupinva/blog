@@ -1,0 +1,85 @@
+diff -Naur src/zabbix_proxy/proxy.c new/zabbix_proxy/proxy.c
+--- src/zabbix_proxy/proxy.c	2013-11-12 13:16:44.000000000 +0600
++++ new/zabbix_proxy/proxy.c	2013-12-07 13:29:39.283703310 +0600
+@@ -42,6 +42,7 @@
+ #include "housekeeper/housekeeper.h"
+ #include "../zabbix_server/pinger/pinger.h"
+ #include "../zabbix_server/poller/poller.h"
++#include "../zabbix_server/poller/checks_snmp.h"
+ #include "../zabbix_server/poller/checks_ipmi.h"
+ #include "../zabbix_server/trapper/trapper.h"
+ #include "../zabbix_server/snmptrapper/snmptrapper.h"
+@@ -407,6 +408,10 @@
+ #endif
+ 		{"Timeout",			&CONFIG_TIMEOUT,			TYPE_INT,
+ 			PARM_OPT,	1,			30},
++		{"SNMPTimeout",			&CONFIG_SNMP_TIMEOUT,			TYPE_INT,
++			PARM_OPT,	1,			30},
++		{"SNMPRetries",			&CONFIG_SNMP_RETRIES,			TYPE_INT,
++			PARM_OPT,	1,			10},
+ 		{"TrapperTimeout",		&CONFIG_TRAPPER_TIMEOUT,		TYPE_INT,
+ 			PARM_OPT,	1,			300},
+ 		{"UnreachablePeriod",		&CONFIG_UNREACHABLE_PERIOD,		TYPE_INT,
+diff -Naur src/zabbix_server/poller/checks_snmp.c new/zabbix_server/poller/checks_snmp.c
+--- src/zabbix_server/poller/checks_snmp.c	2013-11-12 13:16:49.000000000 +0600
++++ new/zabbix_server/poller/checks_snmp.c	2013-12-07 12:50:31.062073112 +0600
+@@ -33,6 +33,9 @@
+ }
+ zbx_snmp_index_t;
+ 
++int CONFIG_SNMP_TIMEOUT;
++int CONFIG_SNMP_RETRIES;
++
+ static zbx_snmp_index_t	*snmpidx = NULL;
+ static int		snmpidx_count = 0, snmpidx_alloc = 16;
+ 
+@@ -268,10 +271,10 @@
+ 			break;
+ 	}
+ 
+-	session.retries = 0;				/* number of retries after failed attempt */
+-							/* (net-snmp default = 5) */
+-	session.timeout = CONFIG_TIMEOUT * 1000 * 1000;	/* timeout of one attempt in microseconds */
+-							/* (net-snmp default = 1 second) */
++	session.retries = CONFIG_SNMP_RETRIES - 1;		/* number of retries after failed attempt */
++								/* (net-snmp default = 5) */
++	session.timeout = CONFIG_SNMP_TIMEOUT * 1000 * 1000;	/* timeout of one attempt in microseconds */
++								/* (net-snmp default = 1 second) */
+ 
+ #ifdef HAVE_IPV6
+ 	if (SUCCEED != get_address_family(item->interface.addr, &family, err, MAX_STRING_LEN))
+diff -Naur src/zabbix_server/poller/checks_snmp.h new/zabbix_server/poller/checks_snmp.h
+--- src/zabbix_server/poller/checks_snmp.h	2013-11-12 13:16:48.000000000 +0600
++++ new/zabbix_server/poller/checks_snmp.h	2013-12-07 12:50:31.062073112 +0600
+@@ -26,7 +26,8 @@
+ #include "sysinfo.h"
+ 
+ extern char	*CONFIG_SOURCE_IP;
+-extern int	CONFIG_TIMEOUT;
++extern int	CONFIG_SNMP_TIMEOUT;
++extern int	CONFIG_SNMP_RETRIES;
+ 
+ int	get_value_snmp(DC_ITEM *item, AGENT_RESULT *value);
+ 
+diff -Naur src/zabbix_server/server.c new/zabbix_server/server.c
+--- src/zabbix_server/server.c	2013-11-12 13:17:04.000000000 +0600
++++ new/zabbix_server/server.c	2013-12-07 13:29:22.605760996 +0600
+@@ -43,6 +43,7 @@
+ #include "housekeeper/housekeeper.h"
+ #include "pinger/pinger.h"
+ #include "poller/poller.h"
++#include "poller/checks_snmp.h"
+ #include "poller/checks_ipmi.h"
+ #include "timer/timer.h"
+ #include "trapper/trapper.h"
+@@ -360,6 +361,10 @@
+ #endif
+ 		{"Timeout",			&CONFIG_TIMEOUT,			TYPE_INT,
+ 			PARM_OPT,	1,			30},
++		{"SNMPTimeout",			&CONFIG_SNMP_TIMEOUT,			TYPE_INT,
++			PARM_OPT,	1,			30},
++		{"SNMPRetries",			&CONFIG_SNMP_RETRIES,			TYPE_INT,
++			PARM_OPT,	1,			10},
+ 		{"TrapperTimeout",		&CONFIG_TRAPPER_TIMEOUT,		TYPE_INT,
+ 			PARM_OPT,	1,			300},
+ 		{"UnreachablePeriod",		&CONFIG_UNREACHABLE_PERIOD,		TYPE_INT,

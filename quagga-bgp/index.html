@@ -1,0 +1,451 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="zebra,stretch,quagga,debian,linux,bgp" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2019-09-22 -->
+		<title>Настройка BGP в Quagga</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка BGP в Quagga</h1>
+
+		<p>Понадобилось на работе настроить динамическую маршрутизацию по протоколу BGP, чтобы сэкономить время на настройке статических маршрутов. Поэкспериментировал для начала на виртуальных машинах на домашнем компьютере, подготовил для себя шпаргалку. На работе настраивал свои серверы в паре с сетевым администратором, который со своей стороны настраивал аппаратные маршрутизаторы. (Данила, если ты это читаешь, то передаю тебе привет!) Когда работа была выполнена, дополнил шпаргалку несколькими полезными разделами.</p>
+
+		<p>Через пару месяцев понадобилось вернуться к настройке BGP по ещё двум поводам. Во-первых, на одной из виртуальных машин в целях резервирования анонсы нужно было принимать сразу от двух соседних маршрутизаторов. Во-вторых, понадобилось настроить сервер, который сам в целях резервирования должен быть доступен через два соседних маршрутизатора. Конфигурацию этого сервера проверил и дополнил другой сетевой администратор. (Андрей, тебе тоже привет!) В результате добавил в шпаргалку ещё несколько пунктов.</p>
+
+		<p>По обыкновению выбрасываю отработанный материал в <strike>мусорку</strike>блог.</p>
+
+		<h2>1. Установка пакетов</h2>
+
+		<p>Для установки демона маршрутизации Quagga с поддержкой одного лишь протокола BGP достаточно установить только один пакет:</p>
+
+		<pre class="console"># apt-get install quagga-bgpd</pre>
+
+		<p>Вместе с этим пакетом будет установлен также пакет quagga-core, в котором находится демон zebra. Демон zebra отвечает за добавление маршрутов, полученных от демонов динамической маршрутизации, в системную таблицу маршрутизации.</p>
+
+		<h2>2. Настройка демона zebra</h2>
+
+		<p>Демон zebra выполняет роль прослойки между операционной системой и демонами динамической маршрутизации. Демоны динамической маршрутизации выступают в роли клиентов демона zebra и пользуются его API.</p>
+
+		<p>Первоначальная настройка демона zebra проста, нужно создать файл конфигурации /etc/quagga/zebra.conf с содержимым следующего вида:</p>
+
+		<pre class="code">hostname &lt;hostname&gt;
+password &lt;password&gt;
+enable password &lt;secret_password&gt;</pre>
+
+		<p>После этого можно включать автозапуск демона при загрузке системы и запустить сам демон маршрутизации:</p>
+
+		<pre class="console"># systemctl enable zebra.service
+# systemctl start zebra.service</pre>
+
+		<p>Дальнейшее управление демоном, в том числе его конфигурирование, можно осуществлять при помощи команды telnet:</p>
+
+		<pre class="console">$ telnet 127.0.0.1 2601</pre>
+
+		<p>Через telent доступен интерфейс командной строки, похожий на интерфейс командной строки устройств Cisco. После изменения настроек не забывайте сохранять их при помощи команды write.</p>
+
+		<p>Я настраивал демона на двух тестовых виртуальных машинах с именами bgp1 и bgp2.</p>
+
+		<h2>3. Настройка демона bgpd</h2>
+
+		<p>Демон bgpd реализует поддержку протокола динамической маршрутизации BGP.</p>
+
+		<p>Для первоначальной настройки демона bgpd нужно создать файл /etc/quagga/bgpd.conf.</p>
+
+		<p>На первой виртуальной машине содержимое файла конфигурации было примерно таким:</p>
+
+		<pre class="code">hostname bgp1
+password &lt;password&gt;
+enable password &lt;secret_password&gt;
+!
+router bgp 64500
+ bgp router-id 169.254.252.6
+ network 169.254.253.0/24
+ network 169.254.254.0/24
+ neighbor 169.254.252.7 remote-as 64500</pre>
+
+		<p>Эта виртуальная машина лишь анонсирует две сети на вторую виртуальную машину. Номера автономных систем на обеих виртуальных машинах одинаковы и взяты из диапазона 64496-64511 для примеров и документации. Поскольку используются одинаковые номера автономных систем, то в нашем случае будет использоваться вариант протокола iBGP - внутренний протокол пограничных шлюзов.</p>
+
+		<p>На второй виртуальной машине содержимое файла конфигурации было примерно следующим:</p>
+
+		<pre class="code">hostname bgp2
+password &lt;password&gt;
+enable password &lt;secret_password&gt;
+!
+router bgp 64500
+ bgp router-id 169.254.252.7
+ neighbor 169.254.252.6 remote-as 64500</pre>
+
+		<p>Эта виртуальная машина не анонсировала своих сетей, зато принимала анонсы от первой.</p>
+
+		<p>После первоначальной настройки можно на обеих виртуальных машинах включить автозапуск демонов bgpd при загрузке системы и запустить их:</p>
+
+		<pre class="console"># systemctl enable bgpd.service
+# systemctl start bgpd.service</pre>
+
+		<p>Подобно демону zebra, управление и настройку демона bgpd можно осуществлять при помощи команды telnet:</p>
+
+		<pre class="console">$ telnet 127.0.0.1 2605</pre>
+
+		<p>Точно так же через telent доступен интерфейс командной строки, похожий на интерфейс командной строки устройств Cisco. После изменения настроек не забывайте сохранять их при помощи команды write.</p>
+
+		<h2>4. Белый список маршрутов</h2>
+
+		<p>Рассмотрим конфигурирование демона bgpd через telnet. Для примера настроим фильтрацию маршрутов на второй виртуальной машине. Для начала подключаемся через telnet:</p>
+
+		<pre class="console">$ telnet 127.0.0.1 2605
+Trying 127.0.0.1...
+Connected to 127.0.0.1.
+Escape character is '^]'.
+
+Hello, this is Quagga (version 1.1.1).
+Copyright 1996-2005 Kunihiro Ishiguro, et al.
+
+
+User Access Verification
+
+Password:</pre>
+
+		<p>Вводим пароль, который был указан в опции password.</p>
+
+		<p>Далее повышаем собственные привилегии при помощи команды enable. В ответ на запрос команды enable вводим пароль, который был указан в опции enable password.</p>
+
+		<pre class="console">bgp2&gt; enable
+Password: 
+bgp2#</pre>
+
+		<p>Далее переходим в режим настройки при помощи команды configure terminal:</p>
+
+		<pre class="console">bgp2# configure terminal 
+bgp2(config)#</pre>
+
+		<p>Настроим сначала список префиксов, который назовём PREFIX-LIST-FROM-BGP1:</p>
+
+		<pre class="console">bgp2(config)# ip prefix-list PREFIX-LIST-FROM-BGP1 seq 1 permit 169.254.254.0/24
+bgp2(config)# ip prefix-list PREFIX-LIST-FROM-BGP1 seq 2 permit 169.254.253.0/24
+bgp2(config)#</pre>
+
+		<p>Теперь создадим на основе этого списка префиксов маршрутную карту с именем MAP-FROM-BGP1:</p>
+
+		<pre class="console">bgp2(config) # route-map MAP-FROM-BGP1 permit 10
+bgp2(config-route-map)#</pre>
+
+		<p>Добавим в маршрутную карту список префиксов PREFIX-LIST-FROM-BGP1:</p>
+
+		<pre class="console">bgp2(config-route-map)# match ip address prefix-list PREFIX-LIST-FROM-BGP1
+bgp2(config-route-map)#</pre>
+
+		<p>И покинем диалог настройки маршрутной карты:</p>
+
+		<pre class="console">bgp2(config-route-map)# exit
+bgp2(config)#</pre>
+
+		<p>Осталось немного. Переходим в режим настройки протокола динамической маршрутизации bgp:</p>
+
+		<pre class="console">bgp2(config)# router bgp 64500
+bgp2(config-router)#</pre>
+
+		<p>Добавим созданную маршрутную карту для фильтрации маршрутов, получаемых от соседа:</p>
+
+		<pre class="console">bgp2(config-router)# neighbor 169.254.252.6 route-map MAP-FROM-BGP1 in
+bgp2(config-router)#</pre>
+
+		<p>Покидаем режим настройки bgp:</p>
+
+		<pre class="console">bgp2(config-router)# exit
+bgp2(config)#</pre>
+
+		<p>Сохраняем изменения конфигурации на диск:</p>
+
+		<pre class="console">bgp2(config)# write
+Configuration saved to /etc/quagga/bgpd.conf
+bgp2(config)#</pre>
+
+		<p>Осталось выйти из режима конфигурирования:</p>
+
+		<pre class="console">bgp2(config)# exit
+bgp2#</pre>
+
+		<p>В процессе настройки из любого режима можно проверять правильность каждой введённой команды, просматривая текущий файл конфигурации при помощи команды show running-config:</p>
+
+		<pre class="console">bgp2(config)# show running-config                          
+
+Current configuration:
+!
+hostname bgp2
+password &lt;password&gt;
+enable password &lt;secret_password&gt;
+!
+router bgp 64500
+ bgp router-id 169.254.252.7
+ neighbor 169.254.252.6 remote-as 64500
+ neighbor 169.254.252.6 route-map MAP-FROM-BGP1 in
+!
+ address-family ipv6
+ exit-address-family
+ exit
+!
+ip prefix-list PREFIX-LIST-FROM-BGP1 seq 1 permit 169.254.254.0/24
+ip prefix-list PREFIX-LIST-FROM-BGP1 seq 2 permit 169.254.253.0/24
+!
+route-map MAP-FROM-BGP1 permit 10
+ match ip address prefix-list PREFIX-LIST-FROM-BGP1
+!
+line vty
+!
+end</pre>
+
+		<p>Чтобы посмотреть текущую таблицу маршрутов, можно воспользоваться командой show ip bgp:</p>
+
+		<pre class="console">bgp2# show ip bgp 
+BGP table version is 0, local router ID is 169.254.252.7
+Status codes: s suppressed, d damped, h history, * valid, &gt; best, = multipath,
+              i internal, r RIB-failure, S Stale, R Removed
+Origin codes: i - IGP, e - EGP, ? - incomplete
+
+   Network          Next Hop            Metric LocPrf Weight Path
+*&gt;i169.254.253.0/24 169.254.252.6            0     100       0 i
+*&gt;i169.254.254.0/24 169.254.252.6            0     100       0 i
+
+Displayed  2 out of 2 total prefixes</pre>
+
+		<p>Если нужно применить новый или изменённый фильтр к уже принятым маршрутам, можно воспользоваться командой clear ip bgp такого вида:</p>
+
+		<pre class="console">bgp2# clear ip bgp 169.254.252.6 soft in
+bgp2#</pre>
+
+		<p>После этого все маршруты, не разрешённые маршрутной картой явным образом, должны пропасть из списка текущих маршрутов.</p>
+
+		<h2>5. Чёрный список маршрутов</h2>
+
+		<p>Цель настройки динамической маршрутизации заключается в том, чтобы перестать добавлять статические маршруты в систему вручную. Однако, если вместо этого придётся добавлять те же самые маршруты в белый список, то ручной работы не станет меньше. В большинстве случаев достаточно просто принимать все маршруты безо всякой фильтрации, но иногда может понадобиться не принимать маршруты до отдельных сетей. В таком случае поможет чёрный список маршрутов.</p>
+
+		<p>Не буду повторять предыдущий раздел, а расскажу кратко. Поскольку логика фильтрации обратная - нужно отбрасывать маршруты из списка, а не принимать их, то в маршрутной карте действие permit заменяется на deny:</p>
+
+		<pre class="console">bgp2(config)# route-map MAP-FROM-BGP1 deny 10
+bgp2(config-route-map)# match ip address prefix-list PREFIX-LIST-FROM-BGP1
+bgp2(config-route-map)# exit
+bgp2(config)#</pre>
+
+		<p>В списке префиксов действия permit не меняется. Чтобы отбросить анонсы сети 169.254.254.0/24, нужно поместить в список одну запись:</p>
+
+		<pre class="console">bgp2(config)# ip prefix-list PREFIX-LIST-FROM-BGP1 seq 1 permit 169.254.254.0/24
+bgp2(config)#</pre>
+
+		<p>Также может потребоваться не принимать анонсы маршрутов не только с точно совпадающим префиксом, но и анонсы маршрутов ко всем сетям, находящимся внутри указанной. Сделать это можно следующим образом:</p>
+
+		<pre class="console">bgp2(config)# ip prefix-list PREFIX-LIST-FROM-BGP1 seq 2 permit 169.254.253.0/24 le 32
+bgp2(config)#</pre>
+
+		<p>Выражение "le 32" означает, что условию удовлетворяют не только сети с префиксом 169.254.253.0/24, но и со всеми префиксами с длиной меньше 32 или равными 32. Например, если маршрутизатор BGP1 будет анонсировать маршруты к сетям 169.254.253.0/25 и 169.254.253.128/26, то оба анонса будут отброшены маршрутной картой.</p>
+
+		<h2>6. Фильтрация исходящих анонсов</h2>
+
+		<p>Сетевые администраторы рекомендуют создавать маршрутную карту не только для принимаемых маршрутов, но и для анонсируемых. Двойная защита позволяет застраховаться от непредусмотренных ошибок, допущенных при конфигурации одного из узлов.</p>
+
+		<p>Делается это аналогично фильтрации принимаемых маршрутов, с той лишь разницей, что ключевое слово in нужно заменить на out и прописать имя соответствующей маршрутной карты:</p>
+
+		<pre class="console">bgp2(config)# router bgp 64500
+bgp2(config-router)# neighbor 169.254.252.6 route-map MAP-TO-BGP1 out
+bgp2(config-router)# exit
+bgp2(config)#</pre>
+
+		<p>Если маршрутизатор должен только принимать анонсы, то такая маршрутная карта будет выглядеть следующим образом:</p>
+
+		<pre class="console">bgp2(config)# route-map MAP-TO-BGP1 deny 10
+bgp2(config-router)# exit
+bgp2(config)#</pre>
+
+		<h2>7. Применение политик без разрыва сеансов BGP</h2>
+
+		<p>При изменении маршрутных карт и списков префиксов, чтобы новые политики фильтрации вступали в силу, нужно выполнять команду следующего вида:</p>
+
+		<pre class="console">bgp2# clear ip bgp 169.254.252.6 soft in
+bgp2#</pre>
+
+		<p>Эта команда разрывает сеанс BGP с соседним маршрутизатором и устанавливает его заново. При этом соседний маршрутизатор вновь анонсирует весь список маршрутов, который и подвергается фильтрации.</p>
+
+		<p>Чтобы не разрывать сеансы BGP только лишь для того, чтобы применить новые политики фильтрации маршрутов, сетевые администраторы рекомендуют включить для соседа режим мягкой переконфигурации:</p>
+
+		<pre class="console">bgp2(config)# router bgp 64500
+bgp2(config-router)# neighbor 169.254.252.6 soft-reconfiguration inbound
+bgp2(config-router)# exit
+bgp2(config)#</pre>
+
+		<p>В этом режиме сеанс BGP с соседним маршрутизатором не разрывается, а фильтрация применяется к уже принятому ранее списку маршрутов.</p>
+
+		<h2>8. Описание соседей</h2>
+
+		<p>Даже если в конфигурации BGP описан только один соседний маршрутизатор, лучше снабдить его описанием, чтобы в дальнейшем не приходилось ориентироваться только на IP-адреса и номера автономных систем. Сделать это можно следующим образом:</p>
+
+		<pre class="console">bgp2(config)# router bgp 64500
+bgp2(config-router)# neighbor 169.254.252.6 description bgp1
+bgp2(config-router)# exit
+bgp2(config)#</pre>
+
+		<h2>9. Группировка настроек соседей</h2>
+
+		<p>Рассмотрим случай, когда необходимо настроить соседство с двумя маршрутизаторами, настройки которых в целом должны быть идентичны. В примере ниже маршрутизатор с именем bgp3 и IP-адресом 169.254.252.10 соседствует с маршрутизаторами bgp1 и bgp2, имеющими IP-адреса 169.254.252.5 и 169.254.252.6 соответственно:</p>
+
+		<pre class="code">hostname bgp3
+password &lt;password&gt;
+enable password &lt;secret_password&gt;
+!
+router bgp 64500
+ bgp router-id 169.254.252.10
+ neighbor 169.254.252.5 remote-as 64500
+ neighbor 169.254.252.5 route-map PREFIX-LIST-FROM-BGP1 in
+ neighbor 169.254.252.5 soft-reconfiguration inbound
+ neighbor 169.254.252.5 description bgp1.stupin.su
+ neighbor 169.254.252.6 remote-as 64500
+ neighbor 169.254.252.6 route-map PREFIX-LIST-FROM-BGP2 in
+ neighbor 169.254.252.6 soft-reconfiguration inbound
+ neighbor 169.254.252.6 description bgp2.stupin.su
+!
+ip prefix-list PREFIX-LIST-FROM-BGP1 seq 1 permit 169.254.254.0/24
+ip prefix-list PREFIX-LIST-FROM-BGP1 seq 2 permit 169.254.253.0/24
+!
+ip prefix-list PREFIX-LIST-FROM-BGP2 seq 1 permit 169.254.254.0/24
+ip prefix-list PREFIX-LIST-FROM-BGP2 seq 2 permit 169.254.253.0/24
+!
+route-map MAP-FROM-BGP1 permit 10
+ match ip address prefix-list PREFIX-LIST-FROM-BGP1
+!
+route-map MAP-FROM-BGP2 permit 10
+ match ip address prefix-list PREFIX-LIST-FROM-BGP2</pre>
+
+		<p>Настройки соседей по замыслу должны быть идентичными, но из приведённой выше конфигурации это не очевидно. Если конфигурацию будет читать другой системный администратор, то ему во-первых придётся прочитать довольно много, во-вторых первоначальный замысел может оказаться для него не очевидным. Он может изменить настройки одного из соседей, но забыть поправить подобным образом настройки второго соседа.</p>
+
+		<p>Первое, что приходит в голову - это объединить списки префиксов и маршрутные карты:</p>
+
+		<pre class="code">hostname bgp3
+password &lt;password&gt;
+enable password &lt;secret_password&gt;
+!
+router bgp 64500
+ bgp router-id 169.254.252.10
+ neighbor 169.254.252.5 remote-as 64500
+ neighbor 169.254.252.5 route-map PREFIX-LIST-FROM-BGP1_2 in
+ neighbor 169.254.252.5 soft-reconfiguration inbound
+ neighbor 169.254.252.5 description bgp1.stupin.su
+ neighbor 169.254.252.6 remote-as 64500
+ neighbor 169.254.252.6 route-map PREFIX-LIST-FROM-BGP1_2 in
+ neighbor 169.254.252.6 soft-reconfiguration inbound
+ neighbor 169.254.252.6 description bgp2.stupin.su
+!
+ip prefix-list PREFIX-LIST-FROM-BGP1_2 seq 1 permit 169.254.254.0/24
+ip prefix-list PREFIX-LIST-FROM-BGP1_2 seq 2 permit 169.254.253.0/24
+!
+route-map MAP-FROM-BGP1_2 permit 10
+ match ip address prefix-list PREFIX-LIST-FROM-BGP1_2</pre>
+
+		<p>Конфигурация стала короче, замысел стал более понятным, но всё ещё есть возможность поменять настройки одного маршрутизатора, не меняя настройки второго. Настройки соседей можно сгруппировать:</p>
+
+		<pre class="code">hostname bgp3
+password &lt;password&gt;
+enable password &lt;secret_password&gt;
+!
+router bgp 64500
+ bgp router-id 169.254.252.10
+ neighbor NEIGHBORS-BGP1_2 peer-group
+ neighbor NEIGHBORS-BGP1_2 remote-as 64500
+ neighbor NEIGHBORS-BGP1_2 route-map PREFIX-LIST-FROM-BGP1_2 in
+ neighbor NEIGHBORS-BGP1_2 soft-reconfiguration inbound
+ neighbor 169.254.252.5 peer-group NEIGHBORS-BGP1_2
+ neighbor 169.254.252.5 description bgp1.stupin.su
+ neighbor 169.254.252.6 peer-group NEIGHBORS-BGP1_2
+ neighbor 169.254.252.6 description bgp2.stupin.su
+!
+ip prefix-list PREFIX-LIST-FROM-BGP1_2 seq 1 permit 169.254.254.0/24
+ip prefix-list PREFIX-LIST-FROM-BGP1_2 seq 2 permit 169.254.253.0/24
+!
+route-map MAP-FROM-BGP1_2 permit 10
+ match ip address prefix-list PREFIX-LIST-FROM-BGP1_2</pre>
+
+		<p>Теперь оба соседа состоят в одной группе и их настройки объединены, так что будут меняться только одновременно, если специально не отделить их друг от друга. Получившийся файл конфигурации стал короче и нагляднее.</p>
+
+		<h2>10. Ограничение доступа к терминалу</h2>
+
+		<p>Т.к. для настройки демонов zebra и bpgd используется протокол telnet, то я бы не стал делать его доступным через внешние интерфейсы сервера. Трафик в telnet не шифруется, а если кому-то нужно поправить настройки, то пусть лучше зайдёт сначала на сервер по SSH, а потом уже подключается к терминалу zebra или quagga локально. Если бы мне пришла в голову мысль сделать терминал доступным на внешних интерфейсах, то я открыл доступ в пакетном фильтре только для необходимых IP-адресов. Тем не менее, параноики исходят из справедливости принципа Мерфи, поэтому стремятся защититься даже от тех ситуаций, которые кажутся почти невероятными. Мне порекомендовали защитить доступ к терминалу управления списками управления доступом, вот так:</p>
+
+		<pre class="code">access-list TERMINAL permit 127.0.0.1/32
+access-list TERMINAL deny any
+!
+line vty
+ access-class TERMINAL</pre>
+
+		<h2>11. Анонсирование адреса Loopback-интерфейса</h2>
+
+		<p>Если BGP настраивается на сервере для того, чтобы сервер был доступен через два маршрутизатора, то IP-адрес сервера, анонсируемый соседям по протоколу BGP, настраивается не на физическом интерфейсе, а на так называемом <a href="https://ru.wikipedia.org/wiki/Loopback#%D0%A1%D0%B5%D1%82%D0%B5%D0%B2%D0%BE%D0%B5_%D0%BE%D0%B1%D0%BE%D1%80%D1%83%D0%B4%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D0%B5">Loopback-интерфейсе</a>.</p>
+
+		<p>В Debian я не нашёл способа создать отдельный петлевой интерфейс, поэтому анонсируемый IP-адрес можно добавить на один-единственный петлевой интерфейс lo в качестве дополнительного IP-адреса. Сделать это можно при помощи команды следующего вида:</p>
+
+		<pre class="console"># ip addr add 169.254.251.1/32 dev lo</pre>
+
+		<p>Чтобы дополнительный IP-адрес назначался интерфейсу lo при перезагрузке сервера, нужно в файле /etc/network/interfaces прописать аналогичные настройки:</p>
+
+		<pre class="code">auto lo:1
+iface lo:1 inet static
+  address 169.254.251.1
+  netmask 255.255.255.255</pre>
+
+		<p>После этого нужно:</p>
+
+		<ol>
+			<li>настроить демона, который реализует необходимый сервис, так чтобы он принимал входящие подключения только на этот IP-адрес,</li>
+
+			<li>разрешить соответствующий трафик в пакетном фильтре,</li>
+
+			<li>добавить IP-адрес в конфигурацию демона bgpd.</li>
+		</ol>
+
+		<p>При выполнении последнего пункта стоит учесть правила хорошего тона и создать отдельную маршрутную карту на исходящие анонсы, которая будет разрешать демону bgpd анонсировать соседям только этот IP-адрес. Например, если сервер должен принимать от маршрутизаторов только маршруты по умолчанию, а анонсировать в их сторону только Loopback-адрес 169.254.251.1, то конфигурация может выглядеть следующим образом:</p>
+
+		<pre class="code">hostname server
+password &lt;password&gt;
+enable password &lt;secret_password&gt;
+!
+router bgp 64500
+ bgp router-id 169.254.251.1
+ network 169.254.251.1/32
+ neighbor NEIGHBORS-BGP1_2 peer-group
+ neighbor NEIGHBORS-BGP1_2 remote-as 64500
+ neighbor NEIGHBORS-BGP1_2 route-map PREFIX-LIST-FROM-BGP1_2 in
+ neighbor NEIGHBORS-BGP1_2 route-map PREFIX-LIST-TO-BGP1_2 in
+ neighbor NEIGHBORS-BGP1_2 soft-reconfiguration inbound
+ neighbor 169.254.252.5 peer-group NEIGHBORS-BGP1_2
+ neighbor 169.254.252.5 description bgp1.stupin.su
+ neighbor 169.254.252.6 peer-group NEIGHBORS-BGP1_2
+ neighbor 169.254.252.6 description bgp2.stupin.su
+!
+ip prefix-list PREFIX-LIST-FROM-BGP1_2 seq 1 permit 0.0.0.0/0
+ip prefix-list PREFIX-LIST-TO-BGP1_2 seq 1 permit 169.254.251.1/32
+!
+route-map MAP-FROM-BGP1_2 permit 10
+ match ip address prefix-list PREFIX-LIST-FROM-BGP1_2
+!
+route-map MAP-TO-BGP1_2 permit 10
+ match ip address prefix-list PREFIX-LIST-TO-BGP1_2</pre>
+
+		<p>На случай, если демон bgpd аварийно завершится, можно добавить в демоне zebra статический маршрут по умолчанию с низким приоритетом через одного из соседей:</p>
+
+		<pre class="code">ip route 0.0.0.0/0 169.254.252.5 250</pre>
+
+		<h2>12. Использованные материалы</h2>
+
+		<ul>
+			<li><a href="https://www.opennet.ru/base/cisco/bgp_zebra.txt.html">Настройка и тестирование протокола BGP с пакетом Quagga (zebra)</a></li>
+
+			<li><a href="https://ru.wikipedia.org/wiki/%D0%90%D0%B2%D1%82%D0%BE%D0%BD%D0%BE%D0%BC%D0%BD%D0%B0%D1%8F_%D1%81%D0%B8%D1%81%D1%82%D0%B5%D0%BC%D0%B0_(%D0%98%D0%BD%D1%82%D0%B5%D1%80%D0%BD%D0%B5%D1%82)">Автономная система (Интернет)</a></li>
+
+			<li>Помощь зала, звонок другу и 50/50</li>
+		</ul>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка BGP в Quagga">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

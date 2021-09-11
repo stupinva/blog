@@ -1,0 +1,52 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="python,перевод,flask" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-05-12 -->
+		<title>Армин Роначер. Расширения Flask, 2012</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Армин Роначер. Расширения Flask, 2012</h1>
+
+		<p>Перевод статьи: <a href="http://flask.pocoo.org/docs/extensions/">Flask Extensions</a></p>
+
+		<p>Автор: Армин Роначер (Armin Ronacher)</p>
+
+		<p>Расширения Flask различным образом расширяют функциональность Flask. Например, добавляют поддержку баз данных и т.п.</p>
+
+		<h2>1. Поиск расширений</h2>
+
+		<p>Расширения Flask перечислены в <a href="http://flask.pocoo.org/extensions/">реестре расширений Flask</a> и могут быть скачаны при помощи easy_install или pip. Если добавить расширение  Flask в качестве зависимости в файл requirements.rst или setup.py, то обычно их можно установить с помощью простой команды или при установке приложения.</p>
+
+		<h2>2. Использование расширений</h2>
+
+		<p>Обычно расширения снабжены документацией, которая объясняет как их использовать. Нет общих правил обращения с расширениями, но их можно импортировать из обычных мест. Если у вас имеется расширение под названием Flask-Foo или Foo-Flask, в любом случае его можно импортировать из flask.ext.foo:</p>
+
+		<pre class="code">from flask.ext import foo</pre>
+
+		<b>Flask до версии 0.8</b>
+
+		<p>Во Flask версии 0.7 и более ранних пакет flask.ext отсутствует, а вместо него можно импортировать расширение из flaskext.foo или flask_foo, в зависимости от способа поставки расширения. Если вы хотите разрабатывать приложения, поддерживающие Flask 0.7 и более ранние, импортировать всё равно нужно из пакета flask.ext. Есть модуль, предоставляющий этот пакет и позволяющий достичь совместимости со старыми версиями Flask. Его можно скачать с github: <a href="https://github.com/mitsuhiko/flask/raw/master/scripts/flaskext_compat.py">flaskext_compat.py</a></p>
+
+		<p>Вот пример его использования:</p>
+
+		<pre class="code">import flaskext_compat
+
+flaskext_compat.activate()
+from flask.ext import foo</pre>
+
+		<p>После активации модуля flaskext_compat появится flask.ext из которого можно импортировать расширения.</p>
+
+		<h2>3. Примечания переводчика</h2>
+
+		<p><a href="https://flask-russian-docs.readthedocs.org/ru/latest/extensions.html">Этот</a> и другие переводы можно найти на <a href="https://flask-russian-docs.readthedocs.org/">сайте проекта перевода документации по Flask</a>. Автор проекта - Виталий Кузьмин aka ferm32.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Армин Роначер. Расширения Flask, 2012">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

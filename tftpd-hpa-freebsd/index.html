@@ -1,0 +1,50 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="tftp,8.2,freebsd" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2016-01-31 -->
+		<title>Настройка TFTP-сервера tftpd-hpa во FreeBSD</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка TFTP-сервера tftpd-hpa во FreeBSD</h1>
+
+		<p>Ранее я уже делал краткую заметку о том, как <a href="../tftpd-hpa/">установить и настроить TFTP-сервер tftpd-hpa в Debian Wheezy</a>. Во FreeBSD подобная конфигурация настраивается аналогично. На всякий случай решил её зафиксировать тут, чтобы потом было на что сослаться (есть высокая вероятность, что сослаться неожиданно понадобится).</p>
+
+		<p>Если ранее на компьютере использовался TFTP-демон, запускаемый демоном inetd, отключим его в файле /etc/inetd.conf, закоментировав строчки, начинающиеся с tftp. Перезапускаем демона inetd:</p>
+
+		<pre class="console"># /etc/rc.d/inetd restart</pre>
+
+		<p>Установим нового TFTP-демона из порта:</p>
+
+		<pre class="console"># cd /usr/ports/ftp/tftp-hpa
+# make install</pre>
+
+		<p>Включаем и настраиваем установленный TFTP-демон в файле /etc/rc.conf:</p>
+
+		<pre class="code">tftpd_enable="YES"
+tftpd_flags="--ipv4 --secure --create --user tftp --umask 027 --permissive --address 0.0.0.0:69 /var/tftp"</pre>
+
+		<p>Создаём группу и пользователя, от имени которых будет рабоатать TFTP-демон:</p>
+
+		<pre class="console"># pw group add tftp
+# pw user add tftp -c 'TFTPd user' -d /var/tftp -g tftp -M 0750 -s /bin/nologin</pre>
+
+		<p>Содаём каталог для файлов TFTP-демона, выставляем права доступа:</p>
+
+		<pre class="console"># mkdir /var/tftp
+# chown tftp:tftp /var/tftp
+# chmod u=rwx,g=rx,o= /var/tftp</pre>
+
+		<p>Запускаем TFTP-демона:</p>
+
+		<pre class="console"># /usr/local/etc/rc.d/tftpd start</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка TFTP-сервера tftpd-hpa во FreeBSD">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

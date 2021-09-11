@@ -1,0 +1,83 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="patch,python,Debian,linux,wheezy,troubleshooting,snmp" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2016-02-07 -->
+		<title>Исправление Python-прослойки библиотеки Net-SNMP</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Исправление Python-прослойки библиотеки Net-SNMP</h1>
+
+		<p>Заметка, ссылка на которую мне может в дальнейшем понадобиться.</p>
+
+		<p>Из всех SNMP-модулей Python для работы с SNMP наименьшей гадостью мне показалась официальная прослойка библиотеки Net-SNMP для Python. Её разработчики не так прониклись Java-подходом, как разработчики библиотеки pysnmp, воспользоваться которой невозможно без написания трёхэтажного кода с использованием всех фабрик классов, прокси-классов и преобразования типов, родных для Python, в классы, используемые библиотекой. Библиотека pysnmp выглядит в Python совершенно чужеродно, потребляет мнго ресурсов и плохо документирована.</p>
+
+		<p>Прослойка библиотеки Net-SNMP для Python выглядит очень куцей, однако для моих нужд её оказывалось достаточно, пока я не попробовал с её помощью инициировать резервное копирование коммутатора. Оказалось, что в ней неправильно реализовано преобразование параметров типа IPADDR в запросах SNMP SET. Официальный патч в тот момент я не нашёл и решил попробовать исправить библиотеку самостоятельно, что мне и удалось. Официальный патч можно найти тут: <a href="http://sourceforge.net/p/net-snmp/code/ci/1bc799de6cab010b25c0c4d3f5155b5fbaf527f0/">Python bindings: Fix the out-of-bounds write</a>. Я же подготовил свой патч, использование которого будет описано ниже.</p>
+
+		<p>Скачиваем патч:</p>
+
+		<pre class="console">$ wget <a href="netsnmp543_python_client.patch">netsnmp543_python_client.patch</a></pre>
+
+		<p>Скачиваем и распаковываем в текущий каталог исходные тексты пакета:</p>
+
+		<pre class="console"># apt-get source libsnmp-python</pre>
+
+		<p>Скачиваем и устанавливаем зависимости, необходимые для сборки пакета:</p>
+
+		<pre class="console"># apt-get build-dep net-snmp</pre>
+
+		<p>Скачиваем и устанавливаем инструменты для сборки:</p>
+
+		<pre class="console"># apt-get install dpkg-dev
+# apt-get install fakeroot
+# apt-get install devscripts</pre>
+
+		<p>Переходим в каталог с исходными текстами пакета и накладываем патч:</p>
+
+		<pre class="console"># cd net-snmp-5.4.3~dfsg/
+# patch -Np0 --ignore-whitespace &lt; ../netsnmp543_python_client.patch</pre>
+
+		<p>Добавим наш патч в будущий пакет:</p>
+
+		<pre class="console"># dpkg-source --commit</pre>
+
+		<p>Укажем имя патча snmp_set_fixed. В окне редактирования информации о патче введём что-нибудь подобное следующему (вплоть до двух нижних строчек, с которых начинается сам текст патча):</p>
+
+		<pre class="code">Description: Fixed snmp set operation in python-snmp
+Fixed snmp set operation in python-snmp
+ .
+ net-snmp (5.4.3~dfsg-2.8+deb7u1) stable-proposed-updates; urgency=medium
+ .
+--- net-snmp-5.4.3~dfsg.orig/python/netsnmp/client_intf.c
++++ net-snmp-5.4.3~dfsg/python/netsnmp/client_intf.c</pre>
+
+		<p>Теперь отметим изменения, внесённые в пакет:</p>
+
+		<pre class="console"># dch -i</pre>
+
+		<p>В окне редактирования введём информацию о нашей версии пакета:</p>
+
+		<pre class="code">net-snmp (5.4.3~dfsg-2.8+deb7ufanet) UNRELEASED; urgency=low
+
+  * Fixed snmp set in libsnmp-python
+
+ -- Vladimir Stupin &lt;vladimir@stupin.su&gt;  Thu, 21 Jan 2016 16:58:40 +0500</pre>
+
+		<p>Осталось собрать пакет:</p>
+
+		<pre class="console"># dpkg-buildpackage -us -uc -rfakeroot</pre>
+
+		<p>Теперь его можно установить в систему:</p>
+
+		<pre class="console"># cd ..
+# dpkg -i libsnmp-python_5.4.3~dfsg-2.8+deb7u1_amd64.deb</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Исправление Python-прослойки библиотеки Net-SNMP">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

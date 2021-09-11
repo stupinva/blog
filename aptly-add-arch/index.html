@@ -1,0 +1,64 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="stretch,apt,debian,linux,aptly" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2019-11-24 -->
+		<title>Добавление в репозиторий aptly пакетов новой архитектуры</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Добавление в репозиторий aptly пакетов новой архитектуры</h1>
+
+		<p>Ещё одна микрозаметка. Не так давно я уже писал об aplty - утилите для управления репозиториями пакетов Debian: <a href="../aptly/">Создание своего репозитория Debian при помощи aptly</a>.</p>
+
+		<p>По какой-то причине aptly не добавляет в индекс пакеты тех архитектур, которые отсутствовали в репозитории на момент первичной публикации репозитория. Если в опубликованный репозиторий нужно добавить пакеты новой архитектуры, понадобится удалить существующую публикацию и создать новую публикацию, указав необходимые архитектуры пакетов.</p>
+
+		<p>Удаляем существующую публикацию репозитория с именем stretch в каталоге repo:</p>
+
+		<pre class="console">$ aptly publish drop stretch repo
+Removing /home/stupin/.aptly/public/repo/dists/stretch...
+Cleaning up prefix "repo" components main...
+
+Published repository has been removed successfully.</pre>
+
+		<p>Публикуем репозиторий на том же месте снова, указывая явным образом список публикуемых архитектур пакетов:</p>
+
+		<pre class="console">$ aptly publish repo -architectures="amd64,armhf,sources" -skip-signing=true stretch repo
+Loading packages...
+Generating metadata files and linking package files...
+Finalizing metadata files...
+
+Local repo stretch has been successfully published.
+Please setup your webserver to serve directory '/home/stupin/.aptly/public' with autoindexing.
+Now you can add following line to apt sources:
+  deb http://your-server/repo/ stretch main
+Don't forget to add your GPG key to apt with apt-key.
+
+You can also use `aptly serve` to publish your repositories over HTTP quickly.</pre>
+
+		<p>При дальнейших обновлениях уже опубликованного репозитория все архитектуры, указанные при его первичной публикации, будут обрабатываться обычным образом:</p>
+
+		<pre class="console">$ aptly publish update -skip-signing=true stretch repo
+Loading packages...
+Generating metadata files and linking package files...
+Finalizing metadata files...
+Cleaning up prefix "repo" components main...
+
+Publish for local repo repo/stretch [amd64, armhf, sources] publishes {main: [stretch]} has been successfully updated.</pre>
+
+		<p>Посмотреть список архитектур пакетов в уже опубликованных репозиториях можно следующим образом:</p>
+
+		<pre class="console">$ aptly publish list
+Published repositories:
+  * repo/buster [amd64, source] publishes {main: [buster]}
+  * repo/stretch [amd64, armhf, sources] publishes {main: [stretch]}
+  * repo/wheezy [amd64, source] publishes {main: [wheezy]}</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Добавление в репозиторий aptly пакетов новой архитектуры">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

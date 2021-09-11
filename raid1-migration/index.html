@@ -1,0 +1,141 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="raid1,grub2,mdadm,debian,md" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-10-13 -->
+		<title>Перевод работающей системы Debian на RAID 1</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Перевод работающей системы Debian на RAID 1</h1>
+
+		<h2>1. Задача</h2>
+
+		<p>Есть система, установленная на один диск. В систему установлен пустой диск такого же размера. Необходимо настроить зеркалирование разделов диска при помощи подсистемы md. В моём случае разбивка диска была следующей: /dev/sda2 - раздел подкачки, /dev/sda3 - корневой раздел, /dev/sda4 - раздел /home/.</p>
+
+		<h2>2. Клонирование имеющейся системы на деградированный RAID 1</h2>
+
+		<p>Для начала, скопируем на новый диск таблицу разделов с имеющегося:</p>
+
+		<pre class="console"># sfdisk -d /dev/sda | sfdisk /dev/sdb</pre>
+
+		<p>Теперь выставим у каждого раздела, который будет зеркалироваться тип Linux raid autodetect (в моём случае это разделы 3 и 4) и запишем изменения на диск:</p>
+
+		<pre class="console"># fdisk /dev/sdb
+Command (m for help): <b style="color: green;">t</b>
+Partition number (2-4): <b style="color: green;">3</b>
+Hex code (type L to list codes): <b style="color: green;">fd</b>
+
+Command (m for help): <b style="color: green;">t</b>
+Partition number (2-4): <b style="color: green;">4</b>
+Hex code (type L to list codes): <b style="color: green;">fd</b>
+
+Command (m for help): <b style="color: green;">w</b></pre>
+
+		<p>На новом диске создадим деградированные разделы RAID 1, то есть разделы, в которых зеркальная пара отсутствует:</p>
+
+		<pre class="console"># mdadm --create /dev/md3 -l1 -n2 missing /dev/sdb3
+# mdadm --create /dev/md4 -l1 -n2 missing /dev/sdb4</pre>
+
+		<p>Можно заглянуть в файл /proc/mdstat, чтобы увидеть, что разделы RAID 1 созданы и в них отсутствует зеркальная пара.</p>
+
+		<p>Теперь нужно разметить разделы дисков (раздел для подкачки объединять в RAID 1 я не стану, а буду использовать его как дополнение к первому):</p>
+
+		<pre class="console"># mkswap /dev/sdb2
+# mkfs.ext4 /dev/md3
+# mkfs.ext4 /dev/md4</pre>
+
+		<p>Теперь создадим точки монтирования для разделов и смонтируем их:</p>
+
+		<pre class="console"># mkdir /mnt/root
+# mkdir /mnt/home
+# mount /dev/md3 /mnt/root
+# mount /dev/md4 /mnt/home</pre>
+
+		<p>Теперь нужно скопировать содержимое разделов с работающей системы. Для этого я воспользуюсь rsync, запущенным от пользователя root, что позволит скопировать права доступа и владельцев всех файлов и каталогов:</p>
+
+		<pre class="console"># rsync -avvx --delete / /mnt/root/
+# rsync -avvx --delete /home/ /mnt/home/</pre>
+
+		<p>Теперь отредактируем файл /etc/fstab на копии корневого раздела. Для этого сначала узнаем идентификаторы раздела подкачки, корневого раздела и домашнего раздела, а затем пропишем их в файл /mnt/root/etc/fstab:</p>
+
+		<pre class="console"># blkid /dev/sdb2
+# blkid /dev/md3
+# blkid /dev/md4
+# vi /mnt/root/etc/fstab</pre>
+
+		<p>Обновим таблицу разделов md на новом диске:</p>
+
+		<pre class="console"># mdadm --detail --scan &gt; /mnt/root/etc/mdadm/mdadm.conf</pre>
+
+		<p>Теперь пришло время установить на новый диск GRUB и обновить загрузочный образ initrd, чтобы в нём были модули ядра, необходимые для работы с разделами RAID. Для этого сначала смонтируем в новый корневой раздел необходимые виртуальные файловые системы:</p>
+
+		<pre class="console"># mount --bind /dev /mnt/root/dev
+# mount --bind /sys /mnt/root/sys
+# mount --bind /proc /mnt/root/proc</pre>
+
+		<p>Сделаем корнем корневую файловую систему нового диска:</p>
+
+		<pre class="console"># chroot /mnt/root</pre>
+
+		<p>Смотрим идентификаторы дисков:</p>
+
+		<pre class="console"># ls /dev/disk/by-id/</pre>
+
+		<p>Прописываем идентификатор нового диска в файл /boot/grub/device.map:</p>
+
+		<pre class="console"># vim /boot/grub/device.map</pre>
+
+		<p>И устанавливаем GRUB (обратите внимание на то, что загрузочный сектор записывается на сам новый диск, а установка осуществляется в корневой раздел RAID 1):</p>
+
+		<pre class="console"># grub-install /dev/sdb
+# update-grub</pre>
+
+		<p>Обновим загрузочный образ initrd. Для этого сначала в файл /etc/initramfs-tools/modules дописываем модуль raid1, а затем обновляем загрузочные образы:</p>
+
+		<pre class="console"># vi /etc/initramfs-tools/modules
+# update-initramfs -u -k all</pre>
+
+		<p>Теперь можно попробовать перезагрузить систему, выбрав в BIOS загрузку со нового диска, на котором размечены разделы RAID 1.</p>
+
+		<h2>3. Добавление исходного диска во вновь созданный RAID 1</h2>
+
+		<p>Если система загрузилась, осталось только изменить типы разделов на старом диске и включить его разделы массивы RAID 1:</p>
+
+		<pre class="console"># fdisk /dev/sda
+Command (m for help): <b style="color: green;">t</b>
+Partition number (2-4): <b style="color: green;">3</b>
+Hex code (type L to list codes): <b style="color: green;">fd</b>
+
+Command (m for help): <b style="color: green;">t</b>
+Partition number (2-4): <b style="color: green;">4</b>
+Hex code (type L to list codes): <b style="color: green;">fd</b>
+
+Command (m for help): <b style="color: green;">w</b>
+# mdadm --add /dev/md3 -a /dev/sda3
+# mdadm --add /dev/md4 -a /dev/sda4</pre>
+
+		<p>В файле /proc/mdstat можно наблюдать за процессом синхронизации разделов-половинок RAID 1.</p>
+
+		<p>Теперь переустановим GRUB на первом диске, чтобы в случае отказа второго, систему можно было загрузить с первого диска:</p>
+
+		<pre class="console"># grub-install /dev/sda</pre>
+
+		<p>Не забудьте проверить, что с первого диска тоже можно загрузить систему, перезагрузив её снова и выбрав в BIOS загрузку с первого диска.</p>
+
+		<h2>4. Использованные материалы:</h2>
+
+		<ol>
+			<li><a href="http://pomka.blogspot.ru/2008/07/raid-1.html">Перенос работающей системы на программный RAID 1</a></li>
+
+			<li><a href="http://linuxguru.ru/administration/ustanovka-raid1-na-rabotayushhuyu-sistemu-debian/">Установка raid1 на работающую систему Debian Squeeze</a> - осторожно, сиське :)</li>
+		</ol>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Перевод работающей системы Debian на RAID 1">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

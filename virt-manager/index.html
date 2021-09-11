@@ -1,0 +1,153 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="xen,libvirt,stretch,virt-manager,kvm,debian,linux,wheezy" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2019-09-01 -->
+		<title>Virt-manager для управления виртуальными машинами под управлением KVM и Xen</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Virt-manager для управления виртуальными машинами под управлением KVM и Xen</h1>
+
+		<p>Для управления виртуальными машинам, работающими под управлением систем виртуализации KVM и Xen можно использовать программу с графическим интерфейсом, которая называется Virt-manager. Программа использует демон libvirt, установленный на компьютере с системой виртуализации. Для подключения Virt-manager к демону libvirt можно использовать SSH, что довольно удобно и безопасно. Как правило, демон SSH бывает уже установлен на компьютерах, доступных по сети, поэтому не нужно заботиться о настройке отдельного сетевого демона. Плюс к тому, SSH поддерживает аутентификацию пользователей и надёжное шифрование передаваемых данных.</p>
+
+		<h2>1. Настройка демона libvirt для управления виртуальными машинами под управлением KVM (на примере Debian Stretch)</h2>
+
+		<p>Проверим наличие аппаратной поддержки виртуализации:</p>
+
+		<pre class="console">$ egrep -c '(vmx|svm)' /proc/cpuinfo</pre>
+
+		<p>Устанавливаем систему виртуализации qemu с поддержкой KVM и демон libvirt для управления виртуальными машинами, работающими под управлением KVM:</p>
+
+		<pre class="console"># apt-get install qemu-kvm libvirt-daemon-system</pre>
+
+		<p>Добавляем пользователя, от имени которого будем заходить на сервер по SSH, в группу libvirt, чтобы он имел доступ к управлению виртуальными машинами:</p>
+
+		<pre class="console"># usermod -aG libvirt stupin</pre>
+
+		<p>Пользователь получит доступ к Unix-сокету /var/run/libvirt/libvirt-sock</p>
+
+		<p>Установим netcat из OpenBSD, поддерживающий опцию -U для подключения к Unix-сокету. Это нужно для перенаправления подключения от SSH-клиента в Unix-сокет libvirt:</p>
+
+		<pre class="console"># apt-get install netcat-openbsd</pre>
+
+		<p>Осталось включить и запустить демона:</p>
+
+		<pre class="console"># systemctl enable libvirtd
+# systemctl start libvirtd</pre>
+
+		<h2>2. Настройка демона libvirt для управления виртуальными машинами под управлением Xen (на примере Debian Wheezy)</h2>
+
+		<p>В моём случае Xen был развёрнут в операционной системе Debian Wheezy, где пакет с демоном libvirt называется libvirt-bin. Установим его:</p>
+
+		<pre class="console"># apt-get install libvirt-bin</pre>
+
+		<p>Теперь, чтобы пользователь, от имени которого мы будем подключаться по SSH к серверу виртуализации, смог подключиться к демону libvirtd, нужно добавить его в группу libvirt:</p>
+
+		<pre class="console"># usermod -aG libvirt stupin</pre>
+
+		<p>Пользователь получит доступ к Unix-сокету /var/run/libvirt/libvirt-sock</p>
+
+		<p>Для того, чтобы демон libvirt смог работать с системой виртуализации Xen, нужно включить HTTP-сервер, встроенный в xend. Демон libvirt будет выполнять роль посредника, транслируя входящие запросы в запросы к xend.</p>
+
+		<p>Настроим HTTP-сервер, ожидающий подключений на порту 8000 и адресе 127.0.0.1. Для этого нужно прописать в файл /etc/xen/xend-config.sxp следующие опции:</p>
+
+		<pre class="code">(xend-http-server yes)
+(xend-address localhost)
+(xend-port 8000)</pre>
+
+		<p>Чтобы настройки xend вступили в силу, нужно перезапустить его (пример для Debian Wheezy):</p>
+
+		<pre class="console"># /etc/init.d/xen restart</pre>
+
+		<p>Будьте осторожны - в конфигурации по умолчанию при перезапуске демона xend перезапускаются также и все виртуальные машины. Чтобы избежать этого, нужно при создании виртуальной машины прописать в её конфигурацию такие настройки:</p>
+
+		<pre class="code">on_xend_start = 'ignore'
+on_xend_stop = 'ignore'</pre>
+
+		<p>У меня эти настройки были прописаны в каждой виртуальной машине, поэтому я перезапускал xend без опасений.</p>
+
+		<h2>3. Установка и использование Virt-manager</h2>
+
+		<p>Устанавливаем на компьютере администратора пакет с GUI-интерфейсом для управления виртуальными машинами:</p>
+
+		<pre class="console"># apt-get install virt-manager</pre>
+
+		<p>Теперь можно попробовать сделать то, ради чего всё и затевалось: подключиться к системе виртуализации из программы virt-manager. Ниже приведены снимки экрана, иллюстрирующие этот процесс.</p>
+
+		<p>Запуск virt-manager:</p>
+
+		<img src="virt-manager1.png" />
+
+		<p>Добавление нового подключения:</p>
+
+		<img src="virt-manager-add-connection.png" />
+
+		<p>Новое подключение к системе виртуализации Xen:</p>
+
+		<img src="virt-manager-add-connection-xen.png" />
+
+		<p>Настройки удалённого подключения к системе виртуализации Xen через SSH:</p>
+
+		<img src="virt-manager-add-connection-xen-via-ssh.png" />
+
+		<p>Подключение к системе виртуализации установлено, виден список виртуальных машин:</p>
+
+		<img src="virt-manager-add-connected.png" />
+
+		<p>Теперь можно подключаться к консоли виртуальной машины и менять её настройки.</p>
+
+		<h2>4. Типичные проблемы</h2>
+
+		<h3>4.1. Не установлен пакет netcat-openbsd</h3>
+
+		<blockquote>
+			<p>Не удалось подключиться к libvirt.</p>
+
+			<p>Для взаимодействия с удалённым узлом необходимо, чтобы версия netcat/nc поддерживала параметр -U.</p>
+		</blockquote>
+
+		<img src="virt-manager-need-netcat-openbsd.png" />
+
+		<h3>4.2. Не установлен пакет libvirt-bin или libvirt-daemon-system</h3>
+
+		<blockquote>
+			<p>Не удалось подключиться к libvirt.</p>
+
+			<p>End of file while reading data: nc: unix connect failed: No such file or directory: Ошибка ввода/вывода</p>
+
+			<p>Убедитесь, что на удалённом узле запущен libvirtd.</p>
+		</blockquote>
+
+		<img src="virt-manager-need-libvirt-bin.png" />
+
+		<h3>4.3. Не настроен HTTP-сервер xend</h3>
+
+		<blockquote>
+			<p>Не удалось подключиться к libvirt.</p>
+
+			<p>unable to connect to 'localhost:8000': В соединении отказано</p>
+
+			<p>Убедитесь, что на удалённом узле запущен libvirtd.</p>
+		</blockquote>
+
+		<img src="virt-manager-need-xend-unix-server.png" />
+
+		<h3>4.4. Не установлен пакет gir1.2-spice-client-gtk-3.0</h3>
+
+		<blockquote>
+			<p>Ошибка подключения к графической консоли:</p>
+
+			<p>Error opening Spice console, SpiceClientGtk missing</p>
+		</blockquote>
+
+		<img src="virt-manager-need-spice-client.png" />
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Virt-manager для управления виртуальными машинами под управлением KVM и Xen">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,87 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="quake2,linux,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2010-07-25 -->
+		<title>Quake2 на Debian GNU/Linux</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Quake2 на Debian GNU/Linux</h1>
+
+		<p>Ранее я уже писал про то, как можно запустить Quake в Linux:</p>
+
+		<ol>
+			<li><a href="../quake/">Quake в Linux</a></li>
+
+			<li><a href="../quake-nexuiz/">Запуск Quake на движке Nexuiz</a></li>
+		</ol>
+
+		<p>Запуск Quake 3 тоже не представляет проблем, если воспользоваться для этого игрой OpenArena.</p>
+
+		<p>Вот чего мне до сих пор не удавалось, так это приличным образом запустить в Debian любимый мной Quake 2, который во времена студенчества мы с тремя моими друзьями перевели на русский язык. Но теперь я нашёл готовые deb-пекеты для установки Quake 2 в Debian: <a href="http://www.yamagi.org/quake2/">Yamagi Quake II Client</a></p>
+
+		<p>Для установки Quake 2 скачиваем три пакета вот отсюда <a href="http://www.yamagi.org/quake2/debian.html">Debian packages of Yamagi Quake II</a>:</p>
+
+		<pre class="console">$ wget http://deponie.yamagi.org/quake2/debs/i386/yamagi-quake2_2.11-1_i386.deb
+$ wget http://deponie.yamagi.org/quake2/debs/all/quake2-data_16_all.deb
+$ wget http://deponie.yamagi.org/quake2/debs/i386/yamagi-quake2-addons_1.1_i386.deb</pre>
+
+		<p>И незамедлительно устанавливаем их:</p>
+
+		<pre class="console"># dpkg -i yamagi-quake2_2.11-1_i386.deb
+# dpkg -i quake2-data_16_all.deb
+# dpkg -i yamagi-quake2-addons_1.1_i386.deb</pre>
+
+		<p>Теперь достаём с полки диск с Quake 2 и копируем содержимое каталога baseq2 в каталог /usr/share/games/quake2/baseq2. Достаточно скопировать только файл pak0.pak:</p>
+
+		<pre class="console"># cp /cdrom/BASEQ2/PAK0.PAK /usr/share/games/quake2/baseq2/pak0.pak</pre>
+
+		<p>И запускаем:</p>
+
+		<pre class="console">$ yamagiq2</pre>
+
+		<p>Как всегда, без ложки дёгтя в бочке мёда не обходится.</p>
+
+		<p>Во-первых, для работы quake2 необходимо наличие в системе пакетов libogg0 (&gt;= 1.1.3), libsdl1.2debian (&gt;= 1.2.10-1), libvorbis0a (&gt;= 1.1.2), libvorbisfile3 (&gt;= 1.1.2), zlib1g (&gt;= 1:1.2.1). Проверяем наличие нужных пакетов и устанавливаем недостающие.</p>
+
+		<p>Во-вторых, звук в игре по непонятной мне причине немного заикается и хрипит. Как я ни пытался улучшить звук, ничего особого не получилось. С помощью следующей команды:</p>
+
+		<pre class="console">$ yamagiq2 +s_khz 44 +s_loadas8bit 0 +snd_restart</pre>
+
+		<p>Удалось лишь немного улучшить качество звука в те моменты, когда он не заикается и не хрипит. Но заикаться и хрипеть от этого он всё равно не перестал.</p>
+
+		<p>И ещё - для запуска игры необходимо наличие видеокарты, поддерживающей аппаратное ускорение OpenGL. Поддержка программной отрисовки из этого пакета была нещадно выпилена.</p>
+
+		<p>Из приятного можно отметить следующее:</p>
+
+		<ul>
+			<li>Можно играть не только в классический Quake 2, но и в его моды Reckoning от Xatrix и Ground Zero от Rogue.</li>
+
+			<li>Можно слушать музыку с компакт-диска без компакт-диска, благо в состав пакета входит скрипт, который может снять треки с диска, закодировать их в OGG/Vorbis и положить на жёсткий диск, откуда и можно в дальнейшем воспроизводить треки.</li>
+		</ul>
+
+		<p>Для добавления модов скопируем каталоги с модами в соответствующее место, откуда их может взять движок игры.</p>
+
+		<pre class="console"># cp -R /home/stupin/quake2/Quake2Mods/RecKoning/xatrix /usr/share/games/quake2/
+# cp -R /home/stupin/quake2/Quake2Mods/GroundZero/rogue /usr/share/games/quake2/</pre>
+
+		<p>Теперь для запуска одного из модов можно воспользоваться следующими командами:</p>
+
+		<pre class="console">$ yamagiq2 +s_khz 44 +s_loadas8bit 0 +snd_restart +set game xatrix
+$ yamagiq2 +s_khz 44 +s_loadas8bit 0 +snd_restart +set game rogue</pre>
+
+		<p>Для съёма треков с компакт-диска можно воспользоваться примером скрипта, находящимся в одном из пакетов с игрой: /usr/share/doc/yamagi-quake2/examples/cdripper.sh</p>
+
+		<p>Ну и напоследок, снимок на память:</p>
+
+		<img src="quake2.png" />
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Quake2 на Debian GNU/Linux">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

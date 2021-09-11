@@ -1,0 +1,435 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="clamsmtpd,clamav,spampd,postfixadmin,lighttpd,spamassassin,linux,debian,postgrey,php,mysql,postfix,squirrelmail" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2009-11-05 -->
+		<title>Настройка почтовой системы на основе Postfix, Dovecot, PostfixAdmin</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка почтовой системы на основе Postfix, Dovecot, PostfixAdmin</h1>
+
+		<p>Перед тем, как приступить к настройке почтового сервера, необходимо убедиться в том, что на сервере имеется прямой доступ в Интернет, то есть на одном из интерфейсов имеется так называемый «белый» IP. Также на сервере должна быть доступна служба DNS. Поскольку почтовый сервер очень часто обращается к службе DNS, может потребоваться настроить локальный кэширующий DNS-сервер для снижения нагрузки на сеть и повышения отзывчивости подсистемы DNS.</p>
+
+		<p>Настраиваемая почтовая система обладает возможностями по администрированию доменов и почтовых ящиков через веб-интерфейс PostfixAdmin, в качестве основного домена в статье фигурирует домен stupin.homelinux.org, все учётные записи при этом хранятся в базе данных MySQL. Имеется почтовый клиент с веб-интерфейсом SquirrelMail, фильтрация спама средствами PostGrey, фильтрация вирусов средствами ClamSMTPd, отметка подозрительных писем с помощью SpamPd и SpamAssassin.</p>
+
+		<p>Не смотря на то, что настройка почтовой системы рассмотрена довольно подробно, данная статья конечно же не претендует на полноту. За кадром остаётся настройка защищённого подключения к веб-серверу, тонкая настройка фильтрации почты с помощью SpamAssassin, Postfix и PostGrey, повышение безопасности почтовой системы посредством запуска отдельных подсистем от имени непривилегированных пользователей и т.п. Статью можно использовать в качестве опорной для построения более развитой почтовой системы.</p>
+
+		<h2>1. Настройка Lighttpd</h2>
+
+		<p>Первым делом устанавливаем веб-сервер lighttpd, php.</p>
+
+		<pre class="console"># aptitude install lighttpd php5-cgi php5-json</pre>
+
+		<p>Включаем модуль fastcgi веб-сервера lighttpd:</p>
+
+		<pre class="console"># lighty-enable-mod fastcgi</pre>
+
+		<p>Заменяем в конфигурации модуля /etc/lighttpd/conf-enabled/10-fastcgi.conf интерпретатор PHP4 на PHP5:</p>
+
+		<pre class="code">fastcgi.server = (
+  &quot;.php&quot; =&gt;
+  (
+    (
+      &quot;bin-path&quot; =&gt; &quot;/usr/bin/php5-cgi&quot;,
+      &quot;socket&quot; =&gt; &quot;/tmp/php.socket&quot;,
+      &quot;max-procs&quot; =&gt; 2,
+      &quot;idle-timeout&quot; =&gt; 20,
+      &quot;bin-environment&quot; =&gt;
+      (
+        &quot;PHP_FCGI_CHILDREN&quot; =&gt; &quot;4&quot;,
+        &quot;PHP_FCGI_MAX_REQUESTS&quot; =&gt; &quot;10000&quot;
+      ),
+      &quot;bin-copy-environment&quot; =&gt;
+      (
+        &quot;PATH&quot;, &quot;SHELL&quot;, &quot;USER&quot;
+      ),
+      &quot;broken-scriptfilename&quot; =&gt; &quot;enable&quot;,
+      &quot;check-local&quot; =&gt; &quot;disable&quot;
+    )
+  )
+)</pre>
+
+		<p>Перезапускаем веб-сервер:</p>
+
+		<pre class="console"># /etc/init.d/lighttpd restart</pre>
+
+		<h2>2. Настройка PostfixAdmin</h2>
+
+		<p>Качаем последнюю стабильную версию PostfixAdmin со страницы <a href="http://sourceforge.net/projects/postfixadmin/files/">http://sourceforge.net/projects/postfixadmin/files/</a>. Для Debian существует готовый пакет postfixadmin_2.2.1.1_all.deb, его и скачаем:</p>
+
+		<pre class="console">$ wget &quot;http://downloads.sourceforge.net/project/postfixadmin/postfixadmin/postfixadmin-2.2.1.1/postfixadmin_2.2.1.1_all.deb?use_mirror=sunet&quot;</pre>
+
+		<p>Установим пакет в систему:</p>
+
+		<pre class="console"># dpkg -i postfixadmin_2.2.1.1_all.deb</pre>
+
+		<p>Пакет устанавливает все файлы проекта в каталог /usr/share/postfixadmin, файлы документации - в каталог /usr/share/doc/postfixadmin. Также создаются файлы с настройками самого PostfixAdmin - /etc/postfixadmin/config.inc.php и настройками Apache 2 - /etc/apache2/conf.d/postfixadmin.</p>
+
+		<p>Поскольку я собираюсь пользоваться PostfixAdmin на web-сервере Lighttpd, заглянем в файл /etc/apache2/conf.d/postfixadmin:</p>
+
+		<pre class="code">Alias /postfixadmin /usr/share/postfixadmin</pre>
+
+		<p>И создадим на его основе настройки для Lighttpd - в файл /etc/lighttpd/lighttpd.conf нужно будет добавить строчки:</p>
+
+		<pre class="code">alias.url += (
+  &quot;/postfixadmin&quot; =&gt; &quot;/usr/share/postfixadmin&quot;,
+)</pre>
+
+		<p>Дополнительно, защитим каталог на web-сервере от случайных зевак:</p>
+
+		<pre class="code">auth.backend = &quot;htdigest&quot;
+auth.backend.htdigest.userfile = &quot;/etc/lighttpd/htdigest&quot;
+auth.require = (
+  &quot;/posfixadmin&quot; =&gt;
+  (
+    &quot;method&quot; =&gt; &quot;digest&quot;,
+    &quot;realm&quot; =&gt; &quot;PostfixAdmin&quot;,
+    &quot;require&quot; =&gt; &quot;user=morbo&quot;
+  )
+)</pre>
+
+		<p>И с помощью утилиты htdigest из пакета apache2-utils задаём пароль для пользователя morbo и рилма PostfixAdmin:</p>
+
+		<pre class="console">$ htdigest /etc/lighttpd/htdigest &quot;PostfixAdmin&quot; morbo</pre>
+
+		<p>Настроим Postfix Admin в соответствии с вашей спецификой (например, зададим подходящий пароль к базе данных, настроим домен по умолчанию и т.п.)</p>
+
+		<p>Отредактируем файл /usr/share/postfixadmin/config.inc.php и укажем следующее:</p>
+
+		<pre class="console"># vi config.inc.php
+[...]
+$CONF[&#039;configured&#039;] = true;
+$CONF[&#039;postfix_admin_url&#039;] = &#039;http://stupin.homelinux.org/postfixadmin&#039;;
+$CONF[&#039;database_type&#039;] = &#039;mysql&#039;;
+$CONF[&#039;database_host&#039;] = &#039;localhost&#039;;
+$CONF[&#039;database_user&#039;] = &#039;postfixadmin&#039;;
+$CONF[&#039;database_password&#039;] = &#039;SecretPassword!&#039;;
+$CONF[&#039;database_name&#039;] = &#039;postfix&#039;;
+$CONF[&#039;domain_path&#039;] = &#039;YES&#039;;
+$CONF[&#039;domain_in_mailbox&#039;] = &#039;NO&#039;;
+$CONF[&#039;encrypt&#039;] = &#039;cleartext&#039;;</pre>
+
+		<p>Просмотрите остаток файла, если вам захочется сделать более тонкие настройки.</p>
+
+		<p>Вы можете быстро заменить домен по умолчанию на ваш собственный:</p>
+
+		<pre class="console">$ replace &quot;change-this-to-your.domain.tld&quot; &quot;stupin.homelinux.org&quot; - /usr/share/postfixadmin/config.inc.php</pre>
+
+		<p>Создайте базу данных и пользователя в mysql:</p>
+
+		<pre class="console">$ mysql -u root -p
+mysql&gt; create database postfix;
+mysql&gt; grant all privileges on postfix.* to &#039;postfixadmin&#039;@&#039;localhost&#039; identified by &#039;SecretPassword!&#039;;
+mysql&gt; flush privileges;
+mysql&gt; q</pre>
+
+		<p>Откройте браузер и перейдите по ссылке <a href="http://stupin.homelinux.org/postfix/setup.php">http://stupin.homelinux.org/postfix/setup.php</a> или http://ваш-IP/postfixadmin/. Будет предложено запустить процесс настройки. Удостоверьтесь, что все проверки установщика сообщают &#039;OK&#039;.</p>
+
+		<p>Рекомендуется удалить setup.php.</p>
+
+		<p>Теперь перейдите по ссылке <a href="http://stupin.homelinux.org/postfixadmin/admin">http://stupin.homelinux.org/postfixadmin/admin</a>. Вы должны получить приглашение. Войдите с использованием почтового ящика администратора, заведённого ранее на странице настройки. Отсюда вы можете добавлять домены, почтовые ящики и т.п. Но Postfix этого не увидит. Нам нужно установить Postfix и настроить его.</p>
+
+		<h2>3. Настройка Postfix</h2>
+
+		<p>Установим Postfix и SASL2 с поддержкой MySQL:</p>
+
+		<pre class="console"># aptitude install postfix-mysql postfix-tls libsasl2-modules-sql libsasl2-modules</pre>
+
+		<p>Добавим в файл /etc/postfix/main.cf следующие строки:</p>
+
+		<pre class="code">virtual_alias_maps = mysql:/etc/postfix/mysql_virtual_alias_maps.cf
+virtual_gid_maps = static:106
+virtual_mailbox_base = /var/spool/mail/virtual
+virtual_mailbox_domains = mysql:/etc/postfix/mysql_virtual_domains_maps.cf
+virtual_mailbox_maps = mysql:/etc/postfix/mysql_virtual_mailbox_maps.cf
+virtual_minimum_uid = 106
+virtual_transport = virtual
+virtual_uid_maps = static:106
+broken_sasl_auth_clients = yes
+smtpd_recipient_restrictions = permit_mynetworks, permit_sasl_authenticated,
+  reject_non_fqdn_hostname, reject_non_fqdn_sender, reject_non_fqdn_recipient,
+  reject_unauth_destination, reject_unauth_pipelining, reject_invalid_hostname
+smtpd_sasl_auth_enable = yes
+smtpd_sasl_local_domain = $myhostname
+smtpd_sasl_security_options = noanonymous</pre>
+
+		<p>ЗАМЕЧАНИЕ: UID и GID равные 106 на вашей системе могут быть другими. Посмотрите на UID и GID пользователя postfix (или vmail) в файле /etc/passwd и укажите их. Например, на моём сервере:</p>
+
+		<pre class="console"># grep postfix /etc/passwd
+postfix:x:102:105::/var/spool/postfix:/bin/false
+--&gt; uid: 102; gid: 105</pre>
+
+		<p>Создайте файл /etc/postfix/mysql_virtual_alias_maps.cf:</p>
+
+		<pre class="code">user = postfix
+password = SecretPassword!
+hosts = 127.0.0.1
+dbname = postfix
+table = alias
+select_field = goto
+where_field = address</pre>
+
+		<p>Файл mysql_virtual_domains_maps.cf:</p>
+
+		<pre class="code">user = postfix
+password = SecretPassword!
+hosts = 127.0.0.1
+dbname = postfix
+table = domain
+select_field = domain
+where_field = domain
+additional_conditions = and backupmx = &#039;0&#039; and active = &#039;1&#039;</pre>
+
+		<p>Файл mysql_virtual_mailbox_maps.cf:</p>
+
+		<pre class="code">user = postfix
+password = SecretPassword!
+hosts = 127.0.0.1
+dbname = postfix
+table = mailbox
+select_field = maildir
+where_field = username</pre>
+
+		<p>Если вы хотите разрешить ретрансляцию почты через ваш сервер после SMTP AUTH, пропишите в файле /etc/postfix/sasl/smtpd.conf следующие настройки:</p>
+
+		<pre class="code">pwcheck_method: auxprop
+mech_list: PLAIN LOGIN
+auxprop_plugin: sql
+sql_verbose: yes
+sql_engine: mysql
+sql_hostnames: 127.0.0.1
+sql_user: postfix
+sql_passwd: SecretPassword!
+sql_database: postfix
+sql_select: select password from mailbox where username = &#039;%u@%r&#039;</pre>
+
+		<p>Создайте структуру каталогов, включая каталог для первого домена. Вы так же можете войти в PostfixAdmin и создать учётную запись &#039;test&#039; для домена stupin.homelinux.org.</p>
+
+		<pre class="console"># mkdir -p /var/spool/mail/virtual/stupin.homelinux.org/test
+# chmod -R 770 /var/spool/mail/virtual
+# chown -R postfix:postfix /var/spool/mail/virtual</pre>
+
+		<h2>4. Настройка Dovecot</h2>
+
+		<p>Установим Dovecot с поддержкой MySQL:</p>
+
+		<pre class="console"># aptitude install dovecot-common dovecot-imapd dovecot-pop3d</pre>
+
+		<p>Отредактируем файл /etc/dovecot/dovecot-mysql.conf с настройками Dovecot/MySQL, воспользовавшись следующими опциями:</p>
+
+		<pre class="code">driver = mysql
+connect = dbname=postfix user=postfixadmin host=127.0.0.1 password=SecretPassword!
+default_pass_scheme = PLAIN
+password_query = SELECT password
+                 FROM mailbox
+                 WHERE username = &#039;%u&#039;
+user_query = SELECT maildir,
+                    106 AS uid,
+                    106 AS gid
+             FROM mailbox
+             WHERE username = &#039;%u&#039;</pre>
+
+		<p>Теперь настроим Dovecot на использование MySQL, задав следующие опции в файле /etc/dovecot/dovecot.conf:</p>
+
+		<pre class="code">protocols = imap imaps pop3 pop3s
+disable_plaintext_auth = no
+log_timestamp = &quot;%Y-%m-%d %H:%M:%S &quot;
+mail_location = maildir:/var/spool/mail/virtual/%d/%n
+mail_access_groups = mail
+first_valid_uid = 106
+first_valid_gid = 106
+protocol imap {
+}
+protocol pop3 {
+  pop3_uidl_format = %08Xu%08Xv
+}
+auth default {
+  mechanisms = digest-md5 plain
+  passdb sql {
+    args = /etc/dovecot/dovecot-mysql.conf
+  }
+  userdb sql {
+    args = /etc/dovecot/dovecot-mysql.conf
+  }
+  user = root
+}</pre>
+
+		<p>Перезапустим Dovecot и Postfix и проверим их.</p>
+
+		<p>По завершении вы должны получить возможность добавлять новые домены, почтовые ящики, псевдонимы с помощью PostfixAdmin и получить правильно работающую систему, включая SMTP-аутентификацию. Отметим, что для работы SMTP-аутентификации saslauthd не требуется.</p>
+
+		<h2>5. Настройка SquirrelMail</h2>
+
+		<p>Устанавливаем пакет squirrelmail:</p>
+
+		<pre class="console"># aptitude install squirrelmail</pre>
+
+		<p>В файл /etc/lighttpd/lighttpd.conf нужно будет добавить строчки:</p>
+
+		<pre class="code">alias.url += (
+  &quot;/mail&quot; =&gt; &quot;/usr/share/squirrelmail&quot;
+)</pre>
+
+		<p>Настройку SquirrelMail можно осуществить с помощью ncurses-утилиты squirrelmail-configure.</p>
+
+		<h2>6. Настройка плагина SquirrelMail PosfixAdmin</h2>
+
+		<p>Для того, чтобы пользователи имели возможность самостоятельно менять свои пароли, можно установить расширение postfixadmin для squirrelmail. Адрес проекта <a href="http://squirrelmail-postfixadmin.palepurple.co.uk/">http://squirrelmail-postfixadmin.palepurple.co.uk/</a></p>
+
+		<p>Чтобы скачать исходники проекта, необходимо поставить утилиты subversion:</p>
+
+		<pre class="console"># aptitude install subversion</pre>
+
+		<p>Создадим каталог для скачиваемых из svn исходников плагина, скачаем исходники, скопируем необходимое нам, а лишнее удалим:</p>
+
+		<pre class="console">$ mkdir ~/squirrelmail-postfixadmin
+$ cd ~/squirrelmail-postfixadmin
+$ svn co -r 35 http://squirrelmail-postfixadmin.palepurple.co.uk/svn
+$ mkdir ~/squirrelmail
+$ cp ~/squirrelmail-postfixadmin/svn/tags/squirrelmail-postfixadmin-0.4.3/* ~/postfixadmin/
+$ rm -R ~/squirrelmail-postfixadmin</pre>
+
+		<p>Почистим исходники плагина от служебных файлов subversion:</p>
+
+		<pre class="console">$ find ~/postfixadmin/ -name .svn -type d -exec rm -R \{\} \;</pre>
+
+		<p>Установим плагин в каталог squirrelmail:</p>
+
+		<pre class="console"># cp ~/postfixadmin /usr/share/squirrelmail/plugins/</pre>
+
+		<h2>7. Тонкая настройка Postfix</h2>
+
+		<p>Во-первых, я задаю имя, которое будет использовать Postfix при отправке почты на другие почтовые серверы (в команде HELO или EHLO) или при приёме почты на 25 порту в приглашении (например, «220 stupin.homelinux.org ESMTP Postfix»):</p>
+
+		<pre class="code">myhostname = stupin.homelinux.org
+myorigin = $myhostname</pre>
+
+		<p>Во-вторых, укажем сети, имеющие право отправки почты без прохождения авторизации:</p>
+
+		<pre class="code">mynetworks = 10.16.7.0/24, 127.0.0.1</pre>
+
+		<p>Далее, мой провайдер поместил все клиентские сети в список динамических IP, так называемый DUL. Из-за этого подавляющее большинство почтовых серверов отказываются принимать от меня почту. Чтобы отправка почты всё-таки работала, мой провайдер позволяет отправлять почту через его почтовый сервер mail.ufanet.ru:</p>
+
+		<pre class="code">relayhost = [mail.ufanet.ru]</pre>
+
+		<p>И, наконец, я хочу чтобы Postfix не пытался складывать локальную почту в локальные же файлы mailbox. Вместо этого, он должен обрабатывать такую почту, как и всю остальную, то есть передавать её dovecot&#039;у. Для этого пропишем следующую опцию:</p>
+
+		<pre class="code">local_transport = virtual</pre>
+
+		<h2>8. Настройка PostGrey</h2>
+
+		<p>Установим postgrey:</p>
+
+		<pre class="console"># aptitude install postgrey</pre>
+
+		<p>Поменять настройки можно в файле /etc/default/postgrey. Я добавил одну дополнительную опцию, которая помещает отправителя в белый список после 5 удачно пройденных тестов:</p>
+
+		<pre class="code">POSTGREY_OPTS=&quot;--inet=127.0.0.1:60000 --auto-whitelist-clients=5&quot;</pre>
+
+		<p>Настраиваем postfix на использование сервера политик postgrey. В файле /etc/postfix/main.cf к опции smtpd_recipient_restrictions в конец списка добавляем «check_policy_service inet:127.0.0.1:60000». После этого опция smtpd_recipient_restrictions в моей системе приняла следующий вид:</p>
+
+		<pre class="code">smtpd_recipient_restrictions = permit_mynetworks, permit_sasl_authenticated,
+  reject_non_fqdn_hostname, reject_non_fqdn_sender, reject_non_fqdn_recipient,
+  reject_unauth_destination, reject_unauth_pipelining, reject_invalid_hostname,
+  check_policy_service inet:127.0.0.1:60000</pre>
+
+		<p>Теперь, чтобы настройки вступили в силу, можно перезапустить postgrey и postfix:</p>
+
+		<pre class="console"># /etc/init.d/postgrey restart
+# /etc/init.d/postfix reload</pre>
+
+		<h2>9. Настройка ClamSMTPD</h2>
+
+		<p>Устанавливаем clamsmtpd (если на сервере установлен стабильный релиз Debian, то лучше подключить дополнительный репозиторий volatile, в который помещаются обновления антивирусных баз данных и систем фильтрации спама):</p>
+
+		<pre class="console"># aptitude install clamsmtpd</pre>
+
+		<p>Обновляем антивирусные базы:</p>
+
+		<pre class="console"># freshclam -v</pre>
+
+		<p>Настраиваем порты демона в файле /etc/clamsmtpd.conf (я изменил их следующим образом):</p>
+
+		<pre class="code">OutAddress: 10026
+Listen: 127.0.0.1:10025</pre>
+
+		<p>Настраиваем postfix на передачу файла в clamsmtp. Во-первых добавим в файле /etc/postfix/main.cf следующие опции:</p>
+
+		<pre class="code">content_filter = scan:127.0.0.1:10025
+receive_override_options = no_address_mappings</pre>
+
+		<p>Во-вторых, в файл /etc/postfix/master.cf добавляем следующее:</p>
+
+		<pre class="code">scan      unix  -       -       n       -       16      smtp
+  -o smtp_send_xforward_command=yes
+
+127.0.0.1:10026 inet  n -       n       -       16      smtpd
+  -o content_filter=
+  -o receive_override_options=no_unknown_recipient_checks,no_header_body_checks
+  -o smtpd_helo_restrictions=
+  -o smtpd_client_restrictions=
+  -o smtpd_sender_restrictions=
+  -o smtpd_recipient_restrictions=permit_mynetworks,reject
+  -o mynetworks_style=host
+  -o smtpd_authorized_xforward_hosts=127.0.0.0/8</pre>
+
+		<p>Перезапускаем clamsmtpd и postfix:</p>
+
+		<pre class="console"># /etc/init.d/clamsmtp restart
+# /etc/init.d/postfix restart</pre>
+
+		<h2>10. Настройка SpamPd</h2>
+
+		<p>Устанавливаем spampd:</p>
+
+		<pre class="console"># aptitude install spampd</pre>
+
+		<p>Настраиваем spampd, в файле /etc/default/spampd меняем следующие опции:</p>
+
+		<pre class="code">LISTENPORT=10026
+DESTPORT=10027</pre>
+
+		<p>Также необходимо поменять настройки входного порта postfix, на котором письмо принимается без дополнительных проверок. В файле /etc/postfix/master.cf меняем строку</p>
+
+		<pre class="code">127.0.0.1:10026 inet  n -       n       -       16      smtpd</pre>
+
+		<p>на строку</p>
+
+		<pre class="code">127.0.0.1:10027 inet  n -       n       -       16      smtpd</pre>
+
+		<p>Для вступления настроек в силу перезапускаем postfix и spampd:</p>
+
+		<pre class="console"># /etc/init.d/postfix restart
+# /etc/init.d/spampd restart</pre>
+
+		<h2>11. Пояснение принципов фильтрации писем</h2>
+
+		<p>Теперь clamsmtpd и spampd работают последовательно. Postfix получая новое письмо на порт 25, передаёт письмо на проверку на порт 10025, где его принимает clamsmtpd. Далее, проверив письмо, clamsmtpd передаёт письмо на порт 10026, где его принимает spampd. Далее, после проверки, spampd возвращает письмо Posfix&#039;у на порт 10027. Postfix, получив письмо на порт 10027, принимает его без дополнительных проверок.</p>
+
+		<p>clamsmtpd работает в связке с clamav-daemon, последовательно передавая ему на проверку все секции и вложения письма.</p>
+
+		<p>spampd тоже работает в связке с демоном spamassassin, передавая ему на проверку письмо целиком. Важно, что в данном примере настройки, не происходит автоматическое удаление писем, похожих на спам. Вместо этого в начало темы подозрительного письма добавляется текст «*****SPAM***** », а в заголовок письма помещаются метки SpamAssassin, свидетельствующие о количестве набранных спам-баллов и описанием каждого признака спама. Для удаления подозрительных писем необходимо воспользоваться дополнительными компонентами почтовой системы.</p>
+
+		<h2>12. Ссылки</h2>
+
+		<ol>
+			<li><a href="../clutch/">Настройка веб-интерфейса Clutch</a> - взята часть про настройку Lighttpd и PHP. Не пропадать же однажды уже написанному добру?!</li>
+
+			<li><a href="http://squirrelmail-postfixadmin.palepurple.co.uk/">Squirrelmail - PostfixAdmin plugin</a></li>
+
+			<li><a href="../postfixadmin-1/">PostfixAdmin на Debian</a></li>
+
+			<li><a href="http://www.citforum.ru/operating_systems/linux/clamav_postfix/">ClamAV + clamsmtpd + Postfix</a></li>
+
+			<li><a href="../postgrey/">Postfix и Postgrey: Проактивный способ фильтрации спама</a></li>
+		</ol>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка почтовой системы на основе Postfix, Dovecot, PostfixAdmin">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,88 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="dovecot,mysql,linux,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2011-11-17 -->
+		<title>Обновление времени последнего входа пользователя dovecot и авторизация POP before SMTP</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Обновление времени последнего входа пользователя dovecot и авторизация POP before SMTP</h1>
+
+		<p>Захотел сделать так, чтобы Dovecot, при подключении пользователя по протоколу POP3, отмечал в базе данных текущее время. Нужно это для того, чтобы определить, какими ящиками давно не пользуются. Нашёл такую вот страницу в wiki Dovecot: <a href="http://wiki.dovecot.org/PostLoginScripting">http://wiki.dovecot.org/PostLoginScripting</a>.</p>
+
+		<p>Для начала нужно узнать текущее значение mail_executable. Для этого воспользуемся командой:</p>
+
+		<pre class="console"># dovecot -a | grep mail_executable</pre>
+
+		<p>У меня это значение равно /usr/lib/dovecot/pop3. Именно это значение мы и заменим, так чтобы наш скрипт вызывался до этой программы, обновлял информацию в базе данных, а затем запускал первоначальную программу.</p>
+
+		<p>Скрипт /etc/dovecot/pop-update-lastlog.sh, обновляющий информацию в базе данных:</p>
+
+		<pre class="code">#!/bin/sh
+
+mysql -u<b>user</b> -p<b>password</b> -h127.0.0.1 mail &lt;&lt;END
+UPDATE users SET lasttime = NOW(), lastip='$IP' WHERE login = '$USER';
+END
+exec <b>/usr/lib/dovecot/pop3</b> "$@"</pre>
+
+		<p>Установил на него права доступа чтобы простые пользователи не смогли узнать пароль от базы данных и чтобы этот скрипт мог выполняться:</p>
+
+		<pre class="console"># chmod +x,o= pop-update-lastlog.sh</pre>
+
+		<p>Затем этот скрипт я прописал в /etc/dovecot.conf:</p>
+
+		<pre class="code">protocol pop3 {
+  mail_executable = /etc/dovecot/pop-update-lastlog.sh
+}</pre>
+
+		<p>Затем добавил пару столбцов в базу данных (структура базы данных - самодельная, не взята от какого-либо веб-интерфейса администрирования):</p>
+
+		<pre class="console">$ mail -u<b>user</b> -p<b>password</b> mail &lt;&lt;END
+ALTER TABLE users ADD COLUMN lasttime datetime DEFAULT '1900-01-01 00:00:00';
+ALTER TABLE users ADD COLUMN lastip varchar(32) DEFAULT '0.0.0.0';
+END</pre>
+
+		<p>И перезапустил dovecot:</p>
+
+		<pre class="console"># /etc/init.d/dovecot restart</pre>
+
+		<p>В базе данных начали появляться отметки о времени последнего входа и об IP-адресе клиента, с которого входили последний раз.</p>
+
+		<p>Если у вас настроен также imap-сервер, вы можете создать для него похожий скрипт.</p>
+
+		<h2>Дополнение от 18 ноября 2011 года.</h2>
+
+		<p>Информацию из таблиц можно использовать для авторизации POP before SMTP в Postfix (перед отправкой почты по SMTP нужно авторизоваться на POP-сервере).</p>
+
+		<p>В /etc/postfix/main.cf можно прописать следующее:</p>
+
+		<pre class="code">mynetworks = 127.0.0.1/8, mysql:/etc/postfix/sql/pop-before-smtp.cf</pre>
+
+		<p>А в файле /etc/postfix/sql/pop-before-smtp.cf указать запрос и параметры подключения к базе данных:</p>
+
+		<pre class="code">user = <b>user</b>
+password = <b>password</b>
+dbname = mail
+hosts = 127.0.0.1
+query = SELECT DISTINCT lastip
+        FROM users
+        WHERE lastip = '%s'
+          AND ADDTIME(lasttime, '0:1:0') &gt; NOW()</pre>
+
+		<p>Запрос возвращает IP-адрес только в том случае, если этот IP-адрес аутентифицировался на POP-сервере в течение последней минуты. В случае, если этот IP-адрес в течение последней минуты аутентифицировался на нескольких учётных записях POP-сервера, то возвращается только один IP-адрес.</p>
+
+		<p>Не забудьте защитить прописанные в файле пароли доступа к базе данных почтового сервера от обычных пользователей:</p>
+
+		<pre class="console"># chmod o= pop-before-smtp.cf</pre>
+
+		<p>Попробовал - POP before SMTP действительно работает. Если с момента последнего подключения к POP серверу прошло не больше минуты, то почта отправляется. Если больше или ровно минута - то почта уже не уходит. Получилось такое вот, на мой взгляд, довольно изящное решение.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Обновление времени последнего входа пользователя dovecot и авторизация POP before SMTP">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

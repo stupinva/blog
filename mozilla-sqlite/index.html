@@ -1,0 +1,29 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="seamonkey,sqlite,iceape,firefox,mozilla,iceweasel" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2012-05-14 -->
+		<title>Оптимизация баз данных Firefox/Iceweasel и Seamonkey/Iceape</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Оптимизация баз данных Firefox/Iceweasel и Seamonkey/Iceape</h1>
+
+		<p>Эти браузеры хранят часть информации в базах данных SQLite. В процессе работы эти базы данных фрагментируются, что замедляет работу браузера. Чтобы дефрагментировать базы данных, можно воспользоваться пакетом sqlite3. Установим его:</p>
+
+		<pre class="console"># apt-get install sqlite3</pre>
+
+		<p>И запустим команду, которая дефрагментирует все базы данных этих браузеров в профиле пользователя:</p>
+
+		<pre class="console">$ find ~/.mozilla -type f -name \*.sqlite -exec sqlite3 \{\} "VACUUM;" \;</pre>
+
+		<p>Современные версии этих браузеров, возможно, уже сами периодически выполняют подобную дефрагментацию.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Оптимизация баз данных Firefox/Iceweasel и Seamonkey/Iceape">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

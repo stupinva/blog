@@ -1,0 +1,64 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="deb,python,pypi,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-10-06 -->
+		<title>Создание deb-пакетов для модулей Python</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Создание deb-пакетов для модулей Python</h1>
+
+		<p>Во одной из своих прошлых заметок, <a href="../dancer-session-dbi/">Шаблоны HTML::Template в Perl-фреймворке Dancer</a>, я упомянул о том, как можно установить в систему Perl-модуль, которого нет в репозиториях, не засоряя систему. Команда dh-make-perl позволяет скачать произвольный Perl-модуль с CPAN и упаковать его в deb-пакет.</p>
+
+		<p>Теперь у меня возникло аналогичное желание для Python-модуля. В репозитории Debian нет модуля grab. Я не хотел прибегать к помощи python-virtualenv (подобный же инструмент существует и для Perl - пакет perlbrew в Debian и модуль App::perlbrew на CPAN), а захотел собрать deb-пакет для установки в систему.</p>
+
+		<p>Как оказалось, такой инструмент существует (хоть он и менее удобен по сравнению с dh-make-perl) и называется он stdeb. Он уже имеется в репозитории Debian, поэтому задача Мюнхгаузена - вытянуть себя за собственные шнурки - перед нами не стоит. Ставим пакеты stdeb и python-all:</p>
+
+		<pre class="console"># apt-get install stdeb python-all</pre>
+
+		<p>Теперь находим архив с нужным нам модулем на <a href="http://pypi.python.org">pypi.python.org</a> и скачиваем его себе:</p>
+
+		<pre class="console">$ wget https://pypi.python.org/packages/source/g/grab/grab-0.4.12.tar.gz#md5=a9d42f6db9f96357d18fe170176c95b4</pre>
+
+		<p>Теперь можно заглянуть в документацию на stdeb и посмотреть, <a href="https://pypi.python.org/pypi/stdeb#examples">как это делается</a>.</p>
+
+		<p>Распакуем скачанный архив:</p>
+
+		<pre class="console">$ tar xzvf grab-0.4.12.tar.gz</pre>
+
+		<p>Перейдём в каталог с распакованным модулем:</p>
+
+		<pre class="console">$ cd grab-0.4.12</pre>
+
+		<p>Подготовим каталог и управляющие файлы для сборки пакета:</p>
+
+		<pre class="console">$ python setup.py --command-packages=stdeb.command sdist_dsc</pre>
+
+		<p>Теперь перейдём в этот каталог и соберём пакет:</p>
+
+		<pre class="console">$ cd deb_dist/grab-0.4.12
+$ dpkg-buildpackage -us -uc -rfakeroot</pre>
+
+		<p>В каталоге выше появится готовый deb-пакет, который можно установить в систему.</p>
+
+		<pre class="console"># dpkg -i python-grab_0.4.12-1_all.deb</pre>
+
+		<h2>Ссылки:</h2>
+
+		<ol>
+			<li>Документация на <a href="https://pypi.python.org/pypi/stdeb">stdeb</a></li>
+
+			<li>Заметка об использовании  <a href="http://blog.truecrux.org/post/xxxiii">Perlbrew</a></li>
+
+			<li><a href="http://adw0rd.com/2012/6/19/python-virtualenv/">Python. Строим виртуальное окружение с помощью virtualenv</a></li>
+		</ol>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Создание deb-пакетов для модулей Python">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

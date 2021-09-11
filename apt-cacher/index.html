@@ -1,0 +1,153 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="apt-cacher,перевод,linux,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2009-09-18 -->
+		<title>chantra. Как настроить кэш репозитория с помощью apt-cacher, 2006</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>chantra. Как настроить кэш репозитория с помощью apt-cacher, 2006</h1>
+
+		<p>Перевод статьи: <a href="http://www.debuntu.org/how-to-set-up-a-repository-cache-with-apt-cacher">How To Set up a repository cache with apt-cacher</a></p>
+
+		<p>Если имеется несколько компьютеров с одинаковым дистрибутивом, полезно настроить кэш репозитория в вашей сети, так чтобы однажды скачанный из официального репозитория пакет скачивался остальными машинами из вашей локальной сети.</p>
+
+		<p>Имея разные компьютеры, работающие на одинаковом дистрибутиве, полезно настроить кэш в вашей локальной сети. Таким образом, вам не нужно скачивать из официального репозитория общие пакеты больше одного раза.</p>
+
+		<p>В этом случае имеется один компьютер, который называется repository-cache (кэш репозитория), этот компьютер будет работать в качестве кэша репозитория, в то время как остальные компьютеры в вашей сети будут пользоваться им, как обычным репозиторием.</p>
+
+		<h2>1. Приступим</h2>
+
+		<p>Как обычно, вам нужно установить необходимые пакеты на первом компьютере. Поэтому введите в терминале:</p>
+
+		<pre class="console">$ sudo apt-get install apt-cacher</pre>
+
+		<p>Когда команда будет выполнена, пора перейти к файлу настройки /etc/apt-cacher/apt-cacher.conf</p>
+
+		<h2>2. Настройка Apt-Cacher</h2>
+
+		<h3>2.1. apt-cacher.conf</h3>
+
+		<p>И так, откроем главный файл конфигурации apt-cacher'а: /etc/apt-cacher/apt-cacher.conf и начнём редактировать его в соответствии с вашими настройками.</p>
+
+		<p>По умолчанию apt-cacher ожидает подключений на порту 3142. Вы можете поменять это значение на то, которое вам нужно.</p>
+
+		<p><b>allowed_hosts</b>: по умолчанию все перечисленные здесь узлы имеют право использовать кэш репозитория. Вы можете изменить это значение, если вы хотите предоставить доступ только определённым узлам. В моём случае, я хочу разрешить доступ моей локальной сети 192.168.1.0/24 и локальному узлу (localhost - 127.0.0.1 и 127.0.1.1 на системах с ubuntu), поэтому я меняю значение следующим образом:</p>
+
+		<pre class="code">allowed_hosts=192.168.1.0/24, 127.0.1.1</pre>
+
+		<p>Поскольку 127.0.0.1 разрешён всегда, не обязательно добавлять адрес 127.0.0.1.</p>
+
+		<p><b>generate_reports</b>: Эта директива заставляет apt-cacher создавать ежедневный отчёт по эффективности вашего кэша. По умолчанию это 1, если вы хотите отключить его, установите его в 0.</p>
+
+		<p><b>path_map</b>: Это любопытная директива. Здесь вы можете определить различные псевдонимы для различных узлов репозиториев. На моём компьютере с ubuntu edgy, моя директива path_map выглядит следующим образом:</p>
+
+		<pre class="code">path_map = debuntu repository.debuntu.org; ubuntu archive.ubuntu.com/ubuntu; ubuntu-updates archive.ubuntu.com/ubuntu; ubuntu-security security.ubuntu.com/ubuntu</pre>
+
+		<p>Позвольте мне немного пояснить. Здесь я создал отображения в следующие имена:</p>
+
+		<ul>
+			<li>debuntu в узел repository.debuntu.org</li>
+
+			<li>ubuntuand ubuntu-updates в узел archive.ubuntu.com/ubuntu</li>
+
+			<li>и ubuntu-security в узел security.ubuntu.com</li>
+		</ul>
+
+		<p>Теперь, чтобы получить доступ к определённому репозиторию, нам требуется просто добавить псевдоним к нашему серверу с кешем репозиториев, например: компьютер_с_кэшем_репозитория:порт/псевдоним</p>
+
+		<p>Например, мы можем получить доступ к репозиторию debuntu через http://repository-cache:3142/debuntu и к репозиторию ubuntu secutiry через http://repository-cache:3142/ubuntu-security.</p>
+
+		<h3>2.2. Включение apt-cacher'а</h3>
+
+		<p>Чтобы запустить apt-cacher, его нужно включить из файла /etc/default/apt-cacher. Откроем файл /etc/default/apt-cacher и установим AUTOSTART в 1:</p>
+
+		<pre class="code">AUTOSTART=1</pre>
+
+		<p>Теперь перезапустим apt-cacher:</p>
+
+		<pre class="console">$ sudo /etc/init.d/apt-cacher restart</pre>
+
+		<p>Теперь apt-cacher запущен, время исправить файлы всех наших клиентов /etc/apt/sources.list на каждом узле в сети, где мы хотим использовать компьютер с кэшем репозитория.</p>
+
+		<h2>3. Настройка файла sources.list клиентов и серверов</h2>
+
+		<p>Настало время настроить на клиентских узлах файлы источников apt: /etc/apt/sources.list. Важно использовать кэш репозитория ткаже и на самом сервере, таким образом любые обновления, выполненные сервером, будут заполнять кэш.</p>
+
+		<p>Исходный /etc/apt/sources.list:</p>
+
+		<pre class="code">#репозиторий debuntu
+deb http://repository.debuntu.org edgy multiverse
+deb-src http://repository.debuntu.org edgy multiverse
+
+#главный репозиторий ubuntu
+deb http://archive.ubuntu.com/ubuntu/ edgy main restricted universe multiverse
+deb-src http://archive.ubuntu.com/ubuntu/ edgy main restricted universe multiverse
+
+#репозиторий обновлений ubuntu
+deb http://archive.ubuntu.com/ubuntu/ edgy-updates main restricted universe multiverse
+deb-src http://archive.ubuntu.com/ubuntu/ edgy-updates main restricted universe multiverse
+
+#репозиторий обновлений безопасности ubuntu
+deb http://security.ubuntu.com/ubuntu edgy-security main restricted universe multiverse
+deb-src http://security.ubuntu.com/ubuntu edgy-security main restricted universe multiverse</pre>
+
+		<p>Чтобы использовать наш кэш репозитория, эти записи необходимо заменить на:</p>
+
+		<pre class="code">#репозиторий debuntu
+deb http://repository-cache:3142/debuntu edgy multiverse
+deb-src http://repository-cache:3142/debuntu edgy multiverse
+
+#главный репозиторий ubuntu
+deb http://repository-cache:3142/ubuntu edgy main restricted universe multiverse
+deb-src http://repository-cache:3142/ubuntu edgy main restricted universe multiverse
+
+#репозиторий обновлений ubuntu
+deb http://repository-cache:3142/ubuntu-updates edgy-updates main restricted universe multiverse
+deb-src http://repository-cache:3142/ubuntu-updates edgy-updates main restricted universe multiverse
+
+#репозиторий обновлений безопасности ubuntu
+deb http://repository-cache:3142/ubuntu-security edgy-security main restricted universe multiverse
+deb-src http://repository-cache:3142/ubuntu-security edgy-security main restricted universe multiverse</pre>
+
+		<p>Классно, теперь чтобы каждый каждый узел получал пакеты .deb из нашего репозитория, нужно запустить:</p>
+
+		<pre class="console">$ sudo apt-get update</pre>
+
+		<p>на каждом узле.</p>
+
+		<h2>4. Импорт существующих пакетов из /var/cache/apt/archives/ в репозиторий apt-cacher</h2>
+
+		<p>Может случиться, что ваш сервер уже имеет большое количество пакетов, находящихся в локальном кэше репозитория: /var/cache/apt/archives/. apt-cacher содержит инструмент, позволяющий имортировать эти файлы в репозиторий apt-cacher'а.</p>
+
+		<p>Это большое количество полезных сценариев можно найти в каталоге /usr/share/apt-cacher/. Интересующий нас называется apt-cacher-import.pl. Для импорта файлов .deb из каталога /var/cache/apt/archives в репозиторий apt-cacher запустите:</p>
+
+		<pre class="console">$ sudo /usr/share/apt-cacher/apt-cacher-import.pl /var/cache/apt/archives</pre>
+
+		<p>Его нужно запускать от имени пользователя root или файлы .deb могут не скопироваться в кэш репозитория.</p>
+
+		<p>Теперь каталог /var/cache/apt-cacher/packages/ должен пополниться целой кучей пакетов.</p>
+
+		<h2>5. Получение отчётов об использовании вашего кэша репозитория</h2>
+
+		<p>Если вы оставили значение директивы generate_reports равным 1, apt-cacher будет составлять отчёты по использованию кэша каждый день.</p>
+
+		<p>Вы можете получить к ним доступ по адресу: http://repository-cache:3142/report</p>
+
+		<p>Если вам нужно перегенерировать отчёт, запустите:</p>
+
+		<pre class="console">$ sudo /usr/share/apt-cacher/apt-cacher-report.pl</pre>
+
+		<h2>6. Заключение</h2>
+
+		<p>apt-cacher - это простой и эффективный пакет, который одновременно экономит ваше время и пропускную способность канала при использовании нескольких компьютеров, работающих на одинаковом дистрибутиве, как это бывает в домашней сети или в компании.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=chantra. Как настроить кэш репозитория с помощью apt-cacher, 2006">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

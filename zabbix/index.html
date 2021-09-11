@@ -1,0 +1,117 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="zabbix,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2012-04-06 -->
+		<title>Установка системы мониторинга Zabbix</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Установка системы мониторинга Zabbix</h1>
+
+		<p>Первым делом ставим сервер мониторинга и веб-интерфейс системы мониторинга:</p>
+
+		<pre class="console"># apt-get install zabbix-server zabbix-frontend-php snmpd</pre>
+
+		<h2>1. Настройка СУБД MySQL</h2>
+
+		<p>Подключаемся к БД MySQL с правами администратора, создаём базу данных для Zabbix:</p>
+
+		<pre class="console">$ mysql -uroot -p
+&gt; CREATE DATABASE zabbix DEFAULT CHARACTER SET UTF8
+&gt; COLLATE UTF8_GENERAL_CI;</pre>
+
+		<p>Создаём пользователя, от имени которого Zabbix будет подключаться к MySQL:</p>
+
+		<pre class="console">&gt; INSERT INTO user(host, user, password) VALUES('localhost', 'zabbix', PASSWORD('zabbix_password'));
+&gt; FLUSH PRIVILEGES;</pre>
+
+		<p>Даём пользователю zabbix полный доступ к базе данных zabbix (случай, когда сервер мониторинга и БД стоят на одном и том же компьютере):</p>
+
+		<pre class="console">&gt; GRANT ALL ON zabbix.* TO 'zabbix'@'localhost';
+&gt; FLUSH PRIVILEGES;</pre>
+
+		<p>Подключаемся к свежесозданной БД, создаём структуру БД и наполняем её данными:</p>
+
+		<pre class="console">&gt; USE zabbix;
+&gt; SOURCE /usr/share/zabbix-server/mysql.sql
+&gt; SOURCE /usr/share/zabbix-server/data.sql</pre>
+
+		<p>Задаём пароль администратора системы мониторинга и выходим из MySQL:</p>
+
+		<pre class="console">&gt; UPDATE users SET passwd=MD5('zabbix_admin_password') WHERE alias='admin';
+&gt; QUIT</pre>
+
+		<h2>2. Настройка сервера мониторинга</h2>
+
+		<p>Настроим сервер мониторинга, чтобы он мог подключаться к БД. Отредактируем файл конфигурации /etc/zabbix/zabbix_server.conf, установив значения соответствующих опций:</p>
+
+		<pre class="code">DBHost=localhost
+DBName=zabbix
+DBUser=zabbix
+DBPassword=zabbix_password</pre>
+
+		<p>Запустим сервер мониторинга:</p>
+
+		<pre class="console"># /etc/init.d/zabbix-server start</pre>
+
+		<h2>3. Настройка веб-интерфейса системы мониторинга</h2>
+
+		<p>Теперь перейдём к настройке веб-интерфейса системы мониторинга. Для начала настроим сам веб-интерфейс, чтобы он мог подключаться к серверу мониторинга и к БД. Отредактируем файл /usr/share/zabbix/conf/zabbix.conf.php, установив значения соответствующих переменных:</p>
+
+		<pre class="code">$DB["TYPE"]      = "mysql";
+$DB["SERVER"]    = "localhost";
+$DB["PORT"]      = "0";
+$DB["DATABASE"]  = "zabbix";
+$DB["USER"]      = "zabbix";
+$DB["PASSWORD"]  = "zabbix_password";
+$ZBX_SERVER      = "127.0.0.1";
+$ZBX_SERVER_PORT = "10051";</pre>
+
+		<h2>4. Настройка веб-сервера</h2>
+
+		<p>Теперь настроим веб-сервер (я пользуюсь Lighttpd). Процедуру настройки модуля FastCGI для обслуживания файлов PHP я здесь опущу. Файлы веб-интерфейса лежат в каталоге, отличном от корня документов, поэтому нужно настроить псевдоним. Для этого внесём в файл /etc/lighttpd/lighttpd.conf следующие изменения:</p>
+
+		<pre class="code">alias.url += (
+  "/zabbix/" =&gt; "/usr/share/zabbix/"
+)</pre>
+
+		<p>Заставляем веб-сервер перечитать его конфигурацию и можно заходить в веб-интерфейс через браузер:</p>
+
+		<pre class="console"># /etc/init.d/lighttpd reload</pre>
+
+		<h2>5. Тюнинг PHP</h2>
+
+		<p>Пройдясь по веб-интерфейсу Zabbix, я обнаружил несколько предупреждений, касающихся настроки PHP. Все предупреждения устраняются настройкой следующих параметров в файле /etc/php5/cgi/php.ini:</p>
+
+		<pre class="code">date.timezone = Asia/Yekaterinburg
+post_max_size = 16M
+max_execution_time = 300
+max_input_time = 300</pre>
+
+		<p>После перезапуска веб-сервера предупреждения исчезают:</p>
+
+		<pre class="console"># /etc/init.d/lighttpd restart</pre>
+
+		<h2>6. Установка и настройка агента системы мониторинга</h2>
+
+		<p>Теперь можно установить агента мониторинга:</p>
+
+		<pre class="console"># apt-get install zabbix-agent</pre>
+
+		<p>Настройка агента сводится к указанию IP-адреса сервера мониторинга в файле /etc/zabbix/zabbix_agent.conf:</p>
+
+		<pre class="code">Server=127.0.0.1</pre>
+
+		<p>Теперь сервер мониторинга может наблюдать сам за собой. Можно установить дополнительные агенты мониторинга Zabbix на других компьютерах и настроить их на подключение к серверу мониторинга. Сервер мониторинга работает на TCP-порту 10051, а агент мониторинга - на TCP-порту 10050.</p>
+
+		<p>Здесь рассмотрена лишь установка системы мониторинга. Её настройка - отдельная большая тема. Чтобы получить начальное представление об устройстве системы, рекомендую обратиться к статье: <a href="http://www.sergeysl.ru/freebsd-zabbix/">FreeBSD: Установка и начальная настройка системы мониторинга Zabbix</a>. Более подробное описание можно найти на официальной вики-странице проекта: <a href="http://www.zabbix.com/documentation/ru/start">Zabbix documentation in Russian</a>.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Установка системы мониторинга Zabbix">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

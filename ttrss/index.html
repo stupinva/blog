@@ -1,0 +1,243 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="rss,nginx,debian,linux,wheezy,mysql,ttrss,php-fpm" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2014-03-23 -->
+		<title>Установка и настройка TinyTinyRSS</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Установка и настройка TinyTinyRSS</h1>
+
+		<p>TinyTinyRSS - это веб-приложение для чтения RSS-подписок. Оно использует MySQL для хранения учётных записей пользователей и информации из лент новостей. Для обновления лент используется отдельный демон или скрипт, запускаемый при помощи планировщика задач.</p>
+
+		<h2>1. Скачивание и распаковка</h2>
+
+		<p>Находим на странице <a href="http://tt-rss.org/redmine/projects/tt-rss/wiki">http://tt-rss.org/redmine/projects/tt-rss/wiki</a> ссылку на скачивание. Скачиваем тарболл и распаковываем:</p>
+
+		<pre class="console">$ wget https://github.com/gothfox/Tiny-Tiny-RSS/archive/1.11.tar.gz
+$ tar xzvf Tiny-Tiny-RSS-1.11.tar.gz</pre>
+
+		<p>Перемещаем каталог с приложением туда, откуда к нему будет обращаться веб-сервер:</p>
+
+		<pre class="console"># mv Tiny-Tiny-RSS-1.11 /usr/local/share/ttrss</pre>
+
+		<p>И даём веб-серверу права доступа к каталогу с приложением:</p>
+
+		<pre class="console"># chown www-data:www-data /usr/local/share/ttrss
+# find /usr/local/share/ttrss -type d -exec chmod u=rwx,g=rx,o= \{\} \;
+# find /usr/local/share/ttrss -type f -exec chmod u=rw,g=r,o= \{\} \;</pre>
+
+		<h2>2. Настройка пула в php5-fpm</h2>
+
+		<p>Если php5-fpm ещё не был установлен, время сделать это:</p>
+
+		<pre class="console"># apt-get install php5-fpm</pre>
+
+		<p>По умолчанию в php5-fpm имеется общий пул, настройки которого находятся в файле /etc/php/fpm/pool.d/www.conf, но в данном случае я предпочту настроить для этого приложения отдельный пул, поскольку это приложение будет использоваться редко и я не хочу постоянно держать запущенными лишние процессы. Кроме того, разные пулы, даже будучи запущенными от имени одного и того же пользователя, позволяют снизить эффект взаимного влияния разных приложений друг на друга: если одно из приложений вдруг начнёт использоваться больше остальных, оно не займёт процессы других пулов, выделенные для обработки других приложений.</p>
+
+		<p>Создадим файл пула /etc/php5/fpm/pool.d/rss.conf со следующим содержимым:</p>
+
+		<pre class="code">[rss]
+user = www-data
+group = www-data
+listen = /var/run/rss.sock
+
+listen.owner = www-data
+listen.group = www-data
+listen.mode = 0660
+
+pm = ondemand
+pm.max_children = 2
+pm.process_idle_timeout = 10m
+
+access.log = /var/log/rss.access.log</pre>
+
+		<p>Пул называется rss, процессы пула работают от имени пользователя www-data и группы www-data. Пул обрабатывают запросы, поступающие на юникс-сокет /var/run/rss.sock, доступный на чтение и запись только пользователю и группе www-data. Процессы пула порождаются только при обращении и завершаются, если к ним не было обращений более 10 минут. В пуле может быть не более 2 процессов. Журнал обработанных запросов будет вестись в файле /var/log/rss.access.log</p>
+
+		<p>Осталось перезагрузить php5-fpm, чтобы добавить новый пул:</p>
+
+		<pre class="console"># /etc/init.d/php5-fpm reload</pre>
+
+		<h2>3. Настройка веб-сервера nginx</h2>
+
+		<p>Если в системе ещё не установлен веб-сервер nginx, поставим его:</p>
+
+		<pre class="console"># apt-get install nginx-light</pre>
+
+		<p>Теперь можно отредактировать файл /etc/nginx/sites-available/default, добавив в него следующую секцию:</p>
+
+		<pre class="code">location /rss {
+  alias /usr/local/share/ttrss;
+
+  location ~ \.php$ {
+    fastcgi_pass unix:/var/run/rss.sock;
+    fastcgi_index index.php;
+
+    include fastcgi_params;
+  }
+}</pre>
+
+		<p>Если нужно настроить TinyTinyRSS для работы на отдельном доменном имени, например rss.domain.tld, то можно создать файл /etc/nginx/sites-available/rss со следующим содержимым:</p>
+
+		<pre class="code">server {
+  listen 80;
+
+  server_name rss.domain.tld;
+
+  root /usr/local/share/ttrss;
+
+  location ~ \.php$ {
+    fastcgi_pass unix:/var/run/rss.sock;
+    fastcgi_index index.php;
+
+    include fastcgi_params;
+  }
+}</pre>
+
+		<p>Чтобы вновь созданная конфигурация была задействована, нужно создать символическую ссылку на неё в каталоге /etc/nginx/sites-enabled/:</p>
+
+		<pre class="console"># cd /etc/nginx/sites-enabled/
+# ln -s /etc/nginx/sites-available/rss rss</pre>
+
+		<p>Осталось перезапустить веб-сервер:</p>
+
+		<pre class="console"># /etc/init.d/nginx restart</pre>
+
+		<h2>4. Подготовка базы данных</h2>
+
+		<p>Разработчики TinyTinyRSS рекомендуют для хранения настроек и лент использовать СУБД PostgreSQL, но возможно использовать и MySQL. Именно его я и настрою. Если сервер MySQL ещё не установлен, сделайте это:</p>
+
+		<pre class="console"># apt-get install mysql-server-5.5</pre>
+
+		<p>После установки СУБД, нужно подготовить пустую базу данных и пользователя, от имени которого приложение будет подключаться к базе данных. Соответственно, этот пользователь должен иметь полный доступ к своей базе данных. Создадим базу данных и пользователя:</p>
+
+		<pre class="console">$ mysql -uroot -p mysql
+&gt; CREATE DATABASE rss CHARSET UTF8;
+&gt; INSERT INTO user(user, password, host) VALUES('rss', PASSWORD('rss_password'), 'localhost');
+&gt; FLUSH PRIVILEGES;
+&gt; GRANT ALL ON rss.* TO rss@localhost;
+&gt; FLUSH PRIVILEGES;</pre>
+
+		<p>Вместо пароля rss_password я подставил 16-символьный пароль, сгенерированный программой pwgen из одноимённого пакета:</p>
+
+		<pre class="console">$ pwgen 16</pre>
+
+		<h2>5. Веб-настройка приложения</h2>
+
+		<p>Теперь перейдём на страницу настройки веб-сервера http://domain.tld/rss/install/ или http://rss.domain.tld/install/, в зависимости от выбранного вами варианта настройки веб-сервера:</p>
+
+		<p>Вводим настройки подключения к базе данных и нажимаем кнопку "Test configuration":</p>
+
+		<img src="ttrss1.png" alt="Ввод настроек подключения к базе данных" />
+
+		<p>После успешной проверки подключения к базе данных нажимаем на кнопку "Initialize database":</p>
+
+		<img src="ttrss2.png" alt="Инициализация базы данных" />
+
+		<p>Запоминаем имя созданного пользователя admin и его пароль password, а затем сохраняем сгенерированный файл конфигурации нажатием на кнопку "Save configuration":</p>
+
+		<img src="ttrss3.png" alt="Сохранение конфигурации" />
+
+		<p>После того, как конфигурация сохранилась, можно перейти по ссылке с текстом "loading tt-rss now":</p>
+
+		<img src="ttrss4.png" alt="Переход по ссылке" />
+
+		<p>Страница входа в приложение:</p>
+
+		<img src="ttrss5.png" alt="Вход в приложение" />
+
+		<p><b><i>Не забудьте сразу же войти в систему и поменять пароль пользователя admin на нечто более сложное, нежели слово password.</i></b></p>
+
+		<h2>6. Настройка демона обновлений</h2>
+
+		<p>На странице <a href="http://tt-rss.org/redmine/projects/tt-rss/wiki/UpdatingFeeds">http://tt-rss.org/redmine/projects/tt-rss/wiki/UpdatingFeeds</a> описано несколько разных способов обновления RSS-лент. Я решил остановиться на многопроцессном демоне обновлений update_daemon2.php. Добавим демону права на запуск:</p>
+
+		<pre class="console"># chmod ug+x /usr/local/share/ttrss/update_daemon2.php</pre>
+
+		<p>Теперь создадим init-файл /etc/init.d/ttrss для управления демоном (его можно скачать по ссылке <a hfre="ttrss">ttrss</a>):</p>
+
+		<pre class="code">#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          ttrss
+# Required-Start:    $syslog $remote_fs $network
+# Required-Stop:     $syslog $remote_fs $network
+# Should-Start:
+# Should-Stop:
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Start the TinyTinyRSS updates daemon.
+# Description:       Start the TinyTinyRSS updates daemon.
+### END INIT INFO
+
+PATH=/sbin:/bin:/usr/sbin:/usr/bin
+DAEMON=/usr/local/share/ttrss/update_daemon2.php
+NAME=ttrss
+DESC="TinyTinyRSS update daemon"
+PIDFILE=/var/run/$NAME.pid
+SCRIPTNAME=/etc/init.d/$NAME
+USER=www-data
+GROUP=www-data
+
+test -x $DAEMON || exit 0
+
+set -e
+
+. /lib/lsb/init-functions
+
+case "$1" in
+    start)
+        log_daemon_msg "Starting $DESC" $NAME
+        if ! start-stop-daemon --start --oknodo --quiet --background --make-pidfile \
+            --chuid $USER:$GROUP --pidfile $PIDFILE --exec $DAEMON
+        then
+            log_end_msg 1
+        else
+            log_end_msg 0
+        fi
+        ;;
+    stop)
+        log_daemon_msg "Stopping $DESC" $NAME
+        if start-stop-daemon --stop --retry 30 --oknodo --quiet \
+            --pidfile $PIDFILE --exec $DAEMON
+        then
+            rm -f $PIDFILE
+            log_end_msg 0
+        else
+            log_end_msg 1
+        fi
+        ;;
+    restart|reload|force-reload)
+        check_syntax
+        $0 stop
+        $0 start
+        ;;
+    status)
+        status_of_proc -p "$PIDFILE" "$DAEMON" ttrss &amp;&amp; exit 0 || exit $?
+        ;;
+    *)
+        echo "Usage: $SCRIPTNAME {start|stop|restart|reload|force-reload|status}" &gt;&amp;2
+        exit 1
+        ;;
+esac
+
+exit 0</pre>
+
+		<p>Включим автоматический запуск и остановку демона в процессе загрузки, выключения и перезагрузки системы:</p>
+
+		<pre class="console"># insserv ttrss</pre>
+
+		<p>И запустим демон обновлений прямо сейчас:</p>
+
+		<pre class="console"># /etc/init.d/ttrss start</pre>
+
+		<p>Приложение настроено, дальнейшая процедура создания пользователей и добавления подписок уже выходит за рамки заметки.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Установка и настройка TinyTinyRSS">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

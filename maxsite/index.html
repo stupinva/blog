@@ -1,0 +1,182 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="lighttpd,linux,debian,wheezy,php,mysql" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2014-03-09 -->
+		<title>Установка MaxSite CMS</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Установка MaxSite CMS</h1>
+
+		<p>Одними из самых популярных систем управления наполнением сайтов являются Wordpress, Drupal и Joomla! Однако, хочется отметить отечественную разработку - MaxSite, за автором некоего Максима, фамилию которого я так и не смог нагуглить :) Из достоинств системы я отмечу использование фреймворка CodeIgniter, простоту настройки, нетребовательность к ресурсам.</p>
+
+		<p>В этой заметке я рассмотрю процесс установки MaxSite для совместной работы с веб-сервером Lighttpd.</p>
+
+		<h2>1. Подготовка БД</h2>
+
+		<p>Если в системе ещё не установлен MySQL, его сервер и клиент можно установить при помощи команды:</p>
+
+		<pre class="console"># apt-get install mysql-server mysql-client</pre>
+
+		<p>Первым делом мы создадим для сайта пустую базу данных в MySQL:</p>
+
+		<pre class="console">CREATE DATABASE maxsite CHARSET UTF8;
+INSERT INTO user(user, host, password) VALUES('maxsite', 'localhost', PASSWORD('maxsite_password'));
+FLUSH PRIVILEGES;
+GRANT ALL ON maxsite.* TO 'maxsite'@'localhost';
+FLUSH PRIVILEGES;</pre>
+
+		<p>Для генерации реального пароля я обычно пользуюсь программой pwgen из одноимённого пакета. Если пароль будет использоваться какой-то программой и его не нужно будет вводить руками, обычно я генерирую 16-символьные пароли:</p>
+
+		<pre class="console">$ pwgen 16</pre>
+
+		<p>Один из паролей можно использовать в качестве замены для maxsite_password в командах выше.</p>
+
+		<h2>2. Настройка CMS</h2>
+
+		<p>Теперь скачиваем дистрибутив с официального сайта проекта и распаковываем его:</p>
+
+		<pre class="console">$ wget http://max-3000.com/download -O maxsite-cms-0.86x.zip
+$ unzip maxsite-cms-0.86x.zip
+$ cd cms-master</pre>
+
+		<p>Теперь можно скопировать необходимое в каталог, к которому будет обращаться веб-сервер:</p>
+
+		<pre class="console"># cp -R application index.php system uploads /home/www/blog.domain.tld/
+# cd /home/www
+# chown -R www-data:www-data blog.domain.tld
+# cd blog.domain.tld</pre>
+
+		<p>Как выяснилось позднее, CMS требует наличия файлов .htaccess и sitemap.xml. Первый из них в моей системе будет пустым по той причине, что я не использую Apache. Пример второго файла, как оказалось, пустой и в самом дистрибутиве. Создадим эти файлы:</p>
+
+		<pre class="console"># touch .htaccess
+# touch sitemap.xml
+# chown www-data:www-data .htaccess sitemap.xml</pre>
+
+		<p>Теперь пропишем в настройки CMS учётные данные для подключения к базе данных в файле application/config/database.php, взяв за его основу файл application/config/database.php-dist:</p>
+
+		<pre class="console">$ cd application/config
+$ mv database.php-dist database.php
+$ vim database.php</pre>
+
+		<p>Достаточно лишь изменить три настройки:</p>
+
+		<pre class="console">$db['default']['username'] = 'maxsite';
+$db['default']['password'] = 'maxsite_password';
+$db['default']['database'] = 'maxsite';</pre>
+
+		<p>Следующий файл, подлежащий настройке - application/config/mso_config.php. В нём я ничего не трогал, поэтому достаточно лишь переименовать его:</p>
+
+		<pre class="console">$ mv mso_config.php-dist mso_config.php</pre>
+
+		<p>И, наконец, перед тем, как приступить к настройке веб-сервера настроим ещё один файл - application/maxsite/mso_config.php, за основу которого возьмём, как вы уже догадались, файл application/maxsite/mso_config.php-dist:</p>
+
+		<pre class="console">$ cd ../maxsite
+$ mv mso_config.php-dist mso_config.php</pre>
+
+		<p>В нём нужно прописать ключ, которым CMS будет шифровать Cookie:</p>
+
+		<pre class="code">$MSO-&gt;config['secret_key'] = 'secret_key';</pre>
+
+		<p>Для его генерации я опять воспользовался pwgen, указав на этот раз 128 символов - слово "ключ" подразумевает под собой строчку в несколько раз длиннее того, что обычно используется в качестве пароля:</p>
+
+		<pre class="console">$ pwgen 128</pre>
+
+		<p>После настройки сайта через веб-интерфейс можно будет также прописать в этот файл следующую настройку, которая отключит дальнейшую возможность повторно пройти процедуру инсталляции (делать это пока рано):</p>
+
+		<pre class="code">$mso_install = true;</pre>
+
+		<h2>3. Настройка веб-сервера Lighttpd</h2>
+
+		<p>Вместо предполагаемого по умолчанию веб-сервера Apache, на который недвусмысленно намекают файлы .htaccess, я воспользуюсь веб-сервером Lighttpd, которым пользуюсь обычно.</p>
+
+		<p>Если в системе ещё не установлены Lighttpd и PHP, их можно установить при помощи команды:</p>
+
+		<pre class="console"># apt-get install lighttpd php5-cgi</pre>
+
+		<p>Создадим файл настройки Lighttpd, эквивалентный .htaccess - /etc/lighttpd/conf-available/50-maxsite.conf:</p>
+
+		<pre class="code">$HTTP["host"] == "max.stupin.su" {
+
+  server.document-root  = "/home/www/blog.domain.tld"
+
+  url.rewrite-once = ( "^(/(?!(index\.php|application|uploads|robots\.txt|favicon\.ico).*))" =&gt; "/index.php/$1" )
+
+  $HTTP["url"] =~ "^/uploads" {
+    fastcgi.server = ()
+  }
+}</pre>
+
+		<p>Для работы этого файла понадобится включить модуль rewrite, который в Debian включается не при помощи обычной для этого утилиты lighty-enable-mod, а простым раскомментированием соответствующей строчки в файле /etc/lighttpd/lighttpd.conf</p>
+
+		<p>После этого можно включить необходимые модули и только что созданный файл с настройками для maxsite:</p>
+
+		<pre class="console"># lighty-enable-mod fastcgi
+# lighty-enable-mod fastcgi-php
+# lighty-enable-mod maxsite</pre>
+
+		<p>Осталось сообщить веб-серверу о необходимости применить новые настройки:</p>
+
+		<pre class="console"># /etc/init.d/lighttpd force-reload</pre>
+
+		<h2>4. Настройка CMS через веб-интерфейс</h2>
+
+		<p>Теперь можно перейти в браузере по адресу blog.domain.tld и завершить процедуру настройки.</p>
+
+		<p>Проверка правил rewrite:</p>
+
+		<img src="maxsite1.png" alt="Проверка правил rewrite" />
+
+		<p>Ввод настроек блога и проверка правильности настройки веб-сервера:</p>
+
+		<img src="maxsite2.png" alt="Ввод настроек блога и проверка правильности настройки веб-сервера" />
+
+		<p>Рекомендация отключить дальнейшую возможность веб-настройки:</p>
+
+		<img src="maxsite3.png" alt="Рекомендация отключить дальнейшую возможность веб-настройки" />
+
+		<p>На этом этапе стоит воспользоваться рекомендацией и прописать в файл application/maxsite/mso_config.php настройку, запрещающую дальнейшую возможность изменения настроек сайта через веб:</p>
+
+		<pre class="code">$mso_install = true;</pre>
+
+		<p>Установленная система:</p>
+
+		<img src="maxsite4.png" alt="Установленная система" />
+
+		<h2>5. Смена типа таблиц</h2>
+
+		<p>Заметил, что автоматически создаются таблицы MyISAM, поэтому переконвертировал все таблицы в InnoDB. Мне такой выбор кажется несколько странным, т.к. в MyISAM нет внешних ключей, нет транзакций, все блокировки - на уровне таблиц, а не строк. Довольно ненадёжное решение. Если уж экономить на спичках, тогда лучше было бы использовать SQLite вместо MySQL.</p>
+
+		<pre class="console">ALTER TABLE mso_cat2obj ENGINE=InnoDB;
+ALTER TABLE mso_category ENGINE=InnoDB;
+ALTER TABLE mso_comments ENGINE=InnoDB;
+ALTER TABLE mso_comusers ENGINE=InnoDB;
+ALTER TABLE mso_groups ENGINE=InnoDB;
+ALTER TABLE mso_links ENGINE=InnoDB;
+ALTER TABLE mso_meta ENGINE=InnoDB;
+ALTER TABLE mso_options ENGINE=InnoDB;
+ALTER TABLE mso_page ENGINE=InnoDB;
+ALTER TABLE mso_page_type ENGINE=InnoDB;
+ALTER TABLE mso_users ENGINE=InnoDB;</pre>
+
+		<p>Дальнейшая настройка CMS выходит за рамки этой заметки.</p>
+
+		<p>P.S. По прошествии некоторого времени использования системы хочется отметить недостатки:</p>
+
+		<ul>
+			<li>неудобство управления заметками из админки, т.к. заметки выбираются из выпадающего списка, а не классическими галочками, из-за чего становится невозможным выбрать несколько заметок сразу,</li>
+
+			<li>встроенный редактор заметок, использующий свои собственные теги в квадратных скобках, которые не обрабатываются без установки дополнительного плагина. Уж лучше встроенный редактор использовал бы обычные HTML-коды или плагин был бы встроен основной функционал системы, а так как есть - не логично,</li>
+
+			<li>неудобство управления картинками. Нельзя одновременно выбрать и загрузить несколько картинок, не выбирая их по одной. Зачем-то приходится выбирать папку, в которую необходимо загрузить картинки. Нельзя только что загруженные картинки сразу вставить в текст - приходится искать их в списке загруженных и отмечать каждую отдельно.</li>
+		</ul>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Установка MaxSite CMS">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

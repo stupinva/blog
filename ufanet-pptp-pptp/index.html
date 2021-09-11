@@ -1,0 +1,307 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="two-isp,pbr,debian,linux" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2009-01-04 -->
+		<title>Два VPN-подключения к Уфанет</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Два VPN-подключения к Уфанет</h1>
+
+		<p>В прошлом месяце (и году) пытался настроить два VPN-подключения к Уфанет. Одно подключение - по безлимитному тарифу, а другое подключение с бесплатной локалкой. От первого я бы получил минимум ограничений по направлению трафика, а от второго - высокую скорость при работе в локальной сети Уфанет. Настроил, поработал с недельку, а потом перешёл к обычной схеме с безлимитным интернетом, потому что два соединения работали довольно неустойчиво - виной тому были недостаточно хорошо проработанные скрипты. Решил отложить чистую настройку до тех пор пока не появится настроение. И вот позавчера вечером я наконец набросал желаемую схему, вчера её успешно испытал и сегодня хочу поделиться наработками, которые мне не стыдно показать (хотя доработать ещё кое-что можно).</p>
+
+		<p>Для настройки двух VPN-соединений нам понадобятся пакеты pptp-linux, resolvconf, iproute, ifupdown, bind9-host. Их можно установить командой:</p>
+
+		<pre class="console"># aptitude install pptp-linux resolvconf iproute bind9-host</pre>
+
+		<p>ifupdown входит в минимальную поставку системы, поэтому в установке не нуждается.</p>
+
+		<h2>1. Настроим сетевые интерфейсы.</h2>
+
+		<p>Настроим локальный петлевой интерфейс, Ethernet-интерфейс Уфанет, и автоматическое подключение двух VPN-соединений.</p>
+
+		<p><b>/etc/network/interfaces:</b></p>
+
+		<pre class="code">auto lo
+iface lo inet loopback
+
+auto <b>eth0</b>
+iface <b>eth0</b> inet dhcp
+
+auto iunlim
+iface iunlim inet ppp
+  provider iunlim
+
+auto lunlim
+iface lunlim inet ppp
+  provider lunlim</pre>
+
+		<p>Добавляем в файл конфигурации DHCP-клиента /etc/dhcp3/dhclient.conf новую секцию, связанную с интерфейсом eth0:</p>
+
+		<pre class="code">interface "<b>eth0</b>" {
+  script "/root/bin/dhclient-ufanet";
+}</pre>
+
+		<p>Копируем сценарий, выполняющийся по умолчанию, в каталог /root/bin/ под именем dhclient-ufanet:</p>
+
+		<pre class="console"># mkdir /root/bin/
+# cp /sbin/dhclient-script /root/bin/dhclient-ufanet</pre>
+
+		<p>Заменяем в скопированном сценарии строчки следующего вида в двух местах:</p>
+
+		<pre class="code">for router in $new_routers; do
+  route add default dev $interface gw $router $metric_arg
+done</pre>
+
+		<p>На строчки вида:</p>
+
+		<pre class="code">for router in $new_routers; do
+  for dns in $new_domain_name_servers; do
+    route add -host $dns dev $interface gw $router $metric_arg
+    vpn=`host -t A vpn.ufanet.ru $dns | cut -d" " -f4`
+    route add -host $vpn dev $interface gw $router $metric_arg
+  done
+done</pre>
+
+		<p>Таким образом при получении настроек по DHCP мы не будем добавлять в систему маршрут по умолчанию, а добавим маршруты, необходимые для установки VPN-подключений: маршруты к VPN-серверу и маршруты к DNS-серверам (изменённый сценарий можно взять здесь: <a href="dhclient-ufanet">dhclient-ufanet</a>).</p>
+
+		<p>Вам может понадобиться заменить в настройках интерфейс <b>eth0</b> (выше он выделен жирным шрифтом) на тот, к которому подключен Ethernet-кабель Уфанет.</p>
+
+		<h2>2. Настроим приоритеты DNS-серверов.</h2>
+
+		<p>DNS-серверы на интерфейсах ppp должны быть приоритетнее DNS-серверов на интерфейсах Ethernet, поэтому в файле /etc/resolvconf/interface-order строчку ppp* поместим перед eth*.</p>
+
+		<p><b>/etc/resolvconf/interface-order:</b></p>
+
+		<pre class="code"># interface-order(5)
+lo.inet*
+lo.dnsmasq
+lo.pdnsd
+lo.!(pdns|pdns-recursor)
+lo
+tun*
+tap*
+ppp*
+eth*
+ath*
+wlan*
+*</pre>
+
+		<h2>3. Создадим таблицы маршрутизации.</h2>
+
+		<p>Добавим две таблицы с именами lunlim и iunlim, которые будут содержать маршруты ответственные за работу ответного трафика соединений устанавливаемых снаружи.</p>
+
+		<p><b>/etc/iproute2/rt_tables:</b></p>
+
+		<pre class="code">#
+# reserved values
+#
+255     local
+254     main
+253     default
+0       unspec
+#
+# local
+#
+#1      inr.ruhep
+
+201     iunlim
+202     lunlim</pre>
+
+		<h2>4. Настроим VPN-соединения.</h2>
+
+		<p>Зададим опции для PPP-соединений.</p>
+
+		<p><b>/etc/ppp/options:</b></p>
+
+		<pre class="code">asyncmap 0
+auth
+crtscts
+lock
+hide-password
+modem
+proxyarp
+lcp-echo-interval 30
+lcp-echo-failure 4
+noipx
+usepeerdns</pre>
+
+		<p>Зададим опции для PPTP-соединений.</p>
+
+		<p><b>/etc/ppp/options.pptp:</b></p>
+
+		<pre class="code">lock
+noauth
+nobsdcomp
+nodeflate
+persist
+maxfail 0</pre>
+
+		<p>В файле /etc/ppp/chap-secrets пропишем логины и пароли на подключение к VPN-серверу Уфанет.</p>
+
+		<p><b>/etc/ppp/chap-secrets:</b></p>
+
+		<pre class="code"># Secrets for authentication using CHAP
+# client           server          secret     IP addresses
+<b>main_login</b>@local   vpn.ufanet.ru   <b>password</b>   *
+<b>freedom_login</b>      vpn.ufanet.ru   <b>password</b>   *</pre>
+
+		<p>Где:</p>
+
+		<ul>
+			<li>main_login - это логин на подключение по основному тарифу.</li>
+
+			<li>freedom_login - это логин на подключение по тарифу "Свобода".</li>
+
+			<li>password - это соответствующие пароли на подключение.</li>
+		</ul>
+
+		<p>Ваши логины необходимо прописать также в файлах /etc/ppp/peers/iunlim и /etc/ppp/peers/lunlim далее по тексту (они выделены жирным шрифтом).</p>
+
+		<p>Файл /etc/ppp/peers/iunlim задаёт настройки подключения по безлимитному тарифу "Свобода" и привязывает его к интерфейсу ppp0.</p>
+
+		<p><b>/etc/ppp/peers/iunlim:</b></p>
+
+		<pre class="code">pty "pptp vpn.ufanet.ru --nolaunchpppd"
+name <b>freedom_login</b>
+remotename vpn.ufanet.ru
+file /etc/ppp/options.pptp
+ipparam iunlim
+unit 0</pre>
+
+		<p>Файл /etc/ppp/peers/lunlim задаёт настройки подключения по основному тарифу и привязывает его к интерфейсу ppp1.</p>
+
+		<p><b>/etc/ppp/peers/lunlim:</b></p>
+
+		<pre class="code">pty "pptp vpn.ufanet.ru --nolaunchpppd"
+name <b>main_login</b>@local
+remotename vpn.ufanet.ru
+file /etc/ppp/options.pptp
+ipparam lunlim
+unit 1</pre>
+
+		<p>В скрипте /etc/ppp/ip-up.d/route происходит добавление маршрутов к локальным подсетям Уфанет на локальном соединении и добавление маршрутов к нелокальным узлам на внешнем соединении.</p>
+
+		<p><b>/etc/ppp/ip-up.d/route:</b></p>
+
+		<pre class="code">#!/bin/sh
+
+case "$PPP_IPPARAM" in
+  lunlim)
+    ip route add 81.30.176.0/20 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route add 81.30.192.0/19 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route add 89.189.128.0/19 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route add 77.79.128.0/18 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route add 92.50.128.0/18 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route add 94.41.0.0/18 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route add 94.41.128.0/21 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route add 94.41.136.0/22 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route add 94.41.140.0/23 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route add 79.140.24.0/22 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route add 79.140.16.0/21 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route add 172.16.0.0/12 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route add 10.0.0.0/8 dev $PPP_IFACE src $PPP_LOCAL table main
+
+    ip route add default dev $PPP_IFACE src $PPP_LOCAL table lunlim
+    ip rule add from $PPP_LOCAL table lunlim
+    ;;
+  iunlim)
+    ip route add 81.30.199.50 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route add 81.30.199.69 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route add 81.30.199.238 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route add 81.30.197.10 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route add default dev $PPP_IFACE src $PPP_LOCAL table main
+
+    ip route add default dev $PPP_IFACE src $PPP_LOCAL table iunlim
+    ip rule add from $PPP_LOCAL table iunlim
+    ;;
+  *)
+    echo "No PPP_IPPARAM defined"
+    ;;
+esac</pre>
+
+		<p>Не забудьте сделать скрипт исполняемым, например командой:</p>
+
+		<pre class="console"># chmod +x /etc/ppp/ip-up.d/route</pre>
+
+		<p>В скрипте /etc/ppp/ip-down.d/route происходит удаление маршрутов к локальным подсетям Уфанет на локальном соединении и удаление маршрутов к нелокальным узлам на внешнем соединении.</p>
+
+		<p><b>/etc/ppp/ip-down.d/route:</b></p>
+
+		<pre class="code">#!/bin/sh
+
+case "$PPP_IPPARAM" in
+  lunlim)
+    ip route del 81.30.176.0/20 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route del 81.30.192.0/19 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route del 89.189.128.0/19 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route del 77.79.128.0/18 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route del 92.50.128.0/18 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route del 94.41.0.0/18 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route del 94.41.128.0/21 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route del 94.41.136.0/22 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route del 94.41.140.0/23 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route del 79.140.24.0/22 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route del 79.140.16.0/21 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route del 172.16.0.0/12 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route del 10.0.0.0/8 dev $PPP_IFACE src $PPP_LOCAL table main
+
+    ip route del default dev $PPP_IFACE src $PPP_LOCAL table lunlim
+    ip rule del from $PPP_LOCAL table lunlim
+    ;;
+  iunlim)
+    ip route del 81.30.199.50 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route del 81.30.199.69 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route del 81.30.199.238 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route del 81.30.197.10 dev $PPP_IFACE src $PPP_LOCAL table main
+    ip route del default dev $PPP_IFACE src $PPP_LOCAL table main
+
+    ip route del default dev $PPP_IFACE src $PPP_LOCAL table iunlim
+    ip rule del from $PPP_LOCAL table iunlim
+    ;;
+  *)
+    echo "No PPP_IPPARAM defined"
+    ;;
+esac</pre>
+
+		<p>Не забудьте сделать скрипт исполняемым, например командой:</p>
+
+		<pre class="console"># chmod +x /etc/ppp/ip-down.d/route</pre>
+
+		<p>Для ручного включения и отключения соединений можно пользоваться командами:</p>
+
+		<ul>
+			<li>pon iunlim - включить безлимитный интернет,</li>
+			<li>poff iunlim - отключить безлимитный интернет,</li>
+			<li>pon lunlim - включить безлимитную локалку,</li>
+			<li>poff lunlim - отключить безлимитную локалку.</li>
+		</ul>
+
+		<p>В файле /etc/network/interfaces настроена автоматическая установка обоих VPN-соединений. Можете изменить настройки в этом файле по своему желанию - оставить оба соединения, только одно из них или отключить оба. При этом вы всегда сможете установить или разорвать любое из соединений вручную, командами описанными выше.</p>
+
+		<p>Для настройки этого хозяйства воспользовался своими изысканиями в соответствующих областях (1, 2, 4) и официальной информацией (3):</p>
+
+		<ol>
+			<li><a href="../ufanet-pptp/">Настраиваем VPN-соединение с Уфанетом в Debian</a></li>
+
+			<li><a href="../ufanet/">Кое-что об Ufanet</a></li>
+
+			<li><a href="http://www.ufaman.ru/internet/homenet/homenet_resource_about.shtml">Официальная страница Уфанет со списком локальных подсетей</a></li>
+
+			<li><a href="../dnat-pbr/">DNAT и Policy Based Routing (portmapping и два канала)</a></li>
+
+		</ol>
+
+		<p>Обновлено 23 февраля 2009 года.</p>
+
+		<p>Обновлено 6 апреля 2009 года.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Два VPN-подключения к Уфанет">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

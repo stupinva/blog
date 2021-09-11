@@ -1,0 +1,168 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="ocsp,apache,Реми ван Элст,openssl,tls,перевод,ssl" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-02-19 -->
+		<title>Реми ван Элст. Вшивание OCSP в Apache, 2014</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Реми ван Элст. Вшивание OCSP в Apache, 2014</h1>
+
+		<p>Перевод статьи: <a href="https://raymii.org/s/tutorials/OCSP_Stapling_on_Apache2.html">OCSP Stapling on Apache</a></p>
+
+		<p>Автор: Реми ван Элст (Remy van Elst)</p>
+
+		<p>При подключении к серверу, клиент должен проверить действительность сертификата сервера по списку отозванных сертификатов - CRL, или по протоколу интерактивного статуса сертификата - OCSP. Проблема CRL заключается в том, что списки могут вырасти до огромных размеров и скачивание может затянуться на вечность.</p>
+
+		<p>OCSP намного легче, поскольку за один раз запрашивается одна запись. Но недостаток состоит в том, что при подключении к серверу нужно выполнить OCSP-запрос к стороннему ответчику, что увеличивает задержку и может оказаться причиной сбоев. Фактически, ответчики OCSP управляются удостоверяющим центром, недоступность которого для браузера приведёт к ошибке, если ответ не будет получен своевременно. Это уменьшает безопасность, позволяя атакующему наводнить запросами ответчик OCSP, чтобы отключить проверку.</p>
+
+		<p>Решение заключается в том, чтобы разрешить серверу отправлять в процессе рукопожатия TLS запись OCSP из кэша, так чтобы не затрагивать ответчика OCSP. Этот механизм избавляет клиента от необходимости связываться с ответчиком OCSP и называется вшиванием OCSP.</p>
+
+		<p>Сервер посылает ответ OCSP из кэша только если клиент его запрашивает, сообщая в CLIENT HELLO о поддержке расширения TLS status_request.</p>
+
+		<p>Большинство серверов сохраняют в кэш OCSP-ответы на 48 часов. Через регулярные интервалы времени сервер будет подключаться к ответчику OCSP удостоверяющего центра, чтобы получить свежую запись OCSP. Расположение ответчика OCSP берётся из подписанного сертификата, из поля Authority Information Access - доступ к информации о подлинности.</p>
+
+		<p><a href="../ocsp-nginx/">Это руководство также доступно для nginx.</a></p>
+
+		<h2>1. Что такое "вшивание OCSP"?</h2>
+
+		<p>Вшивание OCSP определено в <a href="http://tools.ietf.org/html/rfc6066">IETF RFC 6066</a>. "Вшивание" - это популярное слово, используемое для объяснения принципа получения OCSP-ответа от веб-сервера. Веб-сервер помещает в кэш ответ от удостоверяющего центра, выпустившего сертификат. В процессе рукопожатия SSL/TLS ответ клиенту возвращается веб-сервером, который прикладывает OCSP-ответ из кэша в сообщение CertificateStatus со статусом сертификата. Для использования вшивания OCSP клиент должен включить расширение status_request в его приветственном SSL/TSL-сообщении.</p>
+
+		<p>Вшивание OCSP имеет несколько дополнительных плюсов:</p>
+
+		<ul>
+			<li>Клиент получает статус сертификата веб-сервера, когда это требуется (в процессе рукопожатия SSL/TLS).</li>
+
+			<li>Не требуется устанавливать дополнительное HTTP-подключение к удостоверяющему центру, выпустившему сертификат.</li>
+
+			<li>Вшивание OCSP увеличивает безопасность, уменьшая количество векторов атаки.</li>
+
+		</ul>
+
+		<p>Обратитесь за дополнительной информацией об OCSP и вшивании OCSP по одной из следующих ссылок:</p>
+
+		<ul>
+			<li><a href="http://en.wikipedia.org/wiki/OCSP_stapling">OCSP stapling - Вшивание OSCP</a></li>
+
+			<li><a href="http://en.wikipedia.org/wiki/Online_Certificate_Status_Protocol">Online Certificate Status Protocol - Протокол интерактивного статуса сертификата</a></li>
+
+			<li><a href="http://security.stackexchange.com/questions/29686/how-does-ocsp-stapling-work">How does OCSP stapling work? - Как работает вшивание OCSP?</a></li>
+
+			<li><a href="https://blog.mozilla.org/security/2013/07/29/ocsp-stapling-in-firefox/">OCSP Stapling in Firefox - Вшивание OCSP в Firefox</a></li>
+
+			<li><a href="http://www.thawte.com/assets/documents/whitepaper/ocsp-stapling.pdf">Guide to OCSP Stapling - Руководство по вшиванию OCSP</a></li>
+
+			<li><a href="http://news.netcraft.com/archives/2013/04/16/certificate-revocation-and-the-performance-of-ocsp.html">Certificate revocation and the performance of OCSP - Отзыв сертификата и производительность OCSP</a></li>
+		</ul>
+
+		<h2>2. Требования</h2>
+
+		<p>Для настройки потребуется Apache версии 2.3.3 или выше и OpenSSL версии 0.9.8h или выше. Они не доступны в текущем релизе Ubuntu LTS (12.04), где <a href="http://packages.ubuntu.com/precise/apache2">есть только 2.2.22</a>, а <a href="http://mirror.centos.org/centos/6/os/x86_64/Packages/">в CentOS 6 есть только 2.2.15</a>. Поищите неофициальный репозиторий в PPA или соберите программы самостоятельно.</p>
+
+		<p>Также нужно создать исключение в пакетном фильтре, чтобы разрешить веб-серверу совершать исходящие подключения к вышестоящим серверам OCSP. URI OCSP веб-сайта можно увидеть при помощи следующей команды:</p>
+
+		<pre class="console">OLDIFS=$IFS; \
+IFS=':' certificates=$(openssl s_client -connect google.com:443 -showcerts -tlsextdebug -tls1 2&gt;&amp;1 &lt;/dev/null \
+ | sed -n '/-----BEGIN/,/-----END/ {/-----BEGIN/ s/^/:/; p}'); \
+for certificate in ${certificates#:}; do \
+ echo $certificate | openssl x509 -noout -ocsp_uri; \
+done; \
+IFS=$OLDIFS</pre>
+
+		<p>Вот результаты для google.com:</p>
+
+		<pre class="console">http://clients1.google.com/ocsp
+http://gtglobal-ocsp.geotrust.com</pre>
+
+		<p>Замените google.com на ваш домен. Также отметим, что требуются GNU-версии sed и bash. Команда не работает в OS X и в BSD.</p>
+
+		<h2>3. Конфигурация Apache</h2>
+
+		<p>Добавим следующие настройки в секцию VirtualHost:</p>
+
+		<pre class="code">SSLUseStapling on
+SSLStaplingCache "shmcb:logs/stapling-cache(150000)"</pre>
+
+		<p>Далее приведём объяснение этих двух строк:</p>
+
+		<h3>3.1. SSLUseStapling</h3>
+
+		<p>Вшивание OCSP освобождает клиента от необходимости обращаться к OCSP-ответчику самостоятельно, но необходимо отметить, что в соответствии со спецификацией RFC 6066, ответ сервера в поле CertificateStatus может содержать OCSP-ответ только для одного сертификата. Если же в сертификате сервера имеется цепочка сертификатов промежуточных удостоверяющих центров (что в наши дни встречается повсеместно), текущая реализация вшивания лишь частично достигает цели "снизить задержку и использование ресурсов". Обратитесь также к RFC 6961, где описывается TLS Multiple Certificate Status Extension - расширение TLS для проверки статуса нескольких сертификатов.</p>
+
+		<h3>3.2. SSLStaplingCache</h3>
+
+		<p>Настраивает кэш для хранения OCSP-ответов, которые будут использоваться в процедуре рукопожатия TLS, если включена директива SSLUseStapling. Необходима явная настройка кэша для вшивания OCSP. Поддерживаются те же типы хранилища, что и в SSLSessionCache, за исключением none и nonenotnull.</p>
+
+		<p>Глава о shmbc:</p>
+
+		<blockquote>Создаёт высокопроизводительный циклический буфер (размером примерно size байт) в разделяемом сегменте оперативной памяти (создаётся через путь к файлу данных - /path/to/datafile) для синхронизации кэшей локальной памяти OpenSSL процессов сервера. Рекомендуется использовать его для кэширования сеансов. При использовании убедитесь, что загружен модуль mod_socache_shmcb.</blockquote>
+
+		<p>Также можно указать несколько дополнительных опций. Например, время, через которое OCSP-ответ будет считаться устаревшим:</p>
+
+		<pre class="code">SSLStaplingResponseMaxAge 900</pre>
+
+		<p>Эта директива разрешает держать ответ в кэше не более 15 минут (900 секунд).</p>
+
+		<p>Если сервер Apache находится за HTTP-прокси, может понадобиться выполнять OCSP-запросы через прокси. Для этого можно воспользоваться директивой SSLStaplingForceURL. Она заменяет URL из сертификата:</p>
+
+		<pre class="code">SSLStaplingForceURL http://internal-proxy.example.org</pre>
+
+		<p>Перезапустите Apache, чтобы загрузить новую конфигурацию:</p>
+
+		<pre class="console">service apache2 restart</pre>
+
+		<p>Теперь всё должно заработать. Давайте проверим.</p>
+
+		<h2>4. Тестирование</h2>
+
+		<p>Откройте терминал и воспользуйтесь следующей командой OpenSSL для подключения к вашему веб-сайту:</p>
+
+		<pre class="console">openssl s_client -connect example.org:443 -tls1 -tlsextdebug -status</pre>
+
+		<p>В ответе обратим внимание на следующее:</p>
+
+		<pre class="console">OCSP response:                                                   # Ответ OCSP:
+======================================
+OCSP Response Data:                                              # Данные ответа OCSP
+    OCSP Response Status: successful (0x0)                       #     Статус ответа OCSP: успешно (0x0)
+    Response Type: Basic OCSP Response                           #     Тип ответа: Базовый ответ OCSP
+    Version: 1 (0x0)                                             #     Версия: 1 (0x0)
+    Responder Id: 99E4405F6B145E3E05D9DDD36354FC62B8F700AC       #     Идентификатор ответчика
+    Produced At: Feb 3 04:25:39 2014 GMT                         #     Сформирован: 3 февраля 2014 года в 04:25:39 по Гринвичу
+    Responses:                                                   #     Ответы:
+    Certificate ID:                                              #     Идентификатор сертификата:
+      Hash Algorithm: sha1                                       #       Алгоритм хэширования: sha1
+      Issuer Name Hash: 0226EE2F5FA2810834DACC3380E680ACE827F604 #       Хэш имени эмитента
+      Issuer Key Hash: 99E4405F6B145E3E05D9DDD36354FC62B8F700AC  #       Хэш ключа эмитента
+      Serial Number: 1003                                        #       Серийный номер
+    Cert Status: good                                            #     Статус сертификата: хороший
+    This Update: Feb 3 04:25:39 2014 GMT                         #     Это обновление: 3 февраля 2014 года в 04:25:39 по Гринвичу
+    Next Update: Feb 7 04:25:39 2014 GMT                         #     Следующее обновление: 7 февраля 2014 года в 04:25:39 по Гринвичу</pre>
+
+		<p>Этот ответ означает, что всё работает. Если получен ответ, подобный следующему, то это значит что вшивание OCSP не работает:</p>
+
+		<pre class="console">OCSP response: no response sent # OCSP-ответ: ответ не получен</pre>
+
+		<p>Вы также можете воспользоваться проверкой <a href="https://ssllabs.com/">SSL Labs</a>, чтобы проверить, что вшивание OCSP работает.</p>
+
+		<h2>5. Источники</h2>
+
+		<ul>
+			<li><a href="https://httpd.apache.org/docs/trunk/mod/mod_ssl.html#sslusestapling">Документация Apache по SSLUseStapling</a></li>
+
+			<li><a href="http://httpd.apache.org/docs/trunk/mod/mod_ssl.html#sslstaplingcache">Документация Apache по SSLStaplingCache</a></li>
+
+			<li><a href="https://httpd.apache.org/docs/trunk/mod/mod_ssl.html#SSLStaplingForceURL">Документация Apache по SSLStaplingForceURL</a></li>
+
+			<li><a href="http://httpd.apache.org/docs/trunk/mod/mod_ssl.html#SSLStaplingResponderTimeout">Документация Apache по SSLStaplingResponderTimeout</a></li>
+		</ul>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Реми ван Элст. Вшивание OCSP в Apache, 2014">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

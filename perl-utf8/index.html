@@ -1,0 +1,59 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="html::template,dbi,perl,utf-8,cgi" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2012-09-09 -->
+		<title>Perl и UTF-8</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Perl и UTF-8</h1>
+
+		<p>Оставим в стороне теорию, о ней достаточно написано из без меня, например, здесь <a href="http://habrahabr.ru/post/53578/">Пара слов про UTF-8</a> и здесь <a href="http://www.nestor.minsk.by/sr/2008/09/sr80902.html">UTF Perl Practice, или как использовать UTF-8 в перле</a>. После прочтения теории я занялся практикой и сделал для себя следующие практические заготовки.</p>
+
+		<p>Включаем флаг UTF-8 для всех строк в программе:</p>
+
+		<pre class="code">use utf8;</pre>
+
+		<p>Выставляем флажок UTF-8 для всех строк, прочитанных или записанных в текстовые файлы, включая стандартные потоки ввода-вывода:</p>
+
+		<pre class="code">use open qw(:std :utf8);</pre>
+
+		<p>Странным образом предыдущие настройки включают блочную буферизацию стандартных потоков вывода. Отключаем её:</p>
+
+		<pre class="code">select(STDERR);
+$| = 1;
+select(STDOUT);
+$| = 1;</pre>
+
+		<p>Выставляем флажок UTF-8 для всех строк, полученных в переменных CGI:</p>
+
+		<pre class="code">use CGI qw(:cgi -utf8);</pre>
+
+		<p>Выставляем флажок UTF-8 для файла, с помощью которого грузится шаблон HTML::Template и все подшаблоны. К сожалению, не нашёл в документации модуля способа однократно задать использование этой настройки глобально.</p>
+
+		<pre class="code">my $template = HTML::Template-&gt;new(filename =&gt; "/var/www/index.tmpl",
+                                   utf8 =&gt; 1,
+                                   die_on_bad_params =&gt; 0,
+                                   global_vars =&gt; 1);</pre>
+
+		<p>Чтобы модуль DBI выставлял флаг UTF-8 для всех строк, прочитанных из БД MySQL или переданных ей, выставляем настройку в дескрипторе соединения.</p>
+
+		<pre class="code">$dbh-&gt;{mysql_enable_utf8} = 1;</pre>
+
+		<p>Аналогично для PostgreSQL:</p>
+
+		<pre class="code">$dbh-&gt;{pg_enable_utf8} = 1;</pre>
+
+		<p>Нужно отметить, что эти настройки для DBI не указывает кодировку клиента, а только лишь дают инструкцию модулю выставлять флажок UTF-8 у строк.</p>
+
+		<p>На этом, вроде, всё.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Perl и UTF-8">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

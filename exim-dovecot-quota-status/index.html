@@ -1,0 +1,150 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="stretch,quota-status,debian,linux,exim,dovecot" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2019-06-30 -->
+		<title>Exim и Dovecot quota-status</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Exim и Dovecot quota-status</h1>
+
+		<p>5 лет назад я написал заметку <a href="../exim-dovecot/">Exim и Dovecot без SQL</a>, в конце которой имелся такой вот абзац:</p>
+
+		<blockquote>Для проверки квот на этапе RCPT сеанса ESMTP можно было бы воспользоваться не только самописным скриптом, но и сервисом проверки квот quota-status, который появился в Dovecot 2.2 (в Debian Wheezy поставляется Dovecot версии 2.1.7), благо Exim позволяет отправлять запросы в юникс-сокеты и читать из них ответ.</blockquote>
+
+		<p>С момента написания той заметки я по-прежнему пользуюсь тем почтовым сервером, настройка которого была описана в статье. Сервер пережил несколько обновлений операционной системы, и Dovecot сейчас обновлён до версии 2.2.27.</p>
+
+		<p>Не так давно некто Slavko в комментариях к той заметке спросил, удалось ли мне прикрутить quota-satus к Exim. Я попробовал и у меня получилось. В ходе дальнейшей переписки в комментариях найденное решение было улучшено, а также была подтверждена его пригодность для промышленной эксплуатации на серверах с большим потоком входящих писем.</p>
+
+		<p>Объясню вкратце, зачем нужен quota-status и в чём сложности его интеграции с Exim.</p>
+
+		<p>Когда Dovecot и Exim настраиваются с использованием базы данных SQL, имеется возможность хранить информацию о текущем использовании квот почтового ящика в базе данных. Эту информацию можно использовать в почтовом сервере Exim на этапе приёма писем, чтобы не принимать к доставке письма на переполненные почтовые ящики.</p>
+
+		<p>При настройке связки Dovecot и Exim без использования базы данных SQL такой простой способ проверки квот пропадает. Exim не может проверить квоту почтового ящика получателя и принимает письмо к доставке. Если места в ящике нет, Dovecot не принимает письмо от Exim и Exim вынужден слать отправителю письма ответное письмо с сообщением об ошибке - рикошет.</p>
+
+		<p>В Dovecot имеется плагин quota-status, который реализует сервис для проверки превышения квоты получателем письма. Небольшая проблема заключается в том, что этот сервис рассчитан на работу с Postfix, т.к. сервис реализует протокол, используемый Postfix.</p>
+
+		<p>Однако, в Exim - это не простой почтовый сервер. Т.к. он обладает богатыми возможностями по фильтрации писем, его можно называть своего рода фреймворком для реализации SMTP-серверов. В частности, Exim позволяет передавать запросы в TCP- и Unix-сокеты и читать ответы из них. Этим можно воспользоваться для того, чтобы попытаться воспользоваться сервисом quota-status, который предоставляется Dovecot.</p>
+
+		<h2>1. Настройка Dovecot</h2>
+
+		<p>В файл /etc/dovecot/conf.d/90-quota.conf вписываем:</p>
+
+		<pre class="code">plugin {
+  quota_status_success = OK 
+  quota_status_nouser = NOUSER
+  quota_status_overquota = OVER
+}
+
+service quota-status {
+  executable = quota-status -p postfix
+  
+  unix_listener exim-quota-status {
+    mode = 0660
+    user = Debian-exim
+    group = Debian-exim
+  }
+  
+  client_limit = 1
+}</pre>
+
+		<p>Осталось перезапустить Dovecot:</p>
+
+		<pre class="console"># systemctl restart dovecot.service</pre>
+
+		<p>Проверить работу сервиса можно при помощи утилиты socat. В примере ниже проиллюстрирована проверка статуса двух почтовых ящиков:</p>
+
+		<pre class="console"># socat STDIO UNIX:/var/run/dovecot/exim-quota-status 
+recipient=xxx@stupin.su
+
+action=OK
+
+recipient=yyy@stupin.su
+
+action=OVER</pre>
+
+		<p>Как видно, с почтовым ящиком xxx@stupin.su всё в порядке, а вот у почтового ящика yyy@stupin.su квота превышена.</p>
+
+		<h2>2. Настройка Exim</h2>
+
+		<p>В файл конфигурации /etc/exim4/exim4.conf перед ACL грейлистинга вставляем такую проверку:</p>
+
+		<pre class="code">defer message = 422 Mailbox $local_part@$domain is over quota
+         domains = +local_domains
+         condition = ${if eq{${extract{action}\
+                                      {${readsocket{/var/run/dovecot/exim-quota-status}\
+                                                   {size=$message_size\nrecipient=$local_part@$domain\n\n}\
+                                                   {5s}\
+                                                   { }\
+                                                   {action=FAIL}}}}}\
+                            {OVER}\
+                            {yes}\
+                            {no}}</pre>
+
+		<p>Указанное выше условие отправляет в сокет /var/run/dovecot/exim-quota-status три строки. В первой строке указан размер письма, во второй - его получатель, третья строка - пустая. Пустая строка сигнализирует о завершении запроса. Дальше в течение 5 секунд ожидается ответ. Если ответ поступил, то все переводы строк в ответе заменяются на пробелы. Если ответ не поступил, то вместо ответа дальше будет использоваться строка "action=FAIL". В результате должна получиться строка, в которой содержится ассоциативный массив, в котором разделителями элементов являются пробелы, а разделителями ключей и значений - знаки "равно", вот такая:</p>
+
+		<pre class="code">key1=value1 key2=value2 key3=value3</pre>
+
+		<p>Выражение extract извлекает из этого словаря значение ключа action. Если значение равно OVER, то считается, что ящик переполнен и отправителю сообщается, что он должен отложить письмо в очередь, т.к. в данный момент почтовый ящик одного из получателей переполнен.</p>
+
+		<p>Осталось перезапустить Exim:</p>
+
+		<pre class="console"># systemctl restart exim4.service</pre>
+
+		<p>Письма на переполненный ящик отбиваются с таким сообщением в журнале:</p>
+
+		<pre class="code">2019-06-11 22:48:31 H=forward100p.mail.yandex.net [77.88.28.100] X=TLS1.2:ECDHE_RSA_AES_256_GCM_SHA384:256 CV=no F= temporarily rejected RCPT : 422 Mailbox yyy@stupin.su is over quota</pre>
+
+		<h2>3. Пригодность решения к промышленному применению</h2>
+
+		<p>У Slavko возникли опасения, что Exim будет закрывать подключение к Dovecot по истечение 5 секунд даже в тех случаях, когда Dovecot уже ответил на запрос. Такая задержка может привести к проблемам при приёме большого потока входящих писем.</p>
+
+		<p>Судя по описанию readsocket на странице <a href="https://www.exim.org/exim-html-current/doc/html/spec_html/ch-string_expansions.html">Chapter 11 - String expansions</a>, Exim пишет запрос и сразу закрывает ту половинку сокета, которая используется для передачи данных в направлении Dovecot. После этого он читает ответ из оставшейся половинки сокета, в которую Dovecot пишет ответ для Exim. Чтобы Exim не закрывал свою половинку сокета, через которую отправляет данные в Dovecot, нужно после таймаута явным образом указать опцию shutdown=no, вот так: {5s:shutdown=no}. Поведение по умолчанию в нашем случае как раз подходящее, поэтому эту опцию писать не нужно.</p>
+
+		<p>Если посмотреть со стороны Dovecot, то он может отреагировать на поведение Exim одним из двух способов:</p>
+
+		<ol>
+			<li>либо сразу обнаружить закрытие половинки сокета и закрыть вторую половинку, не отправляя ответ,</li>
+
+			<li>либо сначала отправить ответ, а потом закрыть свою половинку сокета.</li>
+		</ol>
+
+		<p>Во-первых, я попробовал сымитировать ситуацию при помощи printf и socat:</p>
+
+		<pre class="console"># printf "recipient=yyy@stupin.su\n\n" | socat STDIO UNIX:/var/run/dovecot/exim-quota-status 
+action=OVER</pre>
+
+		<p>Как видно, ответ пришёл.</p>
+
+		<p>Во-вторых, я попробовал оттрассировать процесс dovecot/quota-status -p postfix при помощи strace и увидел, что сразу после ответа клиентское подключение через Unix-сокет закрывается. "Невооружённым взглядом" заметно, что таймаута в 5 секунд нет, т.к. вся проверка отрабатывает меньше чем за секунду.</p>
+
+		<p>Так что за образование очередей из писем, ожидающих проверки квоты ящиков адресатов можно не беспокоиться.</p>
+
+		<h2>4. Отклонение адресата вместо отказа от письма</h2>
+
+		<p>Я пробовал указывать выражение discard, чтобы отбрасывать только тех получателей, ящики которых переполнены. Но если вместо defer написать discard, то в журналах почтового сервера появляются ошибки следующего вида:</p>
+
+		<pre class="code">2019-06-11 22:35:32 configured error code starts with incorrect digit (expected 2) in "422 Mailbox yyy@stupin.su is over quota"
+2019-06-11 22:35:32 H=forward104j.mail.yandex.net [5.45.198.247] F=&lt;zzz@yandex.ru&gt; RCPT &lt;yyy@stupin.su&gt;: discarded by RCPT ACL: 422 Mailbox ууу@stupin.su is over quota</pre>
+
+		<p>Exim считает, что его неправильно настроили, т.к. ответ должен начинаться с цифры 2.</p>
+
+		<p>Описанная конфигурация тестировалось на Debian Stretch. Готов выслушать замечания или дополнения к описанной конфигурации.</p>
+
+		<h2>5. Использованные материалы</h2>
+
+		<ul>
+			<li><a href="https://blog.sys4.de/postfix-dovecot-mailbox-quota-en.html">Serving Dovecot mailbox quota status to Postfix</a></li>
+
+			<li><a href="https://www.exim.org/exim-html-current/doc/html/spec_html/ch-string_expansions.html">Exim Internet Mailer. Chapter 11 - String expansions</a></li>
+		</ul>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Exim и Dovecot quota-status">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

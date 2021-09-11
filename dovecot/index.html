@@ -1,0 +1,630 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="linux,debian,postfixadmin,dovecot,wheezy,mysql" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2014-01-26 -->
+		<title>Установка и настройка Dovecot</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Установка и настройка Dovecot</h1>
+
+		<p>В <a href="../postfixadmin-2/">прошлой заметке</a> была рассмотрена настройка веб-интерфейса для управления почтовыми ящиками Postfixadmin.</p>
+
+		<p>В этой заметке рассмотрена настройка агента доставки почты (MDA) Dovecot для совместного использования с Postfixadmin. Рассмотрена вторая версия сервера, настройка которой несколько отличается от настройки первой версии. Я и раньше не считал документацию на Dovecot хорошей, но для настройки второй версии мне пришлось потратить ещё больше времени, потому что для неё документации ещё меньше. Собственно, всё, что есть из документации - это официальный сайт с wiki-страницами, больше напоминающими обрывки HowTo, нежели систематическую исчерпывающую документацию по каждой доступной опции.</p>
+
+		<p>Файл конфигурации Dovecot состоит из нескольких логических элементов: глобальные настройки, раздел настройки словарей, несколько разделов настройки сервисов, раздел настройки плагинов. Файл конфигурации не назовёшь логичным, поскольку плагины включаются в одном разделе файла, а настройки хранятся в другом. Взаимосвязи между плагинами и используемыми ими сервисами тоже не всегда кажутся очевидными.</p>
+
+		<p>Однако при всех указанных недостатках, Dovecot всё равно настраивается проще других подобных систем (Courier и Cyrus). Причин у этого, на мой взгляд, две: он лучше поддерживается разработчиками дистрибутива и в нём меньше исторических наслоений. (По непонятным причинам поддержка Courier оставляет желать лучшего: когда я пытался его настроить, мне пришлось пересобрать пакет с библиотекой SASL, чтобы она поддерживала прямую работу с courier-auth. После длительных мучений с его настройкой, я решил больше не биться головой в закрытую дверь, пытаясь исправить очередную кривизну в поставке по умолчанию, и настроил Dovecot. Собственно, я и пытался-то настроить Courier из простого любопытства).</p>
+
+		<p>Главное разочарование, постигшее меня при настройке второй версии Dovecot, заключалось в том, что теперь не работает придуманный мной метод аутентификации POP-before-SMTP. В новом Dovecot можно задавать только скрипты, выполняемые при отключении клиента от сервера POP3 или IMAP, а не в момент подключения, как это было раньше. В результате для того, чтобы отправить письмо, нужно не только подключиться к POP3 или IMAP-серверу, но и тут же отключиться от него. Впрочем, большинство современных почтовых клиентов имеет встроенную поддержку аутентификации на SMTP-сервере, поэтому утрата не выглядит сейчас столь уж серьёзной.</p>
+
+		<h2>1. Установка Dovecot</h2>
+
+		<p>Установим пакеты Dovecot, содержащие поддержку серверов POP3 и IMAP, а также пакет, позволяющий использовать данные из MySQL:</p>
+
+		<pre class="console"># apt-get install dovecot-core dovecot-imapd dovecot-pop3d dovecot-mysql</pre>
+
+		<h2>2. Подготовка системы</h2>
+
+		<p>Создадим группу и пользователя vmail, от имени которого будет работать Dovecot и дадим этому пользователю доступ к каталогу, в котором будет храниться почта пользователей почтовой системы. На серверах для размещения почтовых ящиков, как и другой часто меняющейся информации, обычно используется раздел /var, который заранее делается достаточно большим. На настраиваемой мной системе больше всего свободного места на разделе home, поэтому я размещу почтовые ящики пользователей на нём:</p>
+
+		<pre class="console"># groupadd -g 120 -r vmail
+# useradd -g 120 -r -u 120 vmail
+# mkdir /home/vmail
+# chown vmail:vmail /home/vmail
+# chmod u=rwx,g=rx,o= /home/vmail</pre>
+
+		<p>Добавляем пользователя dovecot для доступа к базе данных:</p>
+
+		<pre class="code">USE mysql;
+
+INSERT INTO user(user, password, host) VALUES('dovecot', PASSWORD('dovecot_password'), 'localhost');
+
+FLUSH PRIVILEGES;</pre>
+
+		<p>Вместо пароля dovecot_password я сгенерировал случайный пароль при помощи программы pwgen из одноимённого пакета. Можно сгенерировать сразу длинный пароль, поскольку вводить вручную его не придётся:</p>
+
+		<pre class="console">$ pwgen 16</pre>
+
+		<p>Здесь и ниже я оставил пароль dovecot_password для того, чтобы описание настройки было более наглядным. При реальной настройке Dovecot стоит использовать случайный пароль.</p>
+
+		<p>Таблица mailbox в базе данных postfixadmin содержит информацию о почтовых ящиках. Дадим пользователю dovecot доступ к таблице mailbox и её колонкам:</p>
+
+		<pre class="code">USE mysql;
+
+INSERT INTO tables_priv(host, db, user, table_name, table_priv, column_priv) VALUES
+('localhost', 'postfixadmin', 'dovecot', 'mailbox', '', 'Select');
+
+INSERT INTO columns_priv(host, db, user, table_name, column_name, column_priv) VALUES
+('localhost', 'postfixadmin', 'dovecot', 'mailbox', 'username', 'Select'),
+('localhost', 'postfixadmin', 'dovecot', 'mailbox', 'local_part', 'Select'),
+('localhost', 'postfixadmin', 'dovecot', 'mailbox', 'domain', 'Select'),
+('localhost', 'postfixadmin', 'dovecot', 'mailbox', 'password', 'Select'),
+('localhost', 'postfixadmin', 'dovecot', 'mailbox', 'quota', 'Select'),
+('localhost', 'postfixadmin', 'dovecot', 'mailbox', 'active', 'Select');
+
+FLUSH PRIVILEGES;</pre>
+
+		<h2>3. Базовая настройка Dovecot</h2>
+
+		<p>Обратимся к странице <a href="http://ru.wikipedia.org/wiki/%D0%A1%D1%80%D0%B0%D0%B2%D0%BD%D0%B5%D0%BD%D0%B8%D0%B5_%D0%BF%D0%BE%D1%87%D1%82%D0%BE%D0%B2%D1%8B%D1%85_%D0%BF%D1%80%D0%BE%D0%B3%D1%80%D0%B0%D0%BC%D0%BC#.D0.9F.D0.BE.D0.B4.D0.B4.D0.B5.D1.80.D0.B6.D0.BA.D0.B0_.D0.B0.D1.83.D1.82.D0.B5.D0.BD.D1.82.D0.B8.D1.84.D0.B8.D0.BA.D0.B0.D1.86.D0.B8.D0.B8">Сравнение почтовых программ</a> на Википедии. Судя по сводной таблице механизмов аутентификации, поддерживаемых разными почтовыми клиентами, большинство из них поддерживает механизмы PLAIN, LOGIN и CRAM-MD5.</p>
+
+		<p>При использовании PLAIN и LOGIN пароль передаётся в открытом виде, а хранить в базе данных его можно в хэшированном виде. В случае с CRAM-MD5 дело обстоит с точностью до наоборот - пароль передаётся в хэшированном виде, но хранится - в открытом.</p>
+
+		<p>Что безопаснее? Если вы не собираетесь настраивать защищённые версии протоколов IMAP и POP3, то лучше использовать CRAM-MD5. На мой взгляд вероятность перехвата паролей выше, нежели вероятность получения не авторизованного доступа к базе данных. Если же предполагается всегда использовать шифрование, то безопаснее использовать PLAIN и LOGIN, потому что при их использовании можно хранить пароли в базе данных в хэшированном виде. Пароль при этом не получится перехватить, а в случае получения доступа к хэшам паролей воспользоваться ими напрямую не удастся, т.к. нужно будет подобрать пароль, который будет соответствовать хэшу.</p>
+
+		<p>Я буду использовать защищённые версии протоколов IMAP и POP3, поэтому настрою в файле /etc/dovecot/conf.d/10-auth.conf механизмы PLAIN и LOGIN, чтобы хранить пароли в базе данных в хэшированном виде:</p>
+
+		<pre class="code">disable_plaintext_auth = no
+auth_default_realm = domain.tld
+auth_mechanisms = plain login
+!include auth-sql.conf.ext</pre>
+
+		<p>Настроим использование учётных данных из базы данных SQL, прописав в файле /etc/dovecot/conf.d/auth-sql.conf.ext следующие секции:</p>
+
+		<pre class="code">passdb {
+  driver = sql
+  args = /etc/dovecot/dovecot-mysql.conf
+}
+userdb {
+  driver = sql
+  args = /etc/dovecot/dovecot-mysql.conf
+}</pre>
+
+		<p>Теперь нужно прописать в файл /etc/dovecot/dovecot-mysql.conf учётные данные для доступа к базе данных и запросы для извлечения из неё необходимой информации о почтовых ящиках:</p>
+
+		<pre class="code">driver = mysql
+
+connect = host=localhost dbname=postfixadmin user=dovecot password=dovecot_password
+
+default_pass_scheme = MD5-CRYPT
+
+password_query = SELECT local_part AS username, \
+                        domain, \
+                        password, \
+                        120 AS userdb_uid, \
+                        120 AS userdb_gid<b>, \
+                        CONCAT('*:bytes=', quota) AS userdb_quota_rule</b> \
+                 FROM mailbox \
+                 WHERE username = '%u' \
+                   AND active = 1
+
+user_query =  SELECT <b>CONCAT('*:bytes=', quota) AS quota_rule,</b> \
+                     120 AS uid, \
+                     120 AS gid \
+              FROM mailbox \
+              WHERE username = '%u' \
+                AND active = 1
+
+iterate_query = SELECT username AS user \
+                FROM mailbox \
+                WHERE active = 1</pre>
+
+		<p>Выделенные жирным шрифтом части запросов используются плагином quota. Если вы не собираетесь настраивать этот плагин, то эти части запросов можно пропустить. Настройка этого плагина подробнее рассмотрена ниже.</p>
+
+		<p>Стоит сразу же изменить права доступа к этому файлу, чтобы посторонние пользователи системы не смогли увидеть пароль, под которым dovecot будет подключаться к базе данных:</p>
+
+		<pre class="console"># chown root:dovecot /etc/dovecot/dovecot-mysql.conf 
+# chmod u=rw,g=r,o= /etc/dovecot/dovecot-mysql.conf</pre>
+
+		<p>В противном случае потенциальный злоумышленник, получивший локальный непривилегированный доступ к системе, сможет получить список почтовых ящиков системы и хэши паролей от них (или сами пароли). Понятно, чем может быть опасно получение доступа к паролям или их хэшам - злоумышленник сможет получить полный доступ к ящикам. Не столь очевидной может показаться опасность получения злоумышленником списка почтовых ящиков - на них он может начать отправлять спам, что тоже не обрадует ни пользователей почтовой системы, ни её администратора.</p>
+
+		<p>Изменим форматирование отметок времени, вписав в файл /etc/dovecot/conf.d/10-logging.conf следующую настройку:</p>
+
+		<pre class="code">log_timestamp = "%Y-%m-%d %H:%M:%S "</pre>
+
+		<p>На время отладки также можно включить другие опции из этого файла:</p>
+
+		<pre class="code">auth_verbose = yes
+auth_verbose_passwords = yes
+auth_debug = yes
+mail_debug = yes</pre>
+
+		<p>В файле /etc/dovecot/conf.d/10-mail.conf настроим путь к почтовым ящикам и пользователя, от имени которого dovecot будет работать с ящиками:</p>
+
+		<pre class="code">mail_home = /home/vmail/%Ld/%Ln
+mail_location = maildir:/home/vmail/%Ld/%Ln
+mail_uid = vmail
+mail_gid = vmail
+first_valid_uid = 120
+last_valid_uid = 120
+first_valid_gid = 120
+last_valid_gid = 120</pre>
+
+		<p>Сейчас придётся немного опять забежать вперёд и настроить SASL. Это сервис, при помощи которого Postfix будет проверять учётные данные почтовых клиентов. Для этого отредактируем файл /etc/dovecot/conf.d/10-master.conf и впишем в него путь к UNIX-сокету и права доступа к нему:</p>
+
+		<pre class="code">service auth {
+  unix_listener /var/spool/postfix/private/auth {
+    mode = 0600
+    user = postfix
+    group = postfix
+  }
+}</pre>
+
+		<p>Сокет-файл размещается в chroot-окружении Postfix и доступен для чтения и записи только пользователю postfix.</p>
+
+		<p>Зададим в файле /etc/dovecot/conf.d/15-lda.conf адрес, с которого Dovecot будет отправлять сообщения об ошибках:</p>
+
+		<pre class="code">postmaster_address = postmaster@domain.tld</pre>
+
+		<p>Осталось отредактировать файл /etc/dovecot/dovecot.conf, указав в нём адрес, на котором сервер будет ожидать подключений:</p>
+
+		<pre class="code">!include_try /usr/share/dovecot/protocols.d/*.protocol
+listen = <b>*</b>
+!include conf.d/*.conf
+!include_try local.conf</pre>
+
+		<p>Начальная настройка сервера окончена. Осталось перезапустить Dovecot, чтобы настройки вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/dovecot restart</pre>
+
+		<h2>4. Настройка плагина acl</h2>
+
+		<p>Плагин acl позволяет пользователям предоставлять друг другу доступ к папкам в своих почтовых ящиках. Это может быть полезно для корпоративных пользователей. Например, для директора и его заместителя. Или для директора и его секретаря. Или для сотрудников из одного отдела, которые подменяют друг друга на время обеда или отпуска. Эта возможность, естественно, доступна только при использовании протокола IMAP.</p>
+
+		<p>В файле /etc/dovecot/conf.d/10-mail.conf включаем использование плагина:</p>
+
+		<pre class="code">mail_plugins = <b>acl</b></pre>
+
+		<p>В файле /etc/dovecot/conf.d/20-imap.conf включаем использование плагина в IMAP-сервере:</p>
+
+		<pre class="code">protocol imap {
+  mail_plugins = $mail_plugins <b>imap_acl</b>
+}</pre>
+
+		<p>В файле /etc/dovecot/conf.d/10-mail.conf прописываем следующие настройки:</p>
+
+		<pre class="code">namespace inbox {
+  type = private
+  separator = /
+  prefix =
+  inbox = yes
+}
+
+namespace {
+  type = shared
+  separator = /
+  prefix = shared/%%u/
+  location = maildir:%%h:INDEX=%h/shared/%%u
+  subscriptions = yes
+  list = children
+}</pre>
+
+		<p>Эти настройки описывают два пространства имён: в первом хранится личная почта пользователя, а во втором будут отображаться каталоги других пользователей, к которым этот пользователь имеет доступ.</p>
+
+		<p>Поясню смысл настроек location для пространства имён общих каталогов:</p>
+
+		<ul>
+			<li>maildir:%%h - означает место расположения чужого почтового ящика в формате Maildir,</li>
+
+			<li>%%h - полный путь к Maildir-каталогу чужого ящика,</li>
+
+			<li>INDEX=%h/shared/%%u - задаёт каталог, в который как бы монтируются каталоги чужой почты, к которым её владелец дал нам доступ,</li>
+
+			<li>%h - путь к Maildir-каталогу нашего ящика,</li>
+
+			<li>%%u - имя другого пользователя в виде box@domain.tld.</li>
+		</ul>
+
+		<p>В файл /etc/dovecot/conf.d/90-acl.conf прописываем настройки плагина:</p>
+
+		<pre class="code">plugin {
+  acl = vfile
+  acl_shared_dict = file:/home/vmail/%Ld/shared-mailboxes.db
+}</pre>
+
+		<p>Значение vfile предписывает создавать внутри почтового ящика файл dovecot-acl, в котором и будут прописываться права доступа к нему со стороны других пользователей.</p>
+
+		<p>Значение acl_shared_dict указывает путь к файлу словаря, который позволит пользователям узнавать, к каким каталогам в чужих почтовых ящиках у них имеется доступ. В данном случае для каждого домена будет создан отдельный файл словаря, расположенный в каталоге домена, на одном уровне с ящиками.</p>
+
+		<p>Заодно опишем в файле /etc/dovecot/conf.d/15-mailboxes.conf назначение различных каталогов внутри пространства имён, в котором хранится личная почта пользователя:</p>
+
+		<pre class="code">namespace inbox {
+  mailbox Drafts {
+    special_use = \Drafts
+  }
+  mailbox Junk {
+    special_use = \Junk
+  }
+  mailbox Trash {
+    special_use = \Trash
+  }
+  mailbox Sent {
+    special_use = \Sent
+  }
+}</pre>
+
+		<ul>
+			<li>Drafts - каталог черновиков,</li>
+
+			<li>Junk - каталог для спама,</li>
+
+			<li>Trash - каталог для удалённых писем,</li>
+
+			<li>Sent - каталог для отправленных писем.</li>
+		</ul>
+
+		<p>Современные почтовые программы смогут прямо по протоколу IMAP узнать назначение каждого из специальных каталогов, вне зависимости от их названия. Это бывает полезно, если каталог имеет нестандартное название или название на языке пользователя ящика, например "Входящие" или "Спам".</p>
+
+		<p>Чтобы настройки плагина acl вступили в силу, нужно перезапустить Dovecot:</p>
+
+		<pre class="console"># /etc/init.d/dovecot restart</pre>
+
+		<h2>5. Настройка плагина quota</h2>
+
+		<p>Плагин quota позволяет назначить для почтового ящика ограничения на объём хранящихся в нём писем или даже на их общее количество. На мой взгляд, ограничение на общее количество писем имеет довольно мало смысла. Единственная польза, которая мне приходит на ум - это возможность защититься от исчерпания inode'ов в файловой системе, если кто-то намеренно решит отправить огромное количество мелких писем в ящики пользователей, с целью нарушить работу почтовой системы.</p>
+
+		<p>Мы настроим плагин так, чтобы он использовал значения квот, указанные в интерфейсе Postfixadmin. Эти квоты ограничивают только максимальный объём писем в ящике.</p>
+
+		<p>Включим использование плагина в файле /etc/dovecot/conf.d/10-mail.conf:</p>
+
+		<pre class="code">mail_plugins = <i>acl</i> <b>quota</b></pre>
+
+		<p>Жирным шрифтом показан добавленный текст, а курсивом - текст, добавленный нами при включении плагина acl. Если вы не включали плагин acl, то вписывать этот текст не нужно.</p>
+
+		<p>В файл /etc/dovecot/conf.d/15-lda.conf впишем, что в случае превышения квоты Dovecot должен сообщать о временной ошибке, но не отклонять письмо окончательно. Почтовый сервер отправителя (или наш MTA) будет периодически предпринимать повторные попытки в надежде на то, что адресат почистит свой ящик от ненужных писем.</p>
+
+		<pre class="code">quota_full_tempfail = yes</pre>
+
+		<p>В файл /etc/dovecot/conf.d/20-imap.conf добавим поддержку квот в IMAP-сервере:</p>
+
+		<pre class="code">protocol imap {
+  mail_plugins = $mail_plugins <i>imap_acl</i> <b>imap_quota</b>
+}</pre>
+
+		<p>Этот плагин позволит почтовым клиентам, работающим по протоколу IMAP, узнавать квоту почтового ящика и её текущее использование.</p>
+
+		<p>Укажем в файле /etc/dovecot/conf.d/90-quota.conf, что значения квот берутся из словаря и зададим пустое правило по умолчанию:</p>
+
+		<pre class="code">plugin {
+  quota = dict:User quota::proxy::quota
+  quota_rule = *:
+}</pre>
+
+		<p>Текст proxy задаёт использование прокси-сервера, который выполняет мультиплексирование подключений к базе данных. Прокси устанавливает постоянные подключения к базе данных и выполняет необходимые запросы через эти подключения. Таким образом снижаются накладные расходы на повторные переподключения и уменьшается количество одновременно установленных подключений, поскольку без использования прокси каждый процесс, обслуживающий одного клиента, устанавливал бы своё собственное подключение к базе данных.</p>
+
+		<p>Плагин quota использует сервис доступа к словарям данных. Включим и настроим этот сервис в файле /etc/dovecot/conf.d/10-master.conf:</p>
+
+		<pre class="code">service dict {
+  unix_listener dict {
+    mode = 0600
+    user = vmail
+    group = vmail
+  }
+}</pre>
+
+		<p>Теперь укажем в файле /etc/dovecot/dovecot.conf, где хранятся настройки словаря с данными квот:</p>
+
+		<pre class="code">dict {
+  <b>quota = mysql:/etc/dovecot/dovecot-dict-mysql.conf</b>
+}</pre>
+
+		<p>И укажем в файле с настройками /etc/dovecot/dovecot-dict-mysql.conf, в какой таблице хранятся данные о текущем использовании квот и как подключиться к базе данных с этой таблицей:</p>
+
+		<pre class="code">connect = host=localhost dbname=postfixadmin user=dovecot password=dovecot_password
+
+map {
+  pattern = priv/quota/storage
+  table = quota2
+  username_field = username
+  value_field = bytes
+}</pre>
+
+		<p>Сразу же изменим права доступа к этому файлу, чтобы посторонние пользователи системы не смогли увидеть пароль, под которым dovecot будет подключаться к словарям в базе данных:</p>
+
+		<pre class="console"># chown root:dovecot /etc/dovecot/dovecot-dict-mysql.conf 
+# chmod u=rw,g=r,o= /etc/dovecot/dovecot-dict-mysql.conf</pre>
+
+		<p>Выдадим пользователю dovecot права на доступ к таблице quota2 и её колонкам:</p>
+
+		<pre class="code">USE mysql;
+
+INSERT INTO tables_priv(host, db, user, table_name, table_priv, column_priv) VALUES
+('localhost', 'postfixadmin', 'dovecot', 'quota2', 'Delete', 'Select,Insert,Update');
+
+INSERT INTO columns_priv(host, db, user, table_name, column_name, column_priv) VALUES
+('localhost', 'postfixadmin', 'dovecot', 'quota2', 'username', 'Select,Insert,Update'),
+('localhost', 'postfixadmin', 'dovecot', 'quota2', 'bytes', 'Select,Insert,Update');
+
+FLUSH PRIVILEGES;</pre>
+
+		<p>Не забудьте вписать в файл /etc/dovecot/dovecot-mysql.conf текст, выделенный жирным шрифтом в разделе 3. Этот текст извлекает из базы данных настройки квот ящиков.</p>
+
+		<p>Настройка плагина закончена. Осталось перезапустить Dovecot:</p>
+
+		<pre class="console"># /etc/init.d/dovecot restart</pre>
+
+		<h2>6. Настройка плагина expire</h2>
+
+		<p>Плагин expire позволяет автоматически удалять устаревшие письма из каталогов почтовых ящиков. Обычно это каталоги с удалённой почтой и спамом. Поскольку алгоритмы обнаружения спама не совершенны, не стоит удалять такие письма - нужно дать пользователю возможность прочитать письмо, ошибочно определённое как спам. С другой стороны, хочется избавить пользователя от утомительной привычки периодически чистить почтовый ящик, особенно для каталогов со спамом и удалёнными письмами - письма в этих каталогах обладают заведомо низкой ценностью.</p>
+
+		<p>Включим плагин в файле /etc/dovecot/conf.d/10-mail.conf:</p>
+
+		<pre class="code">mail_plugins = <i>acl quota</i> <b>expire</b></pre>
+
+		<p>Курсивом отмечены плагины, настройка которых была рассмотрена выше. Если вы пропустили их настройку, не нужно их вписывать - достаточно добавить текст, отмеченный жирным шрифтом.</p>
+
+		<p>Теперь настроим плагин в файле /etc/dovecot/conf.d/90-expire.conf:</p>
+
+		<pre class="code">plugin {
+  expire = Trash 7            # Хранение писем в папке Trash - 7 дней
+  expire2 = Trash/* 7         # Хранение писем в подпапках папки Trash - 7 дней
+  expire3 = Junk 30           # Хранение писем в папке Junk - 30 дней
+  expire_dict = proxy::expire # Использовать словарь для хранения отметок времени писем
+}</pre>
+
+		<p>Текст proxy задаёт использование прокси-сервера, который выполняет мультиплексирование подключений к базе данных (см. выше описание плагина quota). На самом деле для каждого каталога будет храниться лишь одна отметка времени для самого старого письма в каталоге, которая будет обновляться при очередной чистке каталога.</p>
+
+		<p>В файле /etc/dovecot/dovecot.conf укажем путь к файлу с настройками словаря, в котором будут храниться данные об отметках времени писем:</p>
+
+		<pre class="code">dict {
+  <i>quota = mysql:/etc/dovecot/dovecot-dict-mysql.conf</i>
+  <b>expire = mysql:/etc/dovecot/dovecot-dict-mysql.conf</b>
+}</pre>
+
+		<p>Курсивом отмечена строчка, которая была добавлена в процессе настройки плагина quota. Сейчас же нужно добавить строчку, отмеченную жирным шрифтом.</p>
+
+		<p>Настроим учётные данные для подключения к базе данных в файле /etc/dovecot/dovecot-dict-mysql.conf. Там же укажем, в какой таблице и в каких её полях хранить отметки времени.</p>
+
+		<pre class="code">connect = host=localhost dbname=postfixadmin user=dovecot password=dovecot_password
+
+<i>map {
+  pattern = priv/quota/storage
+  table = quota2
+  username_field = username
+  value_field = bytes
+}</i>
+
+<b>map {
+  pattern = shared/expire/$user/$mailbox
+  table = expire
+  value_field = expire_stamp
+
+  fields {
+    username = $user
+    mailbox = $mailbox
+  }
+}</b></pre>
+
+		<p>Тут так же нужно добавить лишь текст, выделенный жирным шрифтом. Курсивом отмечен текст, добавленный при настройке плагина quota.</p>
+
+		<p>Если вы ещё не поменяли права доступа к этому файлу, стоит сделать это сейчас, чтобы посторонние пользователи системы не могли прочитать пароль, под которым dovecot будет подключаться к словарям в базе данных:</p>
+
+		<pre class="console"># chown root:dovecot /etc/dovecot/dovecot-dict-mysql.conf 
+# chmod u=rw,g=r,o= /etc/dovecot/dovecot-dict-mysql.conf</pre>
+
+		<p>Включим в файле /etc/dovecot/conf.d/10-master.conf сервис для доступа к словарям, если вы его ещё не включили при настройке плагина quota:</p>
+
+		<pre class="code">service dict {
+  unix_listener dict {
+    mode = 0600
+    user = vmail
+    group = vmail
+  }
+}</pre>
+
+		<p>Поскольку по умолчанию в Postfixadmin нет таблицы, предназначенной для хранения информации плагина expire из Dovecot, создадим эту таблицу и дадим пользователю Dovecot права доступа к ней:</p>
+
+		<pre class="code">USE postfixadmin;
+
+CREATE TABLE expire (
+  username varchar(255) not null,
+  mailbox varchar(255) not null,
+  expire_stamp integer not null,
+  primary key (username, mailbox)
+);
+
+USE mysql;
+ 
+INSERT INTO tables_priv(host, db, user, table_name, table_priv, column_priv) VALUES
+('localhost', 'postfixadmin', 'dovecot', 'expire', 'Delete', 'Select,Insert,Update');
+
+INSERT INTO columns_priv(host, db, user, table_name, column_name, column_priv) VALUES
+('localhost', 'postfixadmin', 'dovecot', 'expire', 'username', 'Select,Insert,Update'),
+('localhost', 'postfixadmin', 'dovecot', 'expire', 'mailbox', 'Select,Insert,Update'),
+('localhost', 'postfixadmin', 'dovecot', 'expire', 'expire_stamp', 'Select,Insert,Update');
+
+FLUSH PRIVILEGES;</pre>
+
+		<p>На этом настройку плагина можно считать оконченной. Осталось лишь перезапустить Dovecot, чтобы изменения вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/dovecot restart</pre>
+
+		<h2>7. Настройка SSL</h2>
+
+		<p>Настройка SSL будет подробнее рассмотрена в одной из следующих заметок. Там будет описана настройка отдельных сертификатов SSL для разных доменов, а также будет освещён вопрос подготовки самих сертификатов - самоподписанных или подписанных центром сертификации.</p>
+
+		<p>Если у вас имеются готовый подписанный сертификат, можно включить поддержку SSL в файле /etc/dovecot/conf.d/10-ssl.conf и указать в нём пути к файлам сертификата:</p>
+
+		<pre class="code">ssl = yes
+ssl_cert = &lt;/etc/ssl/mail_public.pem
+ssl_key = &lt;/etc/ssl/mail_private.pem</pre>
+
+		<p>После настройки сертификатов нужно перезапустить Dovecot, чтобы изменения вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/dovecot restart</pre>
+
+		<h2>8. Настройка плагина sieve</h2>
+
+		<p>Sieve - это скрипты фильтрации почты, которые выполняются агентом локальной доставки (LDA) в момент получения письма от почтового сервера (MTA). Скрипты позволяют раскладывать письма в разные папки, ориентируясь на их содержимое - тему письма, получателей, отправителей и т.п. Можно удалить письмо, переслать его на другой ящик или отправить уведомление отправителю, причём использовать можно любое поле заголовка или содержимое тела письма.</p>
+
+		<p>Главное преимущество Sieve заключается в том, что пользователю не нужно настраивать правила фильтрации в каждом из используемых им почтовых клиентов - правила едины для всех почтовых клиентов сразу. Кроме того, фильтрация происходит вообще без участия клиента. Клиент, подключившись к почтовому ящику, имеет возможность работать уже с отсортированной почтой. Кроме того, отправка уведомлений о получении или пересылка писем на другой ящик вообще может происходить без участия почтового клиента.</p>
+
+		<p>Конечно, в наши времена больших почтовых сервисов типа Gmail или Яндекс-почты, этим никого не удивишь. Но тут плюс заключается в том, что перед нами не стоит дилемма "удобство" - "безопасность". Мы можем хранить почту у себя, не делясь ею с посторонними компаниями, имея над ней полный контроль, и в то же время можем пользоваться удобствами, характерными для больших почтовых сервисов.</p>
+
+		<p>Установим пакет с плагином Sieve:</p>
+
+		<pre class="console"># apt-get install dovecot-sieve</pre>
+
+		<p>Включим использование плагина в файле /etc/dovecot/conf.d/15-lda.conf:</p>
+
+		<pre class="code">protocol lda {
+  mail_plugins = $mail_plugins <b>sieve</b>
+}</pre>
+
+		<p>Укажем настройки плагина в файле /etc/dovecot/conf.d/90-sieve.conf:</p>
+
+		<pre class="code">plugin {
+  sieve = /home/vmail/%Ld/%n/active.sieve # Расположение активного скрипта
+  sieve_dir = /home/vmail/%Ld/%n/sieve    # Каталог для скриптов
+  sieve_max_script_size = 1M              # Максимальный размер одного скрипта
+  sieve_quota_max_scripts = 50            # Максимальное количество скриптов
+  sieve_quota_max_storage = 1M            # Максимальный общий объём скриптов
+}</pre>
+
+		<p>Каждый пользователь может обладать собственным набором Sieve-скриптов, из которых в любой момент времени активным может быть только один. Каталог для скриптов указывается в настройке sieve_dir, а в настройке sieve указывается имя символической ссылки, которая будет указывать на активный скрипт.</p>
+
+		<p>После настройки плагина нужно перезапустить Dovecot, чтобы изменения вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/dovecot restart</pre>
+
+		<p>Подробнее о скриптах Sieve можно почитать на Википедии, в статье <a href="http://ru.wikipedia.org/wiki/Sieve">Sieve</a>.</p>
+
+		<h2>9. Настройка сервиса managesieve</h2>
+
+		<p>Плагин sieve не был бы столь полезным, если бы Sieve-скриптами нельзя было бы управлять прямо из почтового клиента. Именно эту функцию и реализует сервис ManageSieve. Он ожидает подключений клиентов на отдельном TCP-порту 4190. Для управления скриптами клиент использует учётные данные своего почтового ящика.</p>
+
+		<p>Для включения сервиса достаточно лишь установить дополнительный пакет:</p>
+
+		<pre class="console"># apt-get install dovecot-managesieve</pre>
+
+		<p>В следующих заметках фильтрация писем при помощи Sieve будет рассмотрена подробнее - я покажу, как им пользоваться в почтовых клиентах.</p>
+
+		<h2>10. Результирующий файл конфигурации</h2>
+
+		<p>Поскольку настроек очень много, проверить их можно при помощи следующей команды:</p>
+
+		<pre class="console">$ doveconf -n</pre>
+
+		<p>Опция n предписывает показывать только те настройки, которые отличаются от настроек по умолчанию. У меня со всеми плагинами, настройка которых была тут описана, команда выдаёт следующий результат:</p>
+
+		<pre class="code"># 2.1.7: /etc/dovecot/dovecot.conf
+# OS: Linux 3.2.0-4-amd64 x86_64 Debian 7.3 ext4
+auth_default_realm = domain.tld
+auth_mechanisms = plain login
+dict {
+  expire = mysql:/etc/dovecot/dovecot-dict-mysql.conf
+  quota = mysql:/etc/dovecot/dovecot-dict-mysql.conf
+}
+disable_plaintext_auth = no
+first_valid_gid = 120
+first_valid_uid = 120
+last_valid_gid = 120
+last_valid_uid = 120
+listen = *
+log_timestamp = "%Y-%m-%d %H:%M:%S "
+mail_gid = vmail
+mail_home = /home/vmail/%Ld/%Ln
+mail_location = maildir:/home/vmail/%Ld/%Ln
+mail_plugins = quota acl expire
+mail_uid = vmail
+managesieve_notify_capability = mailto
+managesieve_sieve_capability = fileinto reject envelope encoded-character vacation subaddress comparator-i;ascii-numeric relational regex imap4flags copy include variables body enotify environment mailbox date ihave
+namespace {
+  list = children
+  location = maildir:%%h:INDEX=%h/shared/%%u
+  prefix = shared/%%u/
+  separator = /
+  subscriptions = yes
+  type = shared
+}
+namespace inbox {
+  inbox = yes
+  location = 
+  mailbox Drafts {
+    special_use = \Drafts
+  }
+  mailbox Junk {
+    special_use = \Junk
+  }
+  mailbox Sent {
+    special_use = \Sent
+  }
+  mailbox Trash {
+    special_use = \Trash
+  }
+  prefix = 
+  separator = /
+  type = private
+}
+passdb {
+  args = /etc/dovecot/dovecot-mysql.conf
+  driver = sql
+}
+plugin {
+  acl = vfile
+  acl_shared_dict = file:/home/vmail/%Ld/shared-mailboxes.db
+  expire = Trash 7
+  expire2 = Trash/* 7
+  expire3 = Spam 30
+  expire_dict = proxy::expire
+  quota = dict:User quota::proxy::quota
+  quota_rule = *:
+  sieve = /home/vmail/%Ld/%n/active.sieve
+  sieve_dir = /home/vmail/%Ld/%n/sieve
+  sieve_max_script_size = 1M
+  sieve_quota_max_scripts = 50
+  sieve_quota_max_storage = 1M
+}
+postmaster_address = postmaster@stupin.su
+protocols = " imap sieve pop3"
+service auth {
+  unix_listener /var/spool/postfix/private/auth {
+    group = postfix
+    mode = 0600
+    user = postfix
+  }
+}
+service dict {
+  unix_listener dict {
+    group = vmail
+    mode = 0600
+    user = vmail
+  }
+}
+ssl_cert = &lt;/etc/ssl/mail.stupin.su.public.pem
+ssl_key = &lt;/etc/ssl/mail.stupin.su.private.pem
+userdb {
+  args = /etc/dovecot/dovecot-mysql.conf
+  driver = sql
+}
+protocol lda {
+  mail_plugins = quota acl expire sieve
+}
+protocol imap {
+  mail_plugins = quota acl expire imap_quota imap_acl
+}</pre>
+
+		<p>Примечание от 27 марта 2013 года: Дополнил описание плагина acl.</p>
+
+		<p>На этом заметку, посвящённую настройке Dovecot, можно считать оконченой. Продолжение: <a href="../postfix/">Установка и настройка Postfix, OpenDKIM, ClamAV-Milter, Milter-Greylist</a>. Или можете продолжить настройку на основе Exim: <a href="../exim/">Настройка Exim</a>.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Установка и настройка Dovecot">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,180 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="patch,jessie,python,snmpv3,debian,linux,wheezy,troubleshooting,snmp" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2016-09-25 -->
+		<title>Стандарт SNMPv3 и суровая действительность USM_TIME_WINDOW</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Стандарт SNMPv3 и суровая действительность USM_TIME_WINDOW</h1>
+
+		<p>В прошлой статье <a href="../zabbix-snmpv3-trouble/">Zabbix и проблемы с опросом по SNMPv3 при дублировании EngineID</a> я описал решение первой проблемы, возникшей при внедрении SNMP третьей версии. После этого я столкнулся с ещё одной проблемой, которую исправлял в два подхода.</p>
+
+		<h2>1. D-Link не соблюдает стандарт RFC3414</h2>
+
+		<p>Дело в том, что даже после исправления EngineID на всех коммутаторах, на некоторых коммутаторах проблема повторялась. После перезагрузки коммутатора, Zabbix считал коммутатор недоступным по SNMP. Если разбираться глубже, с помощью приведённых в прошлой заметке OID'ов, то оказывается, что на коммутаторе после перезагрузки значение EngineBoots остаётся прежним или даже уменьшается! Первым делом были проверены версии прошивок - возможно эта проблема уже была исправлена и надо только обновить прошивку. Но оказалось, что прошивки на проблемных коммутаторах были самые свежие. Поискал в интернете, сталкивался ли кто-нибудь с подобной проблемой, и нашёл аж три темы, в которых открытым текстом утверждается, что эта проблема известна производителю и исправлять он её не собирается:</p>
+
+		<ul>
+			<li><a href="http://forum.dlink.ru/viewtopic.php?f=2&amp;t=170252">DES-3200-c1 и cacti SNMP v3</a></li>
+
+			<li><a href="http://forum.dlink.ru/viewtopic.php?f=2&amp;t=44511">DES-3526 &amp; SNMPv3</a></li>
+
+			<li><a href="http://forum.dlink.ru/viewtopic.php?f=2&amp;t=166236">DES-1210-10/ME SNMPv3 не ведётся счетчик перезагрузок</a></li>
+		</ul>
+
+		<p>Поразмыслив, я решил, что можно было бы отключить проверку монотонности возрастания EngineBoots. В конце концов, лучше использовать SNMP третьей версии без защиты от повторного воспроизведения запросов, но зато с более безопасной аутентификацией и с защитой информации от подслушивания, чем вернуться к использованию SNMP второй или первой версии и передавать по сети в открытом виде и строку сообщества и сами запросы и ответы. Решено - будем править библиотеку.</p>
+
+		<h2>2. Подготовка к пересборке Net-SNMP</h2>
+
+		<p>Для начала отредактируем файл /etc/apt/sources.list и добавим строчки с репозиториями deb-src с исходными текстами:</p>
+
+		<pre class="code">deb http://mirror.ufanet.ru/debian/ wheezy main contrib non-free
+deb http://mirror.ufanet.ru/debian/ wheezy-updates main contrib non-free
+deb http://mirror.ufanet.ru/debian/ wheezy-proposed-updates main contrib non-free
+deb http://mirror.ufanet.ru/debian-security wheezy/updates main contrib non-free
+
+deb-src http://mirror.ufanet.ru/debian/ wheezy main contrib non-free
+deb-src http://mirror.ufanet.ru/debian/ wheezy-updates main contrib non-free
+deb-src http://mirror.ufanet.ru/debian/ wheezy-proposed-updates main contrib non-free
+deb-src http://mirror.ufanet.ru/debian-security wheezy/updates main contrib non-free</pre>
+
+		<p>Обновим список доступных пакетов, чтобы можно было скачать из вновь подключенных репозиториев пакеты с исходными текстами:</p>
+
+		<pre class="console"># apt-get update</pre>
+
+		<p>Скачаем и распакуем исходные тексты, а затем перейдём в каталог с распакованными исходными текстами:</p>
+
+		<pre class="console">$ apt-get source snmp
+$ cd net-snmp-5.4.3~dfsg/</pre>
+
+		<h2>3. Описание исправлений, внесённых в Net-SNMP</h2>
+
+		<p>Поиск показал, что константа USM_TIME_WINDOW со значением 150 используется только в файле snmplib/snmpusm.c. Первым делом я нашёл строчку, в которой проверяется, что значение EngineBoots должно быть больше или равно значению из кэша:</p>
+
+		<pre class="code">if (theirBoots == ENGINEBOOT_MAX || theirBoots &gt; boots_uint) {</pre>
+
+		<p>Если значение EngineBoots не изменилось, то используются значение EngineTime, сохранённое в кэше. Если значение стало больше, то новые значения EngineBoots и EngineTime сохраняются в кэш. Если значение уменьшилось, то запрос завершается ошибкой SNMPERR_USM_NOTINTIMEWINDOW.</p>
+
+		<p>Это строчку я исправил следующим образом:</p>
+
+		<pre class="code">if (theirBoots == ENGINEBOOT_MAX) {</pre>
+
+		<p>То есть при любом изменении значения EngineBoots новое значение будет сохранено в кэш для дальнейшего использования.</p>
+
+		<p>После этого я проделал описанные ниже процедуры по сборке пакета, установил исправленный пакет в систему и перезапустил Zabbix. Прошла пара дней, после чего стало понятно, что это исправление учитывает не все возможные случаи. Некоторые коммутаторы после перезагрузки всё-таки переставали опрашиваться.</p>
+
+		<p>Детальное изучение проблемы показало, что при перезагрузке значение EngineBoots у них не изменилось, зато EngineTime становилось меньше прошлого, т.к. отсчёт времени после перезагрузки начинался с нуля. В этом случае вступал в силу другой фрагмент кода, который при равенстве полученного значения EngineBoots и имеющегося в кэше проверяет соответствие времени. Если время из ответа больше расчётного, то библиотека запоминает новое значение времени в кэше и принимает ответ. Если время из ответа отстаёт от расчётного менее чем на 150 секунд, то такой ответ тоже принимается. Если же время из ответа отстаёт от расчётного более чем на 150 секунд, то ответ отбрасывается, а запрос завершается всё той же ошибкой SNMPERR_USM_NOTINTIMEWINDOW. Этот фрагмент кода выглядит следующим образом:</p>
+
+		<pre class="code">/*
+ * Boots is ok, see if the boots is the same but the time
+ * is old.
+ */
+if (theirBoots == boots_uint &amp;&amp; time_uint &lt; theirLastTime) {
+        if (time_difference &gt; USM_TIME_WINDOW) {
+                DEBUGMSGTL(("usm", "%s\n", "Message too old."));
+                *error = SNMPERR_USM_NOTINTIMEWINDOW;
+                return -1;
+        }
+        else {              /* Old, but acceptable */
+                *error = SNMPERR_SUCCESS;
+                return 0;
+        }
+}</pre>
+
+		<p>Его я исправил следующим образом:</p>
+
+		<pre class="code">/*
+ * Boots is ok, see if the boots is the same but the time
+ * is acceptable old.
+ */
+if (theirBoots == boots_uint &amp;&amp; time_uint &lt; theirLastTime &amp;&amp; time_difference &lt; USM_TIME_WINDOW) {
+        *error = SNMPERR_SUCCESS;
+        return 0;
+}</pre>
+
+		<p>Снова собрал пакет, установил его в систему и перезапустил Zabbix. Через несколько дней стало понятно, что это исправление помогло и опрос по SNMP третьей версии теперь продолжает работать даже после перезагрузок коммутаторов, когда значение EngineBoots не меняется или меняется в меньшую сторону. Был достигнут неприятный компромисс, на который пришлось пойти ради общего увеличения безопасности системы.</p>
+
+		<h2>4. Сборка исправленных пакетов Net-SNMP</h2>
+
+		<p>Теперь уже, когда в деталях раскрыта подноготная исправлений, опишу до конца процесс сборки пакета.</p>
+
+		<p>Скачиваем и устанавливаем пакеты, которые используются в процессе сборки Net-SNMP:</p>
+
+		<pre class="console"># apt-get build-dep snmp</pre>
+
+		<p>Скачиваем патч:</p>
+
+		<pre class="console">$ wget <a href="netsnmp543_snmpv3.patch">netsnmp543_snmpv3.patch</a></pre>
+
+		<p>Тут же, если вы используете библиотеку Net-SNMP из Python, можно скачать ещё один патч, описанный в заметке <a href="../python-netsnmp/">Исправление Python-прослойки библиотеки Net-SNMP</a>:</p>
+
+		<pre class="console">$ wget <a href="netsnmp543_python_client.patch">netsnmp543_python_client.patch</a></pre>
+
+		<p>Теперь перейдём в каталог с исходными текстами и наложим наши патчи:</p>
+
+		<pre class="console"># cd net-snmp-5.4.3~dfsg/
+# patch -Np0 --ignore-whitespace &lt; netsnmp543_snmpv3.patch
+# patch -Np0 --ignore-whitespace &lt; netsnmp543_python_client.patch</pre>
+
+		<p>Добавим наши патчи в будущий пакет:</p>
+
+		<pre class="console"># dpkg-source --commit</pre>
+
+		<p>Укажем имя патча snmpv3-python_client. В окне редактирования информации о патче введём что-нибудь подобное следующему (вплоть до двух нижних строчек, с которых начинается сам текст патча):</p>
+
+		<pre class="code">Description: Fixed Python bindings and SNMPv3 time window logic
+Author: Vladimir Stupin &lt;vladimir@stupin.su&gt;
+Last-Update: &lt;2016-09-06&gt;
+--- net-snmp-5.4.3~dfsg.orig/python/netsnmp/client_intf.c
++++ net-snmp-5.4.3~dfsg/python/netsnmp/client_intf.c</pre>
+
+		<p>Теперь отметим изменения, внесённые в пакет:</p>
+
+		<pre class="console"># dch -i</pre>
+
+		<p>В окне редактирования введём информацию о нашей версии пакета:</p>
+
+		<pre class="code">net-snmp (5.4.3~dfsg-2.8+deb7u2) UNRELEASED; urgency=low
+
+* Fixed Python bindings for IPv4 parameter in SET-requests
+* Fixed SNMPv3 time window logic
+
+-- Vladimir Stupin &lt;vladimir@stupin.su&gt;  Tue, 06 Sep 2016 16:01:20 +0500</pre>
+
+		<p>Осталось собрать пакеты:</p>
+
+		<pre class="console"># dpkg-buildpackage -us -uc -rfakeroot</pre>
+
+		<p>Теперь можно установить необходимые пакеты в систему:</p>
+
+		<pre class="console"># cd ..
+# dpkg -i libsnmp-base_5.4.3~dfsg-2.8+deb7u2_amd64.deb
+# dpkg -i libsnmp15_5.4.3~dfsg-2.8+deb7u2_amd64.deb
+# dpkg -i snmp_5.4.3~dfsg-2.8+deb7u2_amd64.deb
+# dpkg -i libsnmp-python_5.4.3~dfsg-2.8+deb7u2_amd64.deb</pre>
+
+		<h2>5. Python и SNMPv3 в Net-SNMP</h2>
+
+		<p>Двух пересборок пакетов, на самом деле, оказалось недостаточно. Дело в том, что модуль netsnmp для Python не работает с SNMP третьей версии. Как оказалось, при попытке выполнить из программы на Python запроса SNMP с настройками третьей версии, библиотека "молчит" - в сеть не уходит ни единый пакет. В то же время я вспомнил, что на одном из серверов под управлением FreeBSD всё работало превосходно. Сразу же в глаза бросилось различие в версиях Net-SNMP во FreeBSD на том сервере и на сервере под управлением Debian Wheezy. Во FreeBSD был установлен Net-SNMP версии 5.7.2, а в Debian - 5.4.3. Чтобы проверить свои предположения о том, что этот функционал был исправлен в версии 5.7.2, я воспользовался Net-SNMP из Debian Jessie. Набросал небольшую тестовую программку на Python, запустил - всё отработало на ура.</p>
+
+		<p>После этого я заменил в файле /etc/apt/sources.list репозитории deb-src с релиза Wheezy на релиз Jessie и повторил проделанные выше операции, получив таким образом пропатченный бэкпорт Net-SNMP из Jessie для Wheezy. Дело, однако, этим не ограничилось. В бэкпорте вместо библиотеки libsnmp15 была библиотека libsnmp30, а пакет libsnmp-python был переименован в python-netsnmp. К библиотеке libsnmp15 были привязаны Zabbix и PHP5. Пришлось пересобрать и их, в том числе с использованием моих патчей Zabbix, описанных в заметке <a href="../zabbix220/">Установка и настройка Zabbix 2.2.0 в Debian Wheezy</a>.</p>
+
+		<p>Патчи, адаптированные для Net-SNMP версии 5.7.2.1 из Jessie, можно взять по следующим ссылкам:</p>
+
+		<ul>
+			<li><a href="netsnmp5721_snmpv3.patch">netsnmp5721_snmpv3.patch</a></li>
+
+			<li><a href="netsnmp5721_python_client.patch">netsnmp5721_python_client.patch</a></li>
+		</ul>
+
+		<p>Мне невероятно "везёт" с программами, которыми я пользуюсь. Или просто я слишком часто стал заходить на никем ещё не топтанные дорожки?</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Стандарт SNMPv3 и суровая действительность USM_TIME_WINDOW">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

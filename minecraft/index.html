@@ -1,0 +1,67 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="buster,minecraft,debian,linux" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2019-10-06 -->
+		<title>Установка Minecraft в Debian Buster</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Установка Minecraft в Debian Buster</h1>
+
+		<p>На <a href="https://www.minecraft.net">официальном сайте minecraft</a> можно скачать deb-пакет с программой для запуска игры Minecraft. Этот пакет, однако, не устанавливается в Debian Buster, т.к. требует в качестве зависимости установить openjdk-8-jre, а имеющийся в репозитории пакет openjdk-11-jre его не устраивает. К счастью, это легко исправить. Для этого нужно всего-лишь распаковать пакет, исправить список зависимостей, и запаковать обратно.</p>
+
+		<p>Распаковываем пакет в каталог Minecraft:</p>
+
+		<pre class="console">$ dpkg-deb -R Minecraft.deb Minecraft</pre>
+
+		<p>Открываем в текстовом редакторе файл Minecraft/DEBIAN/control, находим строчку Depends и заменяем первую зависимость:</p>
+
+		<pre class="code">Depends: openjdk-11-jre, ...</pre>
+
+		<p>Запаковываем файлы обратно в пакет:</p>
+
+		<pre class="console">$ dpkg-deb -b Minecraft minecraft-launcher_2.1.5965_all.deb</pre>
+
+		<p>Получившийся пакет устанавливаем при помощи следующей команды:</p>
+
+		<pre class="console"># dpkg -i minecraft-launcher_2.1.5965_all.deb</pre>
+
+		<p>Пакет не установится, ссылаясь на то, что для его работы не хватает нескольких пакетов. Автоматическая установка недостающих пакетов при помощи команды <span class="console"># apt-get install -f</span> не срабатывает - удаляется сам пакет с программой для запуска Minecraft.</p>
+
+		<p>Устанавливаем необходимые зависимости вручную:</p>
+
+		<pre class="console"># apt-get install ca-certificates openjdk-11-jre gconf-service libpango1.0-0 libcurl4</pre>
+
+		<p>Возможно также понадобится установить пакет libglfw3:</p>
+
+		<pre class="console"># apt-get install libglfw3</pre>
+
+		<p>Теперь пробуем установить программу снова:</p>
+
+		<pre class="console"># dpkg -i minecraft-launcher_2.1.5965_all.deb</pre>
+
+		<p>На этот раз всё проходит успешно. Можно запускать игру:</p>
+
+		<img src="minecraft-launcher-menu.png" />
+
+		<p>Экран программы для запуска игры:</p>
+
+		<img src="minecraft-launcher.png" />
+
+		<p>Меню игры:</p>
+
+		<img src="minecraft-menu.png" />
+
+		<p>Игра:</p>
+
+		<img src="minecraft.png" />
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Установка Minecraft в Debian Buster">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,191 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="with,python,__call__,yield" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-01-27 -->
+		<title>Генераторы и сопрограммы Python. Часть 2</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Генераторы и сопрограммы Python. Часть 2</h1>
+
+		<p>Эта заметка является идейным и фактическим продолжением одной из моих прошлых заметок -  <a href="../python-generators-part1/">Генераторы и сопрограммы Python</a>. На сей раз я продолжу борьбу за элегантность исходного кода, продолжая приносить в жертву лёгкость понимания средств, лежащих в основе этой элегантности :)</p>
+
+		<p>На сей раз мы ещё немного усложним задачу.</p>
+
+		<p>Во-первых, хочется замаскировать отправку значений в сопрограмму так, чтобы это выглядело как простой вызов функции, а не вызов метода объекта.</p>
+
+		<p>Во-вторых, теперь перед добавлением записи нам нужно проверить, существует ли она. Если запись уже существует, то её не нужно добавлять.</p>
+
+		<p>Для решения первой задачи сначала мне пришло в голову такое решение - сделать дополнительный класс-обёртку с методом __call__:</p>
+
+		<pre class="code">class wrapped_coro():
+    def __init__(self, coro):
+        self.coro = coro
+
+    def __call__(self, *args, **kwargs):
+        return self.coro.send(*args, **kwargs)
+
+class wrapper():
+    def __init__(self, coro, *args, **kwargs):
+        self.coro = coro(*args, **kwargs)
+
+    def __enter__(self):
+        self.coro.next()
+        return wrapped_coro(self.coro)
+
+    def __exit__(self, type, value, traceback):
+        self.coro.close()
+        if value is None:
+            return True
+        return False</pre>
+
+		<p>Однако, немного подумав, я понял, что это ничем не оправданный оверинжениринг, удалил класс wrapped_coro и переписал wrapper вот так:</p>
+
+		<pre class="code">class wrapper():
+    def __init__(self, coro, *args, **kwargs):
+        self.coro = coro(*args, **kwargs)
+
+    def __enter__(self):
+        self.coro.next()
+        return self.coro.send
+
+    def __exit__(self, type, value, traceback):
+        self.coro.close()
+        if value is None:
+            return True
+        return False</pre>
+
+		<p>Получилось даже ещё проще, чем в прошлой заметке. Теперь функцию копирования можно переписать так:</p>
+
+		<pre class="code">def copy(db):
+    """
+    Подпрогрмма, использующая генератор и сопрограмму для копирования
+    содержимого таблицы user в таблицу user2
+    """
+    with wrapper(writer, db) as write:
+        for row in reader(db):
+            write(row)</pre>
+		
+		<p>Для решения второй задачи воспользуемся ещё одной возможностью, предоставляемой оператором yield - он может не только возвращать значение или только считывать его, но и считывать и возвращать одновременно. Делается это так:</p>
+
+		<pre class="code">def checker(db):
+    """Сопрограмма. Проверяет, что указанный пользователь уже добавлен в таблицу users2"""
+    select = db.cursor()
+    exists = None
+    try:
+        while True:
+            row = (yield exists)
+            select.execute('''SELECT COUNT(*)
+                              FROM user2
+                              WHERE surname = %s
+                                AND name = %s
+                                AND patronym = %s''', row)
+            count, = select.fetchone()
+            exists = count != 0
+    except GeneratorExit:
+        select.close()</pre>
+
+		<p>Перед началом использованием сопрограммы, как и прежде, нужно прокрутить её до первого оператора yield. Делается это, как и прежде, вызовом метода next из обёртки.</p>
+
+		<p>Новый вариант функции копирования примет следующий вид:</p>
+
+		<pre class="code">def copy(db):
+    """
+    Подпрогрмма, использующая сопрограммы для дополнения таблицы user2
+    содержимым таблицы user
+    """
+    with wrapper(writer, db) as write:
+        with wrapper(checker, db) as check:
+            for row in reader(db):
+                if not check(row):
+                    write(row)</pre>
+
+		<p>Читается, на мой взгляд, хорошо - код компактен и его логика легко просматривается, если понимать, для чего нужен wrapper. Полностью программа теперь будет выглядеть так:</p>
+
+		<pre class="code">#!/usr/bin/python
+# -*- coding: UTF-8 -*-
+
+import MySQLdb
+
+def reader(db):
+    """Генератор. Читает строки таблицы user"""
+    select = db.cursor()
+    select.execute('SELECT surname, name, patronym FROM user')
+    for row in select:
+        yield row
+    select.close()
+
+def writer(db):
+    """Сопрограмма. Пишет строки в таблицу user2"""
+    insert = db.cursor()
+    try:
+        while True:
+            row = (yield)
+            try:
+                insert.execute('INSERT INTO user2(surname, name, patronym) VALUES(%s, %s, %s)', row)
+                db.commit()
+            except:
+                db.rollback()
+    except GeneratorExit:
+        insert.close()
+
+def checker(db):
+    """Сопрограмма. Проверяет, что указанный пользователь уже добавлен в таблицу users2"""
+    select = db.cursor()
+    exists = None
+    try:
+        while True:
+            row = (yield exists)
+            select.execute('''SELECT COUNT(*)
+                              FROM user2
+                              WHERE surname = %s
+                                AND name = %s
+                                AND patronym = %s''', row)
+            count, = select.fetchone()
+            exists = count != 0
+    except GeneratorExit:
+        select.close()
+
+class wrapper():
+    def __init__(self, coro, *args, **kwargs):
+        self.coro = coro(*args, **kwargs)
+
+    def __enter__(self):
+        self.coro.next()
+        return self.coro.send
+
+    def __exit__(self, type, value, traceback):
+        self.coro.close()
+        if value is None:
+            return True
+        return False
+
+def copy(db):
+    """
+    Подпрогрмма, использующая сопрограммы для дополнения таблицы user2
+    содержимым таблицы user
+    """
+    with wrapper(writer, db) as write:
+        with wrapper(checker, db) as check:
+            for row in reader(db):
+                if not check(row):
+                    write(row)
+
+db = MySQLdb.connect(user = 'user',
+                     passwd = 'p4ssw0rd',
+                     db = 'database',
+                     charset = 'UTF8')
+
+copy(db)
+
+db.close()</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Генераторы и сопрограммы Python. Часть 2">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

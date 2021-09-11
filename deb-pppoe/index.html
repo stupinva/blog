@@ -1,0 +1,118 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="pppoe,Debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2009-02-23 -->
+		<title>deb-пакет и сценарии для запуска PPPoE сервера</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>deb-пакет и сценарии для запуска PPPoE сервера</h1>
+
+		<p>На всякий случай решил разместить собранный мною в предыдущей статье deb-пакет <a href="pppoe_3.8-3_i386.deb">pppoe_3.8-3_i386.deb</a>. Если кому понадобится, но лень собирать - можете взять готовый пакет по этой ссылке, он собран с pppoe-server, поддерживающим работу в режиме ядра.</p>
+
+		<p>Теперь продолжим настройку pppoe-server. Для запуска и остановки pppoe-server я набросал следующий сценарий /etc/init.d/pppoe-server:</p>
+
+		<pre class="code">#!/bin/sh
+
+### BEGIN INIT INFO
+# Provides:          pppoe-server
+# Required-Start:    $network $syslog
+# Required-Stop:     $network $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Roaring Peguin PPPoE server
+# Description:       Roaring Peguin PPPoE server
+### END INIT INFO
+
+CONFIG=/etc/default/pppoe-server
+
+if test -f $CONFIG
+then
+  . $CONFIG
+else
+  echo "PPPoE server: No config-file!"
+fi
+
+if test x$RUN = xno
+then
+  echo "PPPoE Server: disabled."
+  exit
+fi
+
+if test x"$OPTIONS" = x
+then
+  echo "PPPoE server: no options defined!"
+  exit
+fi
+
+if test x$PIDFILE = x
+then
+  PIDFILE=/var/run/pppoe-server.pid
+fi
+
+case $1 in
+  start)
+    echo -n "Starting PPPoE server: "
+    /usr/sbin/pppoe-server -F $OPTIONS &amp;
+    echo $! &gt; $PIDFILE
+    echo "pppoe-server."
+    ;;
+  stop)
+    echo -n "Stopping PPPoE server: "
+    kill `cat $PIDFILE`
+    rm $PIDFILE
+    echo "pppoe-server."
+    ;;
+  restart)
+    $0 stop
+    $0 start
+    ;;
+  *)
+    echo "Usage: $0 start|stop|restart"
+  ;;
+esac</pre>
+
+		<p>Сразу же сделаем его исполняемым:</p>
+
+		<pre class="console"># chmod +x /etc/init.d/pppoe-server</pre>
+
+		<p>Можно также сразу прописать ссылки на его запуск и остановку в каталоги rcX.d:</p>
+
+		<pre class="console"># update-rc.d pppoe-server defaults</pre>
+
+		<p>Теперь займёмся настройкой сервера. Тут всё просто - все настройки сервера хранятся в файле /etc/default/pppoe-server. Настройки являются обычными переменными оболочки и их всего три:</p>
+
+		<pre class="code"># Run pppoe-server at startup
+RUN="yes"
+
+# Options, that provided to pppoe-server
+OPTIONS="-k -I eth1 -L 192.168.0.1"
+
+# File with PID of pppoe-server
+PIDFILE="/var/run/pppoe-server.pid"</pre>
+
+		<p>Переменная RUN задаёт, нужно ли запускать PPPoE сервер при загрузке системы (no - не запускать, yes или любое другое значение означает запускать).</p>
+
+		<p>Переменная OPTIONS задаёт опции, которые будут переданы напрямую в pppoe-server. Все настройки указанные в этой переменной были взяты из моей предыдущей статьи.</p>
+
+		<p>Переменная PIDFILE задаёт расположение файла, в котором хранится идентификатор работающего процесса pppoe-server. Если эта переменная не задана, по умолчанию будет использоваться файл /var/run/pppoe-server.pid.</p>
+
+		<p>На этом пока всё. Следующая цель - настройка pppoe-relay, хотя мне не на чем его тестировать: нужно три компьютера и две изолированные Ethernet-сети, подключенные к компьютеру, на которм будет запускаться pppoe-relay.</p>
+
+		<h2>Ссылки:</h2>
+
+		<ul>
+			<li><a href="http://wiki.debian.org/LSBInitScripts">How to LSBize an Init Script</a> - как составить мета-теги в сценарии инициализации</li>
+		</ul>
+
+		<p>Последнее редактирование: 10 мая 2009 года.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=deb-пакет и сценарии для запуска PPPoE сервера">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

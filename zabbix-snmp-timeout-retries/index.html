@@ -1,0 +1,228 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="buster,zabbix,debian,linux,3.4" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2020-09-27 -->
+		<title>Настройки таймаута и количества попыток для запросов SNMP в Zabbix 3.4</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройки таймаута и количества попыток для запросов SNMP в Zabbix 3.4</h1>
+
+		<p>До версии 2.2.0 в Zabbix для опроса по SNMP использовались настройки опроса по умолчанию. По умолчанию в библиотеке SNMP таймаут опроса составлял 1 секунду, а в случае неудачи делалось до 5 дополнительных попыток опроса. В Zabbix 2.2 для опроса по SNMP используется значение опции Timeout из файла конфигурации и делается только одна попытка опроса.</p>
+
+		<p>Ранее, чтобы уменьшить количество вызовов скриптов внешнего опроса, в конфигурации моих сереров Zabbix было выставлено максимально возможное значение таймаута - 30 секунд, а каждый такой скрипт запрашивал как можно больше значений у устройства и отправлял полученные значения в Zabbix при помощи утилиты zabbix_sender. Если скрипт успевал снять все необходимые данные, укладываясь в отведённые для его работы 30 секунд, то всё хорошо. Если скрипт не укладывался в 30 секунд, то процедуру опроса делили на несколько частей, так чтобы каждая из них уложилась в 30 секунд. Затем в Zabbix'е заводили по отдельному элементу данных для вызова скрипта, указывая ему какую именно часть данных нужно снять с устройства.</p>
+
+		<p>При переходе с Zabbix 2.0 на 2.2 изменение настроек таймаута SNMP привело к большим проблемам: использование процессов Poller выросло до 100% и сервер перестал успевать опрашивать оборудование в необходимом темпе. Происходило это потому, что первый же запрос SNMP к недоступному устройству растягивался до 30 секунд, в течение которых процесс просто ждал ответа от устройства, не занимаясь больше ничем.</p>
+
+		<p>Если вы не используете скриптов внешнего опроса или значение таймаута в конфигурации Zabbix имеет маленькое значение, или на вашем сервере Zabbix много оперативной памяти, то для вас это изменение не будет представлять никаких особых проблем - можно просто увеличить количество процессов Poller. Мне же в моём случае было просто жалко тратить оперативную память на процессы, которые фактически ничем не занимались. Прежний Zabbix без проблем справлялся с опросом, используя значительно меньше оперативной памяти, значит и новый тоже может. Я тогда выполнил откат до прежней версии Zabbix и стал изучать исходные тексты Zabbix с целью вернуть прежние значения таймаута в запросы SNMP.</p>
+
+		<p>Получившиеся исправления ранее уже были описаны в рамках более крупной статьи <a href="../zabbix220/">Установка и настройка Zabbix 2.2.0 в Debian Wheezy</a>, но там им не уделялось достаточного внимания. На этот раз я опишу заплатку более подробно.</p>
+
+		<p>Задеклалируем изменения, которые собираемся внести, отредактировав пример файла конфигурации conf/zabbix_server.conf:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/conf/zabbix_server.conf
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/conf/zabbix_server.conf
++++ zabbix-3.4.12-1+buster/conf/zabbix_server.conf
+@@ -439,6 +439,26 @@ DBUser=zabbix
+ 
+ Timeout=4
+ 
++### Option: SNMPTimeout
++#      Specifies how long we wait for SNMP device (in seconds).
++#
++# Mandatory: no
++# Range: 1-30
++# Default:
++# SNMPTimeout=1
++
++SNMPTimeout=1
++
++### Option: SNMPRetries
++#      Specifies how many times to trying request for SNMP device
++#
++# Mandatory: no
++# Range: 1-10
++# Default:
++# SNMPRetries=3
++
++SNMPRetries=3
++
+ ### Option: TrapperTimeout
+ #      Specifies how many seconds trapper may spend processing new data.
+ #</pre>
+
+		<p>Объявим переменные CONFIG_SNMP_TIMEOUT и CONFIG_SNMP_RETRIES в том же файле, где объявлена переменная CONFIG_TIMEOUT. Это файл src/libs/zbxconf/cfg.c:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/src/libs/zbxconf/cfg.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxconf/cfg.c
++++ zabbix-3.4.12-1+buster/src/libs/zbxconf/cfg.c
+@@ -31,6 +31,8 @@ char  *CONFIG_LOG_FILE        = NULL;
+ int    CONFIG_LOG_FILE_SIZE    = 1;
+ int    CONFIG_ALLOW_ROOT       = 0;
+ int    CONFIG_TIMEOUT          = 3;
++int    CONFIG_SNMP_TIMEOUT     = 1;
++int    CONFIG_SNMP_RETRIES     = 3;
+ 
+ static int     __parse_cfg_file(const char *cfg_file, struct cfg_line *cfg, int level, int optional, int strict);</pre>
+
+		<p>Пропишем эти же объявления в заголовочный файл include/cfg.h, на этот раз - как внешние объявления:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/include/cfg.h
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/include/cfg.h
++++ zabbix-3.4.12-1+buster/include/cfg.h
+@@ -46,6 +46,8 @@ extern char   *CONFIG_LOG_FILE;
+ extern int     CONFIG_LOG_FILE_SIZE;
+ extern int     CONFIG_ALLOW_ROOT;
+ extern int     CONFIG_TIMEOUT;
++extern int     CONFIG_SNMP_TIMEOUT;
++extern int     CONFIG_SNMP_RETRIES;
+ 
+ struct cfg_line
+ {</pre>
+
+		<p>Теперь нужно научить сервер Zabbix и Zabbix-прокси извлекать значения из файлов конфигурации в эти переменные. Отредактируем файлы src/zabbix_server/server.c и src/zabbix_proxy/proxy.c следующим образом:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/src/zabbix_server/server.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/zabbix_server/server.c
++++ zabbix-3.4.12-1+buster/src/zabbix_server/server.c
+@@ -602,6 +602,10 @@ static void        zbx_load_config(ZBX_TASK_EX
+                        PARM_OPT,       0,                      0},
+                {"Timeout",                     &amp;CONFIG_TIMEOUT,                        TYPE_INT,
+                        PARM_OPT,       1,                      30},
++               {"SNMPTimeout",                 &amp;CONFIG_SNMP_TIMEOUT,                   TYPE_INT,
++                       PARM_OPT,       1,                      30},
++               {"SNMPRetries",                 &amp;CONFIG_SNMP_RETRIES,                   TYPE_INT,
++                       PARM_OPT,       1,                      10},
+                {"TrapperTimeout",              &amp;CONFIG_TRAPPER_TIMEOUT,                TYPE_INT,
+                        PARM_OPT,       1,                      300},
+                {"UnreachablePeriod",           &amp;CONFIG_UNREACHABLE_PERIOD,             TYPE_INT,
+Index: zabbix-3.4.12-1+buster/src/zabbix_proxy/proxy.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/zabbix_proxy/proxy.c
++++ zabbix-3.4.12-1+buster/src/zabbix_proxy/proxy.c
+@@ -623,6 +623,10 @@ static void        zbx_load_config(ZBX_TASK_EX
+                        PARM_OPT,       0,                      0},
+                {"Timeout",                     &amp;CONFIG_TIMEOUT,                        TYPE_INT,
+                        PARM_OPT,       1,                      30},
++               {"SNMPTimeout",                 &amp;CONFIG_SNMP_TIMEOUT,                   TYPE_INT,
++                       PARM_OPT,       1,                      30},
++               {"SNMPRetries",                 &amp;CONFIG_SNMP_RETRIES,                   TYPE_INT,
++                       PARM_OPT,       1,                      10},
+                {"TrapperTimeout",              &amp;CONFIG_TRAPPER_TIMEOUT,                TYPE_INT,
+                        PARM_OPT,       1,                      300},
+                {"UnreachablePeriod",           &amp;CONFIG_UNREACHABLE_PERIOD,             TYPE_INT,</pre>
+
+		<p>Реализация функций опроса по SNMP находится в файле src/zabbix_server/poller/checks_snmp.c, но прежде чем редактировать его, заменим в заголовочном файле src/zabbix_server/poller/checks_snmp.h объявление внешней переменной CONFIG_TIMEOUT на объявления внешних переменных CONFIG_SNMP_TIMEOUT и CONFIG_SNMP_RETRIES:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/src/zabbix_server/poller/checks_snmp.h
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/zabbix_server/poller/checks_snmp.h
++++ zabbix-3.4.12-1+buster/src/zabbix_server/poller/checks_snmp.h
+@@ -26,7 +26,8 @@
+ #include "sysinfo.h"
+ 
+ extern char    *CONFIG_SOURCE_IP;
+-extern int     CONFIG_TIMEOUT;
++extern int     CONFIG_SNMP_TIMEOUT;
++extern int     CONFIG_SNMP_RETRIES;
+ 
+ #ifdef HAVE_NETSNMP
+ void   zbx_init_snmp(void);</pre>
+
+		<p>А теперь можно отредактировать сам файл src/zabbix_server/poller/checks_snmp.c:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/src/zabbix_server/poller/checks_snmp.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/zabbix_server/poller/checks_snmp.c
++++ zabbix-3.4.12-1+buster/src/zabbix_server/poller/checks_snmp.c
+@@ -456,8 +456,10 @@ static struct snmp_session *zbx_snmp_ope
+                        break;
+        }
+ 
+-       session.timeout = CONFIG_TIMEOUT * 1000 * 1000; /* timeout of one attempt in microseconds */
+-                                                       /* (net-snmp default = 1 second) */
++       session.timeout = CONFIG_SNMP_TIMEOUT * 1000 * 1000;    /* timeout of one attempt in microseconds */
++                                                               /* (net-snmp default = 1 second) */
++       session.retries = CONFIG_SNMP_RETRIES - 1;              /* number of retries after failed attempt */
++                                                               /* (net-snmp default = 5) */
+ 
+ #ifdef HAVE_IPV6
+        if (SUCCEED != get_address_family(item-&gt;interface.addr, &amp;family, error, max_error_len))
+@@ -1095,7 +1097,7 @@ static int        zbx_snmp_walk(struct snmp_ses
+                        pdu-&gt;max_repetitions = max_vars;
+                }
+ 
+-               ss-&gt;retries = (0 == bulk || (1 == max_vars &amp;&amp; == level) ? 1 : 0);
++               ss-&gt;retries = (0 == bulk || (1 == max_vars &amp;&amp; 0 == level) ? 1 : 0) * (CONFIG_SNMP_RETRIES - 1);
+ 
+                /* communicate with agent */
+                status = snmp_synch_response(ss, pdu, &amp;response);
+@@ -1304,7 +1306,7 @@ static int        zbx_snmp_get_values(struct sn
+                goto out;
+        }
+ 
+-       ss-&gt;retries = (1 == mapping_num &amp;&amp; 0 == level ? 1 : 0);
++       ss-&gt;retries = (1 == mapping_num &amp;&amp; 0 == level ? 1 : 0) * (CONFIG_SNMP_RETRIES - 1);
+ retry:
+        status = snmp_synch_response(ss, pdu, &amp;response);</pre>
+
+		<p>При помощи команды «grep -R CONFIG_TIMEOUT | grep -i snmp» в исходных текстах можно найти ещё один любопытный фрагмент в файле libs/zbxdbcache/dbconfig.c, где можно увидеть отключение повторных попыток опроса по SNMP всего узла, если он не отвечает по SNMP:</p>
+
+		<pre class="code">static void DCincrease_disable_until(const ZBX_DC_ITEM *item, ZBX_DC_HOST *host, int now)
+{
+    switch (item-&gt;type)
+    {
+        case ITEM_TYPE_ZABBIX:
+            if (0 != host-&gt;errors_from)
+                host-&gt;disable_until = now + CONFIG_TIMEOUT;
+            break;
+        case ITEM_TYPE_SNMPv1:
+        case ITEM_TYPE_SNMPv2c:
+        case ITEM_TYPE_SNMPv3:
+            if (0 != host-&gt;snmp_errors_from)
+                host-&gt;snmp_disable_until = now + CONFIG_TIMEOUT;
+            break;
+        case ITEM_TYPE_IPMI:
+            if (0 != host-&gt;ipmi_errors_from)
+                host-&gt;ipmi_disable_until = now + CONFIG_TIMEOUT;
+            break;
+        case ITEM_TYPE_JMX:
+            if (0 != host-&gt;jmx_errors_from)
+                host-&gt;jmx_disable_until = now + CONFIG_TIMEOUT;
+            break;
+        default:
+            /* nothing to do */;
+    }
+}</pre>
+
+		<p>Вопрос, стоит ли исправлять значение таймаута для проверок SNMP в этой функции, я оставлю на размышление. Если значение CONFIG_SNMP_TIMEOUT меньше CONFIG_TIMEOUT, то опрос по SNMP после временных перебоев будет приостанавливаться на меньшее время и, соответственно, восстанавливаться быстрее. Нагрузка на процессы Poller при этом может слегка повыситься, т.к. доступность узлов SNMP будет проверяться чаще. Если вы всё же решитесь поменять значение таймаута в этой функции, то вот очевидный патч для файла libs/zbxdbcache/dbconfig.c:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/src/libs/zbxdbcache/dbconfig.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxdbcache/dbconfig.c
++++ zabbix-3.4.12-1+buster/src/libs/zbxdbcache/dbconfig.c
+@@ -448,7 +448,7 @@ static void DCincrease_disable_until(con
+                case ITEM_TYPE_SNMPv2c:
+                case ITEM_TYPE_SNMPv3:
+                        if (0 != host-&gt;snmp_errors_from)
+-                               host-&gt;snmp_disable_until = now + CONFIG_TIMEOUT;
++                               host-&gt;snmp_disable_until = now + CONFIG_SNMP_TIMEOUT;
+                        break;
+                case ITEM_TYPE_IPMI:
+                        if (0 != host-&gt;ipmi_errors_from)</pre>
+
+		<p>Полную версию описанной здесь заплатки можно взять по ссылке <a href="zabbix3_4_12_snmp_timeout_retries.patch">zabbix3_4_12_snmp_timeout_retries.patch</a>.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройки таймаута и количества попыток для запросов SNMP в Zabbix 3.4">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

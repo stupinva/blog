@@ -1,0 +1,95 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="cups,debian,linux" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2008-10-04 -->
+		<title>Настройка принтера HP LaserJet 1018 в Debian</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка принтера HP LaserJet 1018 в Debian</h1>
+
+		<p>Решил перенести пару статей со старого блога, это одна из них.</p>
+
+		<p>Мне захотелось настроить в Linux систему печати, чтобы распечатать статью из браузера.</p>
+
+		<p>Сначала я установил пакет подсистемы печати cupsys:</p>
+
+		<pre class="console"># aptitude install cupsys</pre>
+
+		<p>Пакет установился и автоматически запустил демона печати и даже нашёл подключенный к USB-порту принтер. Однако тест принтера не дал результатов:</p>
+
+		<pre class="console"># touch test.txt
+# echo "Hello World" &gt; test.txt
+# cat test.txt &gt; /dev/usb/lp0</pre>
+
+		<p>Принтер упорно делал вид, что его вообще тут нет.</p>
+
+		<p>Я немного погуглил в инете на тему настройки принтеров HP LaserJet 1018 и нашёл несколько интересных текстов, о том как же его всё-таки заставить работать.</p>
+
+		<p>Всё дело оказалось в том, что перед тем, как начать печатать, на принтер нужно отправить так называемую прошивку.</p>
+
+		<p>Я критически рассмотрел все три источника и в итоге скомпилировал "своё авторитетное видение" процесса правильной настройки принтера HP LaserJet 1018 в системе Debian GNU/Linux.</p>
+
+		<p>Устанавливаем пакет foo2zjs:</p>
+
+		<pre class="console"># aptitude install foo2zjs</pre>
+
+		<p>Скачиваем исходник его свежей версии с официального сайта разработчика:</p>
+
+		<pre class="console"># wget -O foo2zjs.tar.gz <a href="http://foo2zjs.rkkda.com/foo2zjs.tar.gz">http://foo2zjs.rkkda.com/foo2zjs.tar.gz</a></pre>
+
+		<p>Распакуем его:</p>
+
+		<pre class="console"># tar -xzvf foo2zjs.tar.gz</pre>
+
+		<p>Перейдём в каталог с исходниками:</p>
+
+		<pre class="console"># cd foo2zjs</pre>
+
+		<p>Скачаем образ прошивки для нашего принтера:</p>
+
+		<pre class="console"># ./getweb 1018</pre>
+
+		<p>Тут особое внимание нужно обратить на символы "./" указывающие на то, что команда запускается из текущего каталога, а не из установленного в системе пакета. При этом будет скачана самая свежая версия прошивки.</p>
+
+		<p>Преобразуем прошивку в формат, пригодный для загрузки на принтер, сразу же поместив её в каталог прошивок:</p>
+
+		<pre class="console"># arm2hpdl aihp1018.img &gt; /usr/share/foo2zjs/firmware/sihp1018.dl</pre>
+
+		<p>Сменим владельца прошивки:</p>
+
+		<pre class="console"># chown root:root /usr/share/foo2zjs/firmware/sihp1018.dl</pre>
+
+		<p>После чего выключим и включим принтер. Вуаля, новая прошивка должна быть загружена в принтер!</p>
+
+		<p>Теперь осталось лишь переконфигурировать принтер:</p>
+
+		<pre class="console"># printconf</pre>
+
+		<p>К сожалению запускать эту команду необходимо каждый раз после подключения принтера.</p>
+
+		<p>В комплекте с подсистемой печати идёт веб-приложение для управления подсистемой печати. Оно доступно локально по адресу <a href="http://localhost:631/">http://localhost:631/</a></p>
+
+		<p>В чём преимущества моего метода? В том, что в системе установлен пакет foo2zjs, идущий в комплекте с дистрибутивом. А это значит, что у нас не будет головной боли с обновлением этого пакета.</p>
+
+		<p>Список использованных материалов:</p>
+
+		<ol>
+			<li><a href="http://linux.yaroslavl.ru/docs/conf/print-u.html">Руководство по настройке системы печати </a></li>
+
+			<li><a href="http://www.opennet.ru/tips/info/1396.shtml">Установка принтера HP1020 в Debian Еtch</a></li>
+
+			<li><a href="http://linuxportal.vrn.ru/?q=node/23">Установка принтера HP LaserJet 1018</a></li>
+
+			<li><a href="http://www.linux.org.ru/view-message.jsp?msgid=2725858">[GNU/Debian][HP 1018]Помогите</a></li>
+		</ol>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка принтера HP LaserJet 1018 в Debian">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

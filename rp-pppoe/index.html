@@ -1,0 +1,215 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="pppd,переводы,debian,linux,pppoe,man,p-pppoe" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2009-02-11 -->
+		<title>Пакет RP-PPPoE</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Пакет RP-PPPoE</h1>
+
+		<p>Решил объединить три своих заметки о пакете RP-PPPoE.</p>
+
+		<h2>1. О пакете</h2>
+
+		<p>RP-PPPoE (Roaring Peguin PPP over Ethernet) - это пакет программ, предназначенных для работы с PPPoE-соединениями. В пакет входят клиент, сервер, релей, различные служебные утилиты и сценарии, модуль для PPP-демона, обеспечивающий поддержку соединений PPPoE в режиме ядра Linux.</p>
+
+		<p>Пакет написан Дэвидом Сколлом, домашняя страница проекта находится по адресу <a href="http://www.roaringpenguin.com/pppoe/">http://www.roaringpenguin.com/pppoe/</a>.</p>
+
+		<p>Клиента можно использовать для подключения к сети DSL-провайдера или Ethernet-провайдера, раздающего доступ к интернет через PPPoE-соединения. Сервер и агент ретрансляции можно использовать для построения серверов доступа небольших Ethernet-провайдеров.</p>
+
+		<h2>2. Переводы man-страниц</h2>
+
+		<ol>
+			<li><a href="http://manpages.stupin.su/html/man8/pppoe.8.html">man pppoe(8)</a> - PPPoE-клиент пространства пользователя</li>
+
+			<li><a href="http://manpages.stupin.su/html/man8/pppoe-server.8.html">man pppoe-server(8)</a> - PPPoE-сервер пространства пользователя</li>
+
+			<li><a href="http://manpages.stupin.su/html/man8/pppoe-relay.8.html">man pppoe-relay(8)</a> - PPPoE-агент ретрансляции пространства пользователя</li>
+
+			<li><a href="http://manpages.stupin.su/html/man8/pppoe-sniff.8.html">man pppoe-sniff(8)</a> - поиск в сети нестандартных кадров PPPoE</li>
+			
+			<li><a href="http://manpages.stupin.su/html/man8/pppoe-connect.8.html">man pppoe-connect(8)</a> - сценарий для управления каналом PPPoE</li>
+
+			<li><a href="http://manpages.stupin.su/html/man8/pppoe-start.8.html">man pppoe-start(8)</a> - сценарий для установки канала PPPoE</li>
+
+			<li><a href="http://manpages.stupin.su/html/man8/pppoe-stop.8.html">man pppoe-stop(8)</a> - сценарий для закрытия канала PPPoE</li>
+
+			<li><a href="http://manpages.stupin.su/html/man8/pppoe-setup.8.html">man pppoe-setup(8)</a> - сценарий для настройки PPPoE-клиента Roaring Penguin</li>
+
+			<li><a href="http://manpages.stupin.su/html/man8/pppoe-status.8.html">man pppoe-status(8)</a> - сценарий просмотра состояния канала PPPoE</li>
+
+			<li>man pppoe.conf(5) - файл конфигурации, используемый pppoe-start(8), pppoe-stop(8), pppoe-status(8) и pppoe-connect(8)</li>
+
+			<li>man pppoe-wrapper(1) − SUID-посредник для включения и отключения PPPoE-соединений</li>
+		</ol>
+
+		<p>Переводы страниц руководства выполнены на сайте коллективных переводов <a href="http://translated.by">http://translated.by</a>. Несмотря на то, что это сайт коллективных переводов, в переводе мне никто не помогал, поэтому все переводы были выполнены мной.</p>
+
+		<p>Результаты перевода размещены на сайте <a href="http://manpages.stupin.su/">http://manpages.stupin.su/</a>.</p>
+
+		<p>Несмотря на то, что в названии страниц 1-3 написано, что программы работают в пространстве пользователя, из самой документации чётко видно, что каждая программа может работать в связке с модулем ядра Linux.</p>
+
+		<p>На некоторых системах можно встретить сценарии 5-9 под именами, в которых pppoe заменено на adsl: adsl-connect, adsl-start, adsl-stop, adsl-setup и adsl-status. По содержанию это абсолютно те же самые сценарии.</p>
+
+		<p>Использования сценариев и конфигурационного файла, описанных в пунктах 5-11, на мой взгляд, следует избегать. В большинстве систем обычно имеются собственные сценарии настройки соединений точка-точка.</p>
+
+		<p>В частности, в Debian PPPoE-соединения нужно настраивать точно так же, как и любые другие PPP-соединения, создав соответствующий файл в каталоге /etc/ppp/peers. В этом файле нужно указать все необходимые опции демона pppd. Управлять соединениями можно с помощью сценариев pon и poff. Подробнее настройки рассмотрены ниже.</p>
+
+		<h2>3. Модуль rp-pppoe.so</h2>
+
+		<p>Перед тем, как приступить к описанию настройки, я хочу рассказать о модуле rp-pppoe.so демона pppd. Этот модуль работает в связке с модулем ядра Linux для поддержки PPPoE-соединений.</p>
+
+		<p>Так как при обработке пакетов PPPoE программой, работающей в пространстве пользователя, происходит постоянное переключение из режима ядра в режим пользователя и обратно, довольно большая часть процессорного времени уходит собственно на переключения: на сохранение и восстановление контекста ядра и контеста задачи.</p>
+
+		<p>При обработке PPPoE-пакетов драйвером ядра переключений контекста не происходит. Это позволяет добиться высокой производительности PPPoE-содеинений и сильно снизить нагрузку на центральный процессор.</p>
+		
+		<p>Модуль rp-pppoe.so входит в состав пакета pppd, однако документацию на него мне найти не удалось. Поэтому я решил заглянуть в webgit и посмотреть исходники плагина. На странице по ссылке <a href="http://git.ozlabs.org/?p=ppp.git;a=blob;f=pppd/plugins/rp-pppoe/plugin.c;h=e94494b96cc08587e05def9f7f1ec5023dc8bd9a;hb=HEAD">http://git.ozlabs.org/?p=ppp.git;a=blob;f=pppd/plugins/rp-pppoe/plugin.c;h=e94494b96cc08587e05def9f7f1ec5023dc8bd9a;hb=HEAD</a> я нашёл следующие опции:</p>
+
+		<h3>3.1. device name - PPPoE device name</h3>
+
+		<p>Первая опция не имеет названия. Её значение должно быть указано сразу после строчки подключения плагина. В ней передаётся имя Ethernet-интерфейса, подключенного к ADSL-модему.</p>
+
+		<p>Эта опция соответствует опции -I pppoe-клиента, работающего в пространстве пользователя.</p>
+
+		<h3>3.2. rp_pppoe_service - Desired PPPoE service name</h3>
+
+		<p>Желаемое имя службы PPPoE.</p>
+
+		<p>Соответствует опции -S pppoe.</p>
+
+		<h3>3.3. rp_pppoe_ac - Desired PPPoE access concentrator name</h3>
+
+		<p>Желаемое имя концентратора доступа PPPoE.</p>
+
+		<p>Соответствует опции -C pppoe.</p>
+
+		<h3>3.4. rp_pppoe_sess - Attach to existing session (sessid:macaddr)</h3>
+
+		<p>Подключиться к существующему сеансу идентификатор_сеанса:mac_адрес.</p>
+
+		<p>Соответствует опции -e pppoe.</p>
+
+		<h3>3.5. rp_pppoe_verbose - Be verbose about discovered access concentrators</h3>
+		<p>Сообщать об обнаруженных концентраторах доступа.</p>
+
+		<p>Соответствует опции -A pppoe, однако не предназначена для интерактивного использования, т.к. информация будет оправляться в журнал, а не на стандартный вывод.</p>
+
+		<h3>3.6. pppoe-mac - Only connect to specified MAC address</h3>
+
+		<p>Подключаться только к указанному MAC-адресу.</p>
+
+		<p>У этой опции нет аналогов в pppoe.</p>
+
+		<h2>4. Настройка PPPoE-интерфейсов в Debian</h2>
+
+		<p>Произведём настройку интерфейсов. В файл /etc/network/interfaces впишем следующие строки:</p>
+
+		<pre class="code">auto <b>eth0</b>
+iface <b>eth0</b> inet manual
+
+auto <b>dsl-provider</b>
+iface <b>dsl-provider</b> inet ppp
+  pre-up /sbin/ifconfig <b>eth0</b> up
+  provider <b>dsl-provider</b></pre>
+
+		<ul>
+			<li>eth0 - Ethernet-интерфейс, к которому подключен кабель от провайдера.</li>
+
+			<li>dsl-provider - имя файла в каталоге /etc/ppp/peers/ с настройками подключения к провайдеру.</li>
+		</ul>
+
+		<p>Эти настройки заставят систему пытаться установить PPPoE-соединение сразу после загрузки компьютера. Чтобы соединение было успешно установлено, нужно прописать настройки в файле /etc/ppp/peers/dsl-provider. Настроить PPPoE-соединение можно одним из двух способов: с использованием описанного выше модуля rp-pppoe.so, работающего совместно с PPPoE-модулем ядра или используя pppoe-клиент, работающий в пространстве пользователя.</p>
+
+		<h2>5. Настройка подключения с использованием модуля rp-pppoe.so</h2>
+
+		<p>Сначала нужно убедиться, что ваше ядро имеет поддержку модуля PPPoE. Попробуем загрузить PPPoE-модуль ядра вручную:</p>
+
+		<pre class="console"># modprobe -q pppoe</pre>
+
+		<p>Теперь посмотрим, существует ли файл /proc/net/pppoe. Если модуль был вкомпилирован в ядро статически или модуль успешно загрузился, то этот файл должен появиться. Если нет - нужно разбираться с конфигурацией вашего ядра. Не будем отвлекаться на это, поскольку подавляющее большинство современных дистрибутивов Linux позволяет загрузить этот модуль приведённой выше командой.</p>
+
+		<p>Теперь займёмся настройкой подключения. Для этого в файле /etc/ppp/peers/dsl-provider пропишем настройки подключения:</p>
+
+		<pre class="code"># Здесь указываем имя пользователя, с которым pppd будет подключаться к dsl-провайдеру.
+# Пароль для соединения будет взят из файла /etc/ppp/pap-secrets или /etc/ppp/chap-secrets
+user "ваш_логин"
+
+# Указываем загрузить модуль
+plugin rp-pppoe.so
+
+# Указываем интерфейс, к которому подключен модем
+eth0
+
+# Говорим, что провайдер выдаёт IP-адрес динамически
+noipdefault
+
+# Пытаемся получить IP-адреса DNS-серверов провайдера
+usepeerdns
+
+# Использовать это соединение как маршрут по умолчанию
+defaultroute
+
+# Заставить pppd переподключаться при обрыве соединения
+persist
+
+# Не запрашивать пароль у удалённого партнёра
+noauth</pre>
+
+		<p>Далее в файле /etc/ppp/pap-secrets или /etc/ppp/chap-secrets нужно указать имя и пароль для подключения:</p>
+
+		<pre class="code">ваш_логин * ваш_пароль *</pre>
+
+		<p>Имя используемого файла зависит от метода аутентификации, затребованного PPPoE-сервером, но в большинстве случаев это будет файл chap-secrets.</p>
+
+		<p>Теперь можно воспользоваться обычными для Debian командами pon для установки подключения и poff для закрытия подключения:</p>
+
+		<pre class="console"># pon dsl-provider
+# poff dsl-provider</pre>
+
+		<h2>6. Настройка подключения с использованием pppoe-клиента, работающего в пространстве пользователя</h2>
+
+		<p>Файл /etc/ppp/peers/dsl-provider в этом случае практически идентичен предыдущему, за исключением того, что теперь вместо опции plugin используется опция pty, запускающая программу-посредник pppoe:</p>
+
+		<pre class="code">user ваш_логин
+pty "pppoe -I eth0 -T 80 -m 1452"
+noipdefault
+usepeerdns
+defaultroute
+persist
+noauth</pre>
+
+		<p>Как и в предыдущем случае, для установки и закрытия подключения можно воспользоваться командами pon и poff:</p>
+
+		<pre class="console"># pon dsl-provider
+# poff dsl-provider</pre>
+
+		<p>За кадром остались настройка PPPoE-сервера и релея. Возможно я когда-нибудь за них возьмусь и дополню статью соответствующими разделами.</p>
+
+		<h2>7. Ссылки на использованные для подготовки статьи материалы:</h2>
+
+		<ol>
+			<li><a href="http://www.roaringpenguin.com/pppoe/">Домашняя страница RP-PPPoE</a></li>
+
+			<li><a href="http://translated.by">Сайт коллективных переводов</a></li>
+
+			<li><a href="http://manpages.debian.net">Страницы руководства Debian</a></li>
+
+			<li><a href="http://manpages.stupin.su">Мой проект перевода страниц руководства</a></li>
+
+			<li><a href="http://git.ozlabs.org/?p=ppp.git;a=summary">Web-интерфейс Git-репозитория программы pppd</a></li>
+
+			<li><a href="http://wiki.debian.org/PPPoE">Настройка PPPoE-соединений в Debian</a></li>
+
+			<li><a href="http://ro-che.info/docs/tenet.html">Настройка pppoe в Debian GNU/Linux на примере провайдера TeNeT</a></li>
+		</ol>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Установка и настройка Roundcube">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

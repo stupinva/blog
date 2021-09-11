@@ -1,0 +1,130 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="python,mysql,mysqldb,кодировки" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-02-03 -->
+		<title>Проблема с кодировками в пакете MySQLdb</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Проблема с кодировками в пакете MySQLdb</h1>
+
+		<p>Столкнулся с проблемой при подключении к MySQL с помощью пакета MySQLdb для python. При указании кодировки, содержащей знак минус в своём названии:</p>
+
+		<pre class="code">db = MySQLdb.connect(user = 'user',
+                     passwd = 'p4assw0rd',
+                     db = 'db',
+                     charset = 'koi8r')</pre>
+
+		<p>Пакет отказывается работать, вываливая трассировку:</p>
+
+		<pre class="console">Traceback (most recent call last):
+  File "./myapp.py", line 559, in &lt;module&gt;
+    charset = 'koi8-r')
+  File "/usr/local/lib/python2.7/site-packages/MySQL_python-1.2.3-py2.7-freebsd-8.2-RELEASE-p4-amd64.egg/MySQLdb/__init__.py", line 81, in Connect
+    return Connection(*args, **kwargs)
+  File "/usr/local/lib/python2.7/site-packages/MySQL_python-1.2.3-py2.7-freebsd-8.2-RELEASE-p4-amd64.egg/MySQLdb/connections.py", line 215, in __init__
+    self.set_character_set(charset)
+  File "/usr/local/lib/python2.7/site-packages/MySQL_python-1.2.3-py2.7-freebsd-8.2-RELEASE-p4-amd64.egg/MySQLdb/connections.py", line 294, in set_character_set
+    super(Connection, self).set_character_set(charset)
+_mysql_exceptions.OperationalError: (2019, "Can't initialize character set koi8-r (path: /usr/local/share/mysql/charsets/)")</pre>
+
+		<p>Я знаю, что в MySQL приняты названия кодировок, из которых выкинуты минусы. Однако, если указать кодировку без минуса, то пакет всё равно отказывается работать, выдавая несколько другой трейсбэк:</p>
+
+		<pre class="console">Traceback (most recent call last):
+  File "./myapp.py", line 612, in &lt;module&gt;
+    merge_lists(list1, list2)
+  File "./myapp.py", line 576, in merge_lists
+    value = myfunction(list['key'])
+  File "./myapp.py", line 514, in myfunction
+    WHERE param = %s''', (value,))
+  File "/usr/local/lib/python2.7/site-packages/MySQL_python-1.2.3-py2.7-freebsd-8.2-RELEASE-p4-amd64.egg/MySQLdb/cursors.py", line 159, in execute
+    query = query % db.literal(args)
+  File "/usr/local/lib/python2.7/site-packages/MySQL_python-1.2.3-py2.7-freebsd-8.2-RELEASE-p4-amd64.egg/MySQLdb/connections.py", line 264, in literal
+    return self.escape(o, self.encoders)
+  File "/usr/local/lib/python2.7/site-packages/MySQL_python-1.2.3-py2.7-freebsd-8.2-RELEASE-p4-amd64.egg/MySQLdb/connections.py", line 202, in unicode_literal
+    return db.literal(u.encode(unicode_literal.charset))
+LookupError: unknown encoding: koi8r</pre>
+
+		<p>Что характерно, для кодировки UTF-8 один из вариантов написания всё-же работает. Почитал, что об этом пишут в интернете. Один умный анонимный товарищ <a href="http://www.gentoo.ru/node/1805#comment-67079">объяснил</a> ситуацию так:</p>
+
+		<blockquote>
+			<p>А не MySQLdb ли там у Вас крутится?</p>
+
+			<p>если да - то тут две проблемы:</p>
+
+			<ol>
+				<li>В mysql принято считать, что они лучше знают названия кодировок.</li>
+
+				<li>Модуль MySQLdb для питона считает, что в mysql действительно знают названия кодировок и верит, что python в курсе, что кодировка KOI8-R называется "koi8r", хотя это далеко не так.</li>
+			</ol>
+
+			<p>В модуле codecs python'а кодировка KOI8-R называется "koi8-r", что вообще-то соответствует стандарту. python любит кодировать все строки в unicode. После чего, если они пытаются передаться в mysql, модуль MySQLdb перекодирует из unicode в кодировку, установленную для соединения. А там 'koi8r', вот и ошибка вылетает.</p>
+		
+			<p>Это лечится отстрелом авторов модуля MySQLdb. Хотя впрочем, можно и всех mysqlистых ребят...</p>
+		</blockquote>
+
+		<p>Это подтвердило мои собственные догадки. С момента написания этого высказывания прошло уже почти 5 лет, но ничего не изменилось. Видимо, это не нужно ни пользователям модуля, ни его разработчикам. Честно говоря, мне тоже не нужно - если бы у меня была возможность выбора, то я бы выбрал UTF-8, но у меня такой возможности не было.</p>
+
+		<p>Отредактируем модуль connections.py, входящий в пакет MySQLdb:</p>
+
+		<pre class="console"># vi /usr/local/lib/python2.7/site-packages/MySQL_python-1.2.3-py2.7-freebsd-8.2-RELEASE-p4-amd64.egg/MySQLdb/connections.py</pre>
+
+		<p>И отредактируем метод set_character_set, как показано ниже:</p>
+
+		<pre class="code">def set_character_set(self, charset):
+        """Set the connection character set to charset. The character
+        set can only be changed in MySQL-4.1 and newer. If you try
+        to change the character set from the current value in an
+        older version, NotSupportedError will be raised."""
+        <b>mysql_charset = charset.replace('-', '')</b>
+        if self.character_set_name() != <b>mysql_charset</b>:
+            try:
+                super(Connection, self).set_character_set(<b>mysql_charset</b>)
+            except AttributeError:
+                if self._server_version &lt; (4, 1):
+                    raise NotSupportedError("server is too old to set charset")
+                self.query('SET NAMES %s' % <b>mysql_charset</b>)
+                self.store_result()
+        self.string_decoder.charset = charset
+        self.unicode_literal.charset = charset</pre>
+
+		<p>Пересобирём модуль, чтобы им можно было пользоваться:</p>
+
+		<pre class="console"># python -m compileall /usr/local/lib/python2.7/site-packages/MySQL_python-1.2.3-py2.7-freebsd-8.2-RELEASE-p4-amd64.egg/MySQLdb/connections.py</pre>
+
+		<p>Теперь откроем файл cursors.py:</p>
+
+		<pre class="console"># vi /usr/local/lib/python2.7/site-packages/MySQL_python-1.2.3-py2.7-freebsd-8.2-RELEASE-p4-amd64.egg/MySQLdb/cursor.py</pre>
+
+		<p>И добавим метод character_set_name() в класс BaseCursor:</p>
+
+		<pre class="code">def character_set_name():
+    db = self._get_db()
+    charset = db.character_set_name()
+    map = {'koi8r': 'koi8-r', 'koi8u': 'koi8-u'}
+    return map.get(charset.lower(), charset)</pre>
+
+		<p>А во всех следующих ниже методах заменим строки</p>
+
+		<pre class="code">db = self._get_db()
+charset = db.character_set_name()</pre>
+
+		<p>на строку:</p>
+
+		<pre class="code">charset = self.character_set_name()</pre>
+
+		<p>И перекомпилируем модуль:</p>
+
+		<pre class="console"># python -m compileall /usr/local/lib/python2.7/site-packages/MySQL_python-1.2.3-py2.7-freebsd-8.2-RELEASE-p4-amd64.egg/MySQLdb/cursors.py</pre>
+
+		<p>С такими костылями всё работает нормально, во всяком случае на ошибки я при этом не натыкался. При необходимости можно добавить дополнительные отображения названий кодировок в словарь map.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Проблема с кодировками в пакете MySQLdb">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

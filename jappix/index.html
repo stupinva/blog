@@ -1,0 +1,310 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="stretch,jabber,nginx,debian,linux,php,jappix,php-fpm,xmpp" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2019-05-26 -->
+		<title>Установка, настройка и использование Jappix - веб-клиента Jabber</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Установка, настройка и использование Jappix - веб-клиента Jabber</h1>
+
+		<p>В статье <a href="../prosody-dovecot-sasl/">Настройка Jabber-сервера Prosody с аутентификацией пользователей через Dovecot SASL</a> я описал настройку BOSH. BOSH расшифровывается как Bidirectional-streams Over Synchronous HTTP - двунаправленные потоки данных через синхронный HTTP. Этот протокол позволяет клиентам Jabber взаимодействовать с сервером Jabber через протокол HTTP. Особенно полезной эта функция оказывается для веб-клиентов Jabber, одним из которых и является программа Jappix. Кроме того, что название этой программы похоже на название системы мониторинга Zabbix, можно сказать разве лишь следующее:</p>
+
+		<ul>
+			<li>написана на PHP,</li>
+
+			<li>её нет в репозиториях Debian,</li>
+
+			<li>активная разработка программы не ведётся уже более двух лет - последняя правка в репозитории с исходными текстами датируется 26 января 2017 года.</li>
+		</ul>
+
+		<p>Последний пункт был ещё не настолько очевиден в октябре 2017 года, когда я, по сути, и готовил эту статью.</p>
+
+		<p>Т.к. веб-приложения нет в репозиториях Debian, я подготовил скрипт для сборки deb-пакета:</p>
+
+		<pre class="code">#!/bin/sh
+
+wget --quiet wget https://github.com/jappix/jappix/archive/master.zip -O jappix-master.zip
+unzip -q jappix-master.zip
+rm jappix-master.zip
+
+PACKAGE=jappix
+DATETIME=`date "+%Y%m%d%H%M%S"`
+VERSION="0.$DATETIME"
+DIR=${PACKAGE}_${VERSION}
+
+mkdir -p $DIR/DEBIAN
+
+# Формируем описание пакета
+cat - &gt; $DIR/DEBIAN/control &lt;&lt;END
+Package: $PACKAGE
+Version: $VERSION
+Architecture: all
+Depends: apache2 | httpd, php, php-common (&gt;= 5.5.0+dfsg-10~), php-curl, php-gd
+Maintainer: Vladimir Stupin &lt;vladimir@stupin.su&gt;
+Description: Jappix, a full-featured XMPP web-client
+ Jappix, a full-featured XMPP web-client
+ Homepage: https://github.com/jappix/jappix
+END
+
+chmod 755 $DIR/DEBIAN/control
+
+cat - &gt; $DIR/DEBIAN/postinst &lt;&lt;END
+#!/bin/sh
+# postinst script for jappix
+
+set -e
+
+# summary of how this script can be called:
+#        * &lt;postinst&gt; \`configure' &lt;most-recently-configured-version&gt;
+#        * &lt;old-postinst&gt; \`abort-upgrade' &lt;new version&gt;
+#        * &lt;conflictor's-postinst&gt; \`abort-remove' \`in-favour' &lt;package&gt;
+#          &lt;new-version&gt;
+#        * &lt;deconfigured's-postinst&gt; \`abort-deconfigure' \`in-favour'
+#          &lt;failed-install-package&gt; &lt;version&gt; \`removing'
+#          &lt;conflicting-package&gt; &lt;version&gt;
+# for details, see http://www.debian.org/doc/debian-policy/ or
+# the debian-policy package
+
+case "\$1" in
+  configure)
+        # Change permissions to etc files
+        if ! dpkg-statoverride --list /etc/tmpfiles.d/jappix.conf &gt;/dev/null; then
+                chown -R root:root /etc/tmpfiles.d/jappix.conf
+                chmod 644 /etc/tmpfiles.d/jappix.conf
+        fi
+
+        # Change permissions to application files
+        if ! dpkg-statoverride --list /usr/share/jappix &gt;/dev/null; then
+                chown -R root:root /usr/share/jappix
+                chmod 755 /usr/share/jappix
+                find /usr/share/jappix -type d | xargs chmod 755
+                find /usr/share/jappix -type f | xargs chmod 644
+        fi
+
+        # Create data directory
+        if [ ! -d "/var/lib/jappix" ]; then
+                install -d -o www-data -g www-data -m 770 /var/lib/jappix;
+        fi
+        if ! dpkg-statoverride --list /var/lib/jappix &gt;/dev/null; then
+                chown -R www-data:www-data /var/lib/jappix
+                chmod 770 /var/lib/jappix
+                find /var/lib/jappix -type d | xargs chmod 770
+                find /var/lib/jappix -type f | xargs chmod 660
+        fi
+
+        # Create logs directory
+        if [ ! -d "/var/log/jappix" ]; then
+                install -d -o www-data -g www-data -m 770 /var/log/jappix;
+        fi
+
+        # Create tmp directory
+        systemd-tmpfiles --create &gt;/dev/null 2&gt;&amp;1
+  ;;
+  abort-upgrade|abort-remove|abort-deconfigure)
+  ;;
+  *)
+    echo "postinst called with unknown argument \\\`\$1'" &gt;&amp;2
+    exit 1
+  ;;
+esac
+END
+
+chmod 0755 $DIR/DEBIAN/postinst
+
+# Формируем содержимое пакета
+mkdir -p $DIR/usr/share/jappix/
+cp -R jappix-master/* $DIR/usr/share/jappix/
+rm -R jappix-master
+
+# Выносим каталог /usr/share/jappix/store в /var/lib/jappix
+mkdir -p $DIR/var/lib/
+mv $DIR/usr/share/jappix/store $DIR/var/lib/jappix
+ln -s /var/lib/jappix $DIR/usr/share/jappix/store
+
+# Выносим каталог /usr/share/jappix/tmp в /tmp/jappix
+rm -R $DIR/usr/share/jappix/tmp
+ln -s /tmp/jappix $DIR/usr/share/jappix/tmp
+
+mkdir -p $DIR/etc/tmpfiles.d/
+cat - &gt; $DIR/etc/tmpfiles.d/jappix.conf &lt;&lt;END
+d    /tmp/jappix/          0770 www-data www-data 10m -
+d    /tmp/jappix/avatar/   0770 www-data www-data 10m -
+d    /tmp/jappix/archives/ 0770 www-data www-data 10m -
+d    /tmp/jappix/send/     0770 www-data www-data 10m -
+d    /tmp/jappix/cache/    0770 www-data www-data 10m -
+END
+
+# Выносим каталог /usr/share/jappix/log в /var/log/jappix
+rm -R $DIR/usr/share/jappix/log
+ln -s /var/log/jappix $DIR/usr/share/jappix/log
+
+FILE=${PACKAGE}_${VERSION}_all.deb
+
+# Формируем пакет
+dpkg-deb -b $DIR $FILE &gt;/dev/null 2&gt;&amp;1
+rm -R $DIR</pre>
+
+		<p>Сохраним этот скрипт под именем make_jappix.sh, сделаем его исполняемым и запустим:</p>
+
+		<pre class="console">$ chown +x ./make_jappix.sh
+$ ./make_jappix.sh</pre>
+
+		<p>Если всё пройдёт успешно, то в текущем каталоге появится deb-файл. Во время подготовки статьи к публикации собранный мной deb-файл назывался jappix_0.20190321184054_all.deb. Установим его в систему:</p>
+
+		<pre class="console"># dpkg -i /home/stupin/jappix_0.20190321184054_all.deb</pre>
+
+		<p>Если в системе не установлены необходимые зависимости для этого пакета, то исправить это можно, установив недостающие пакеты вручную и завершив установку недостающих зависимостей при помощи пары команд:</p>
+
+		<pre class="console"># apt-get install nginx-full php-fpm
+# apt-get install -f</pre>
+
+		<p>Настройка BOSH уже была описана, поэтому не буду повторяться и приступлю сразу к настройке приложения Jappix. Во-первых, если у вас ещё не настроен пул процессов PHP-FPM, то можно настроить его, создав файл в каталоге /etc/php/7.0/fpm/pool.d/. Я создал файл /etc/php/7.0/fpm/pool.d/www07.conf со следующим содержимым:</p>
+
+		<pre class="code">[www07]
+user = www07
+group = www-data
+
+listen = /var/run/www07.sock
+listen.owner = www-data
+listen.group = www-data
+listen.mode = 0660
+
+;chroot = /home/www07/
+chdir = /usr/share/jappix/
+
+pm = ondemand
+pm.max_children = 2
+pm.process_idle_timeout = 10m
+
+;access.log = /var/log/php5-fpm.access.log
+
+php_flag[log_errors] = On
+;php_value[error_log] = /var/log/php5-fpm.error.log
+php_value[error_reporting] = E_ALL &amp; ~E_NOTICE
+
+php_value[post_max_size] = 8M
+php_value[upload_max_filesize] = 8M
+php_value[date.timezone] = Asia/Yekaterinburg</pre>
+
+		<p>Теперь нужно перезагрузить php-fpm, чтобы настройки нового пула процессов вступили в силу:</p>
+
+		<pre class="console"># systemctl reload php7.0-fpm.service</pre>
+
+		<p>Теперь можно приступить к настройке nginx. Я вписал в файл /etc/nginx/sites-enabled/default в секцию server следующие настройки:</p>
+
+		<pre class="code">location /jappix/ {
+  alias /usr/share/jappix/;
+  index index.php;
+}
+
+location ~ ^/jappix/.+\.php$ {
+  root /usr/share/jappix/;
+ 
+  include fastcgi.conf;
+
+  fastcgi_pass unix:/var/run/www07.sock;
+  fastcgi_split_path_info ^/jappix(/.+\.php)(.*)$;
+}
+
+location ~ /jappix/(app|i18n|log|test|tmp|tools)/ {
+  deny all;
+}</pre>
+
+		<p>Осталось перезагрузить nginx, чтобы он узнал о новых настройках:</p>
+
+		<pre class="console"># systemctl reload nginx.service</pre>
+
+		<p>Теперь можно вооружиться браузером и приступить к настройке только что установленного приложения.</p>
+
+		<p>Начальная настройка Jappix:</p>
+
+		<img src="jappix-install1.png" />
+
+		<img src="jappix-install2.png" />
+
+		<img src="jappix-install3.png" />
+
+		<p>Внимание! В примере ниже включена опция шифрования. Подумайте о том, стоит ли включать её. Во-первых, при использовании HTTPS, требование шифрования избыточно, т.к. шифрование уже осуществляется на уровне сеанса HTTPS. Во-вторых - требование шифрования может вызвать проблемы, т.к. со стороны сервера может быть выставлена настройка, запрещающая устанавливать шифрованные соединения через HTTPS. В частности, клиент Pidgin с графическим интерфейсом, при указании адреса BOSH пытается установить шифрованное подключение по протоколу XMPP через уже зашифрованное подключение HTTPS. Поскольку в Pidgin нет опции для безусловного отключения требования шифрования, то заставить его работать через BOSH не удаётся. Если вы всё-же включили шифрование, то отключить его позже можно через файл /var/lib/jappix/conf/main.xml, для этого нужно вписать значение off в строчку "&lt;encryption&gt;on&lt;/encryption&gt;" и сохранить изменения.</p>
+
+		<img src="jappix-install4.png" />
+
+		<img src="jappix-install5.png" />
+
+		<img src="jappix-install6.png" />
+
+		<p>Вход в Jappix:</p>
+
+		<img src="jappix-login1.png" />
+
+		<img src="jappix-login2.png" />
+
+		<p>Настройка профиля пользователя Jappix:</p>
+
+		<img src="jappix-profile1.png" />
+
+		<img src="jappix-profile2.png" />
+
+		<img src="jappix-profile3.png" />
+
+		<img src="jappix-profile4.png" />
+
+		<img src="jappix-profile5.png" />
+
+		<img src="jappix-profile6.png" />
+
+		<p>На снимке ниже программа предлагает создать публичный профиль на сайте, который уже не существует. Стоит отказаться от предложения. На мой взгляд, не стоило бы соглашаться, даже если сайт по-прежнему работал бы.</p>
+
+		<img src="jappix-profile7.png" />
+
+		<p>Окно программы:</p>
+
+		<img src="jappix-page.png" />
+
+		<p>Вход в комнату:</p>
+
+		<img src="jappix-add-chat1.png" />
+
+		<img src="jappix-add-chat2.png" />
+
+		<img src="jappix-add-chat3.png" />
+
+		<img src="jappix-add-chat4.png" />
+
+		<img src="jappix-add-chat5-captcha.png" />
+
+		<img src="jappix-add-chat6.png" />
+
+		<p>Поиск пользователя в каталоге VJUD - Virtual Jabber User Directory:</p>
+
+		<img src="jappix-vjud-search1.png" />
+
+		<img src="jappix-vjud-search2.png" />
+
+		<p>Включить/отключить возможность поиска своей учётной записи в каталоге VJUD:</p>
+
+		<img src="jappix-vjud-settings5.png" />
+
+		<img src="jappix-vjud-settings1.png" />
+
+		<img src="jappix-vjud-settings2.png" />
+
+		<img src="jappix-vjud-settings3.png" />
+
+		<img src="jappix-vjud-settings4.png" />
+
+		<p>Поскольку через VJUD мне ни разу не удалось найти что-либо, возможно поддержка VJUD в Prosody, описанная в прошлой статье, просто сломана.</p>
+
+		<p>Учётная запись из примеров - экспериментальная. Не стоит писать мне сообщения на неё, т.к. я пока не пользуюсь ей активно и она в любой момент может оказаться неисправной вместе с сервером Jabber. Лучше пишите комментарии или письма.</p>
+
+		<p>Если кто-то может подсказать альтернативные веб-клиенты Jabber, которые продолжают активно поддерживаться, и поделиться опытом их использования, прошу написать в комментарии.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Установка, настройка и использование Jappix - веб-клиента Jabber">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

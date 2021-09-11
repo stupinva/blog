@@ -1,0 +1,107 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="buster,zabbix,debian,linux,3.4,php" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2020-09-13 -->
+		<title>Местонахождение устройства в панели проблем Zabbix 3.4</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Местонахождение устройства в панели проблем Zabbix 3.4</h1>
+
+		<p>На стартовой странице веб-интерфейса Zabbix по умолчанию отображается список актуальных проблем. Самая важная информация в этом списке - это время начала проблемы, узел сети, срабтавший триггер и длительность проблемы, но нет никакой информации о местоположении устройства. Если у вас небольшая сеть, расположенная не более чем по нескольким десяткам адресов, то хорошая система именования устройств может решить проблему поиска местонахождения устройства. Если же количество адресов, по которым находятся устройства, достигает нескольких тысяч, то правильное именование устройств становится трудной задачей.</p>
+
+		<p>В Zabbix'е к каждому устройству можно прикрепить так называемые «инвентарные данные», среди которых есть поле адреса. Было бы неплохо показывать это поле в списке проблем, чтобы можно было без лишних телодвижений определить адрес устройства. К сожалению, Zabbix не предоставляет для этого штатных средств. Но к счастью, это можно сделать, внеся в исходный текст веб-интерфейса Zabbix небольшую правку.</p>
+
+		<p>Интересующий нас виджет находится в файле frontends/php/app/views/monitoring.widget.problems.view.php</p>
+
+		<p>Этот виджет фигурирует в списке маршрутов в файле frontends/php/include/classes/mvc/CRouter.php:</p>
+
+		<pre class="code">'widget.problems.view'  =&gt; ['CControllerWidgetProblemsView',    'layout.widget',                'monitoring.widget.problems.view'],</pre>
+
+		<p>Класс CControllerWidgetProblemsView описан в файле frontends/php/app/controllers/CControllerWidgetProblemsView.php. Именно в этом классе готовятся данные, которые потом будут использованы в виджете для отображения. Данные об узлах, связанных с триггерами, в этом классе формируется при помощи функции getTriggersHostsList.</p>
+
+		<p>Определение функции getTriggersHostsList находится в файле frontends/php/include/triggers.inc.php, для получения списка узлов с триггерами используется <a href="https://www.zabbix.com/documentation/3.4/manual/api/reference/host/get">метод API host.get</a>:</p>
+
+		<pre class="code">$db_hosts = $hostids
+    ? API::Host()-&gt;get([
+        'output' =&gt; ['hostid', 'name', 'status', 'maintenanceid', 'maintenance_status', 'maintenance_type'],
+        'selectGraphs' =&gt; API_OUTPUT_COUNT,
+        'selectScreens' =&gt; API_OUTPUT_COUNT,
+        'hostids' =&gt; array_keys($hostids),
+        'preservekeys' =&gt; true
+    ])
+    : [];</pre>
+
+		<p>Внесём правку, которая добавит в этот список строку местоположения устройства из его инвентарных данных:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/frontends/php/include/triggers.inc.php
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/frontends/php/include/triggers.inc.php
++++ zabbix-3.4.12-1+buster/frontends/php/include/triggers.inc.php
+@@ -2170,6 +2170,7 @@ function getTriggersHostsList(array $tri
+                        'output' =&gt; ['hostid', 'name', 'status', 'maintenanceid', 'maintenance_status', 'maintenance_type'],
+                        'selectGraphs' =&gt; API_OUTPUT_COUNT,
+                        'selectScreens' =&gt; API_OUTPUT_COUNT,
++                       'selectInventory' =&gt; ['location'],
+                        'hostids' =&gt; array_keys($hostids),
+                        'preservekeys' =&gt; true
+                ])</pre>
+
+		<p>Теперь эти данные нужно отобразить в виджете. Внесём соответствующую правку в файл frontends/php/app/views/monitoring.widget.problems.view.php:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/frontends/php/app/views/monitoring.widget.problems.view.php
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/frontends/php/app/views/monitoring.widget.problems.view.php
++++ zabbix-3.4.12-1+buster/frontends/php/app/views/monitoring.widget.problems.view.php
+@@ -54,6 +54,7 @@ $table = (new CTableInfo())
+                $show_recovery_data ? _('Status') : null,
+                _('Info'),
+                ($data['sortfield'] === 'host') ? [_('Host'), $sort_div] : _('Host'),
++               ($data['sortfield'] === 'location') ? [_('Location'), $sort_div] : _('Location'),
+                [
+                        ($data['sortfield'] === 'problem') ? [_('Problem'), $sort_div] : _('Problem'),
+                        ' &amp;bullet; ',
+@@ -198,11 +199,19 @@ foreach ($data['data']['problems'] as $e
+                ];
+        }
+ 
++       $trigger_hosts = array_values($data['data']['triggers_hosts'][$trigger['triggerid']]);
++       $locations = array();
++       foreach($trigger_hosts as $host)
++       {
++               $locations[] = $host['inventory']['location'];
++       }
++
+        $table-&gt;addRow(array_merge($row, [
+                $show_recovery_data ? $cell_r_clock : null,
+                $show_recovery_data ? $cell_status : null,
+                makeInformationList($info_icons),
+                $triggers_hosts[$trigger['triggerid']],
++               join(', ', $locations),
+                $description,
+                (new CCol(
+                        ($problem['r_eventid'] != 0)</pre>
+
+		<p>Как видно, в правке:</p>
+
+		<ol>
+			<li>в таблицу был добавлен заголовок новой колонки Location,</li>
+
+			<li>по каждому из триггеров формируется строка со списком адресов узлов, на значения элементов данных из которых опирается этот триггер,</li>
+
+			<li>строки с адресами через запятую с пробелом склеиваются в одну строку,</li>
+
+			<li>полученная строка добавляется в строку таблицы, в колонку Location.</li>
+		</ol>
+
+		<p>Готовую заплатку можно взять по ссылке <a href="zabbix3_4_12_frontend_location.patch">zabbix3_4_12_frontend_location.patch</a>.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Местонахождение устройства в панели проблем Zabbix 3.4">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

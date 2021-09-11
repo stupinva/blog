@@ -1,0 +1,267 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="ocsp,перевод,ssl,Реми ван Элст,openssl" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2016-11-06 -->
+		<title>Реми ван Элст. OpenSSL: Ручная проверка сертификата по OCSP, 2014</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Реми ван Элст. OpenSSL: Ручная проверка сертификата по OCSP, 2014</h1>
+
+		<p>Перевод статьи: <a href="https://raymii.org/s/articles/OpenSSL_Manually_Verify_a_certificate_against_an_OCSP.html">OpenSSL: Manually verify a certificate against an OCSP</a></p>
+
+		<p>Автор: Реми ван Элст (Remy van Elst)</p>
+
+		<p>В этой статье показано, как вручную проверить сертификат на OCSP-сервере. OCSP означает Online Certificate Status Protocol - протокол интерактивного статуса сертификата - и является одним из способов проверки актуальности сертификата. Это альтернатива для CRL, Certificate Revocation List - списка отозванных сертификатов.</p>
+
+		<p>По сравнению с CRL:</p>
+
+		<ul>
+			<li>Поскольку ответ OCSP содержит меньше информации по сравнению с обычным CRL, OCSP может более эффективно использовать ресурсы сети и клиента.</li>
+
+			<li>При использовании OCSP клиентам не нужно разбирать CRL самостоятельно, что упрощает реализацию клиента. Однако это компенсируется практической необходимостью поддерживать кэш. На практике эти соображения имеют малое значение, потому что приложения полагаются на сторонние библиотеки, реализующие все функции X.509.</li>
+
+			<li>OCSP предоставляет информацию об определённом сетевом узле, использующим определённый сертификат в определённое время. OCSP не предоставляет шифрование, поэтому третья сторона может перехватить эту информацию.</li>
+		</ul>
+
+		<p>Подробности об OCSP можно найти на <a href="https://en.wikipedia.org/wiki/Online_Certificate_Status_Protocol">Википедии</a>.</p>
+
+		<p>Если нужно вручную проверить сертификат по CRL, обратитесь к <a href="../crl-manual-validation/">соответствующей статье</a>.</p>
+
+		<p>Воспользуемся OpenSSL. Я использую такую версию:</p>
+
+		<pre class="console">$ openssl version
+OpenSSL 1.0.1g 7 Apr 2014</pre>
+
+		<h2>1. Получение сертификата с OCSP</h2>
+
+		<p>Для начала, нам нужен сам сертификат веб-сайта. В качестве примера возьмём сайт Википедия. Получить его сертификат можно при помощи следующей команды:</p>
+
+		<pre class="console">openssl s_client -connect wikipedia.org:443 2&gt;&amp;1 &lt; /dev/null | sed -n '/-----BEGIN/,/-----END/p'</pre>
+
+		<p>Сохраним вывод команды в файл, например, wikipedia.pem:</p>
+
+		<pre class="console">openssl s_client -connect wikipedia.org:443 2&gt;&amp;1 &lt; /dev/null | sed -n '/-----BEGIN/,/-----END/p' &gt; wikipedia.pem</pre>
+
+		<p>Теперь проверим, есть ли в сертификате URI OCSP:</p>
+
+		<pre class="console">openssl x509 -noout -ocsp_uri -in wikipedia.pem
+http://ocsp.digicert.com</pre>
+
+		<p>Если вывод команды пуст, значит у сертификата нет URI OCSP. Этот сертификат нельзя проверить по OCSP.</p>
+
+		<h2>2. Получение цепочки сертификатов</h2>
+
+		<p>Вместе с проверяемым сертификатом нужно отправить цепочку сертификатов. Для этого нужно получить цепочку сертификатов для проверяемого домена, <b>wikipedia.org</b>. С помощью опции <b>-showcerts</b> команды <b>openssl s_client</b> можно увидеть все сертификаты в цепочке:</p>
+
+		<pre class="console">openssl s_client -connect wikipedia.org:443 -showcerts 2&gt;&amp;1 &lt; /dev/null</pre>
+
+		<p>Команда выдаст много информации, но нас интересует только следующее:</p>
+
+		<pre class="console">1 s:/C=US/O=DigiCert Inc/OU=www.digicert.com/CN=DigiCert High Assurance CA-3
+   i:/C=US/O=DigiCert Inc/OU=www.digicert.com/CN=DigiCert High Assurance EV Root CA
+-----BEGIN CERTIFICATE-----
+MIIGWDCCBUCgAwIBAgIQCl8RTQNbF5EX0u/UA4w/OzANBgkqhkiG9w0BAQUFADBs
+MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3
+d3cuZGlnaWNlcnQuY29tMSswKQYDVQQDEyJEaWdpQ2VydCBIaWdoIEFzc3VyYW5j
+ZSBFViBSb290IENBMB4XDTA4MDQwMjEyMDAwMFoXDTIyMDQwMzAwMDAwMFowZjEL
+MAkGA1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3
+LmRpZ2ljZXJ0LmNvbTElMCMGA1UEAxMcRGlnaUNlcnQgSGlnaCBBc3N1cmFuY2Ug
+Q0EtMzCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAL9hCikQH17+NDdR
+CPge+yLtYb4LDXBMUGMmdRW5QYiXtvCgFbsIYOBC6AUpEIc2iihlqO8xB3RtNpcv
+KEZmBMcqeSZ6mdWOw21PoF6tvD2Rwll7XjZswFPPAAgyPhBkWBATaccM7pxCUQD5
+BUTuJM56H+2MEb0SqPMV9Bx6MWkBG6fmXcCabH4JnudSREoQOiPkm7YDr6ictFuf
+1EutkozOtREqqjcYjbTCuNhcBoz4/yO9NV7UfD5+gw6RlgWYw7If48hl66l7XaAs
+zPw82W3tzPpLQ4zJ1LilYRyyQLYoEt+5+F/+07LJ7z20Hkt8HEyZNp496+ynaF4d
+32duXvsCAwEAAaOCAvowggL2MA4GA1UdDwEB/wQEAwIBhjCCAcYGA1UdIASCAb0w
+ggG5MIIBtQYLYIZIAYb9bAEDAAIwggGkMDoGCCsGAQUFBwIBFi5odHRwOi8vd3d3
+LmRpZ2ljZXJ0LmNvbS9zc2wtY3BzLXJlcG9zaXRvcnkuaHRtMIIBZAYIKwYBBQUH
+AgIwggFWHoIBUgBBAG4AeQAgAHUAcwBlACAAbwBmACAAdABoAGkAcwAgAEMAZQBy
+AHQAaQBmAGkAYwBhAHQAZQAgAGMAbwBuAHMAdABpAHQAdQB0AGUAcwAgAGEAYwBj
+AGUAcAB0AGEAbgBjAGUAIABvAGYAIAB0AGgAZQAgAEQAaQBnAGkAQwBlAHIAdAAg
+AEMAUAAvAEMAUABTACAAYQBuAGQAIAB0AGgAZQAgAFIAZQBsAHkAaQBuAGcAIABQ
+AGEAcgB0AHkAIABBAGcAcgBlAGUAbQBlAG4AdAAgAHcAaABpAGMAaAAgAGwAaQBt
+AGkAdAAgAGwAaQBhAGIAaQBsAGkAdAB5ACAAYQBuAGQAIABhAHIAZQAgAGkAbgBj
+AG8AcgBwAG8AcgBhAHQAZQBkACAAaABlAHIAZQBpAG4AIABiAHkAIAByAGUAZgBl
+AHIAZQBuAGMAZQAuMBIGA1UdEwEB/wQIMAYBAf8CAQAwNAYIKwYBBQUHAQEEKDAm
+MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wgY8GA1UdHwSB
+hzCBhDBAoD6gPIY6aHR0cDovL2NybDMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0SGln
+aEFzc3VyYW5jZUVWUm9vdENBLmNybDBAoD6gPIY6aHR0cDovL2NybDQuZGlnaWNl
+cnQuY29tL0RpZ2lDZXJ0SGlnaEFzc3VyYW5jZUVWUm9vdENBLmNybDAfBgNVHSME
+GDAWgBSxPsNpA/i/RwHUmCYaCALvY2QrwzAdBgNVHQ4EFgQUUOpzidsp+xCPnuUB
+INTeeZlIg/cwDQYJKoZIhvcNAQEFBQADggEBAB7ipUiebNtTOA/vphoqrOIDQ+2a
+vD6OdRvw/S4iWawTwGHi5/rpmc2HCXVUKL9GYNy+USyS8xuRfDEIcOI3ucFbqL2j
+CwD7GhX9A61YasXHJJlIR0YxHpLvtF9ONMeQvzHB+LGEhtCcAarfilYGzjrpDq6X
+dF3XcZpCdF/ejUN83ulV7WkAywXgemFhM9EZTfkI7qA5xSU1tyvED7Ld8aW3DiTE
+JiiNeXf1L/BXunwH1OH8zVowV36GEEfdMR/X/KLCvzB8XSSq6PmuX2p0ws5rs0bY
+Ib4p1I5eFdZCSucyb6Sxa1GDWL4/bcf72gMhy2oWGU4K8K2Eyl2Us1p292E=
+-----END CERTIFICATE-----</pre>
+
+		<p>Как можно увидеть, это номер 1. Номер 0 - это сертификат Википедии, он у нас уже есть. Если у проверяемого сайта больше сертификатов в цепочке, они все будут отображены. Сохраните их все в том порядке, в котором их выведет OpenSSL (первый - который непосредственно выпустил сертификат вашего сервера, затем тот, который выпустил этот сертификат и т.д. с корневым или самым корневым в конце файла) в файл с именем <b>chain.pem</b>.</p>
+
+		<h2>3. Отправка запроса OCSP</h2>
+
+		<p>Теперь у нас есть все данные, необходимые для выполнения запроса OCSP. С помощью следующей команды OpenSSL можно отправить запрос OCSP и получить текстовый результат:</p>
+
+		<pre class="console">openssl ocsp -issuer chain.pem -cert wikipedia.pem -text -url http://ocsp.digicert.com</pre>
+
+		<p>Результаты:</p>
+
+		<pre class="console">OCSP Request Data:                                                   # Данные запроса OCSP
+    Version: 1 (0x0)                                                 # Версия: 1 (0x0)
+    Requestor List:                                                  # Список просителя
+        Certificate ID:                                              # Идентификатор сертификата
+          Hash Algorithm: sha1                                       # Алгоритм хэширования: sha1
+          Issuer Name Hash: ED48ADDDCB7B00E20E842AA9B409F1AC3034CF96 # Хэш имени выпустившего сертификат: ED48ADDDCB7B00E20E842AA9B409F1AC3034CF96 
+          Issuer Key Hash: 50EA7389DB29FB108F9EE50120D4DE79994883F7  # Хэш ключа выпустившего сертификат: 50EA7389DB29FB108F9EE50120D4DE79994883F7
+          Serial Number: 0114195F66FAFF8FD66E12496E516F4F            # Серийный номер: 0114195F66FAFF8FD66E12496E516F4F
+    Request Extensions:                                              # Расширения запроса
+        OCSP Nonce:                                                  # Текущий OCSP
+            0410DA634F2ADC31DC48AE89BE64E8252D12
+OCSP Response Data:                                                  # Данные ответа OCSP
+    OCSP Response Status: successful (0x0)                           # Статус ответа OCSP: успешно (0x0)
+    Response Type: Basic OCSP Response                               # Тип ответа: Базовый ответ OCSP
+    Version: 1 (0x0)                                                 # Версия: 1 (0x0)
+    Responder Id: 50EA7389DB29FB108F9EE50120D4DE79994883F7           # Идентификатор ответчика: 50EA7389DB29FB108F9EE50120D4DE79994883F7
+    Produced At: Apr 9 08:45:00 2014 GMT                             # Создано: 9 апреля 2014 года в 08:45:00 по Гринвичу
+    Responses:                                                       # Ответы:
+    Certificate ID:                                                  # Идентификатор сертификата:
+      Hash Algorithm: sha1                                           # Алгоритм хэширования: sha1
+      Issuer Name Hash: ED48ADDDCB7B00E20E842AA9B409F1AC3034CF96     # Хэш имени эмитента: ED48ADDDCB7B00E20E842AA9B409F1AC3034CF96
+      Issuer Key Hash: 50EA7389DB29FB108F9EE50120D4DE79994883F7      # Хэш ключа эмитента: 50EA7389DB29FB108F9EE50120D4DE79994883F7
+      Serial Number: 0114195F66FAFF8FD66E12496E516F4F                # Серийный номер: 0114195F66FAFF8FD66E12496E516F4F
+    Cert Status: good                                                # Статус сертификата: хороший
+    This Update: Apr 9 08:45:00 2014 GMT                             # Это обновление: 9 апреля 2014 года в 08:45:00 по Гринвичу
+    Next Update: Apr 16 09:00:00 2014 GMT                            # Следующее обновление: 16 апреля 2014 года в 09:00:00 по Гринвичу
+
+    Signature Algorithm: sha1WithRSAEncryption                       # Алгоритм подписи: sha1WithRSAEncryption
+         56:21:4c:dc:84:21:f7:a8:ac:a7:b9:bc:10:19:f8:19:f1:34:
+         c1:63:ca:14:7f:8f:5a:85:2a:cc:02:b0:f8:b5:05:4a:0f:28:
+         50:2a:4a:4d:04:01:b5:05:ef:a5:88:41:d8:9d:38:00:7d:76:
+         1a:aa:ff:21:50:68:90:d2:0c:93:85:49:e7:8e:f1:58:08:77:
+         a0:4e:e2:22:98:01:b7:e3:27:75:11:f5:b7:8f:e0:75:7d:19:
+         9b:74:cf:05:dc:ae:1c:36:09:95:b6:08:bc:e7:3f:ea:a2:e3:
+         ae:d7:8f:c0:9d:8e:c2:37:67:c7:5b:d8:b0:67:23:f1:51:53:
+         26:c2:96:b0:1a:df:4e:fb:4e:e3:da:a3:98:26:59:a8:d7:17:
+         69:87:a3:68:47:08:92:d0:37:04:6b:49:9a:96:9d:9c:b1:e8:
+         cb:dc:68:7b:4a:4d:cb:08:f7:92:67:41:99:b6:54:56:80:0c:
+         18:a7:24:53:ac:c6:da:1f:4d:f4:3c:7d:68:44:1d:a4:df:1d:
+         48:07:85:52:86:59:46:d1:35:45:1a:c7:6b:6b:92:de:24:ae:
+         c0:97:66:54:29:7a:c6:86:a6:da:9f:06:24:dc:ac:80:66:95:
+         e0:eb:49:fd:fb:d4:81:6a:2b:81:41:57:24:78:3b:e0:66:70:
+         d4:2e:52:92
+wikipedia.pem: good                                                  # wikipedia.pem: хороший
+    This Update: Apr 9 08:45:00 2014 GMT                             # Это обновление: 9 апреля 2014 года в 08:45:00 по Гринвичу
+    Next Update: Apr 16 09:00:00 2014 GMT                            # Следующее обновление: 16 апреля 2014 года в 09:00:00 по Гринвичу</pre>
+
+		<p>Если вы хотите получить более общий вывод, пропустите опцию <b>-text</b>. В большинстве случаев она нужна только при решении проблем с OCSP.</p>
+
+		<p>Вот как выглядит статус хорошего сертификата:</p>
+
+		<pre class="console">openssl ocsp -issuer chain.pem -cert wikipedia.pem -url http://ocsp.digicert.com
+wikipedia.pem: good                                                              # wikipedia.pem: хороший
+    This Update: Apr 9 08:45:00 2014 GMT                                         # Это обновление: 9 апреля 2014 года в 08:45:00 по Гринвичу
+    Next Update: Apr 16 09:00:00 2014 GMT                                        # Следующее обновление: 16 апреля 2014 года в 09:00:00 по Гринвичу</pre>
+
+		<h2>4. Отозванный сертификат</h2>
+
+		<p>Если у вас есть отозванный сертификат, его так же можете проверить способом, описанным выше. Ответ выглядит следующим образом:</p>
+
+		<pre class="console">Response verify OK                            # Ответ проверки успешен
+test-revoked.pem: revoked                     # test-revoked.pem: отозван
+    This Update: Apr 9 03:02:45 2014 GMT      # Это обновление: 9 апреля 2014 года в 03:02:45 по Гринвичу
+    Next Update: Apr 10 03:02:45 2014 GMT     # Следующее обновление: 10 апреля 2014 года в 03:02:45 по Гринвичу
+    Revocation Time: Mar 25 15:45:55 2014 GMT # Время отзыва: 25 марта 2014 года в 14:45:55 по Гринвичу</pre>
+
+		<p>Вы можете проверить этот сертификат и цепочку на странице проверки отозванных сертификатов Verisign: <a href="https://test-sspev.verisign.com:2443/test-SSPEV-revoked-verisign.html">https://test-sspev.verisign.com:2443/test-SSPEV-revoked-verisign.html</a></p>
+
+		<h2>5. Другие ошибки</h2>
+
+		<p>Если отправить этот запрос к другому OCSP, который не выпускал проверяемый сертификат, должна произойти ошибка авторизации:</p>
+
+		<pre class="console">openssl ocsp -issuer chain.pem -cert wikipedia.pem -url http://rapidssl-ocsp.geotrust.com
+Responder Error: unauthorized (6)                                                         # Ошибка ответа: не авторизован (6)</pre>
+
+		<p>Опция <b>-text</b> покажет больше информации:</p>
+
+		<pre class="console">OCSP Request Data:                                                   # Данные запроса OCSP
+    Version: 1 (0x0)                                                 # Версия: 1 (0x0)
+    Requestor List:                                                  # Список просителя:
+        Certificate ID:                                              # Идентификатор сертификата
+          Hash Algorithm: sha1                                       # Алгоритм хэширования: sha1
+          Issuer Name Hash: ED48ADDDCB7B00E20E842AA9B409F1AC3034CF96 # Хэш имени выпустившего сертификат: ED48ADDDCB7B00E20E842AA9B409F1AC3034CF96
+          Issuer Key Hash: 50EA7389DB29FB108F9EE50120D4DE79994883F7  # Хэш ключа выпустившего сертификат: 50EA7389DB29FB108F9EE50120D4DE79994883F7
+          Serial Number: 0114195F66FAFF8FD66E12496E516F4F            # Серийный номер: 0114195F66FAFF8FD66E12496E516F4F
+    Request Extensions:                                              # Расширения запроса
+        OCSP Nonce:                                                  # Текущий OCSP
+            041015BB718C43C46C41122E841DB2282ECE
+Responder Error: unauthorized (6)                                    # Ошибка ответа: не авторизован (6)</pre>
+
+		<p>Некоторые OCSP настроены по-другому и выдают такую ошибку:</p>
+
+		<pre class="console">openssl ocsp -issuer chain.pem -cert wikipedia.pem -url http://ocsp.digidentity.eu/L4/services/ocsp
+Response Verify Failure                                                                                          # Ответ проверки неудачен
+140735308649312:error:2706B06F:OCSP routines:OCSP_CHECK_IDS:response contains no revocation data:ocsp_vfy.c:269:
+140735308649312:error:2706B06F:OCSP routines:OCSP_CHECK_IDS:response contains no revocation data:ocsp_vfy.c:269:
+wikipedia.pem: ERROR: No Status found.                                                                           # wikipedia.pem: ОШИБКА: Статус не найден.</pre>
+
+		<p>Если добавить опцию <b>-text</b>, можно увидеть ответ, но в нём не будет данных:</p>
+
+		<pre class="console">OCSP Response Data:                                                   # Данные ответа OCSP
+    OCSP Response Status: successful (0x0)                            # Статус ответа OCSP: успешно (0x0)
+    Response Type: Basic OCSP Response                                # Тип ответа: Базовый ответ OCSP
+    Version: 1 (0x0)                                                  # Версия: 1 (0x0)
+    Responder Id: C = NL, O = Digidentity B.V., CN = Digidentity OCSP # Идентификатор ответчика: C = NL, O = Digidentity B.V., CN = Digidentity OCSP
+    Produced At: Apr 9 12:02:00 2014 GMT                              # Сформирован: 9 апреля 2014 года в 12:02:00 по Гринвичу
+    Responses:                                                        # Ответы
+    Request Extensions:                                               # Расширения запроса
+OCSP Nonce:                                                           # Текущий OCSP
+    0410EB540472EA2D8246E88F3317B014BEEF
+Signature Algorithm: sha256WithRSAEncryption                          # Алгоритм подписи: sha256WithRSAEncryption</pre>
+
+		<p>Другие OCSP возвращают статус "неизвестно":</p>
+
+		<pre class="console">openssl ocsp -issuer chain.pem -cert wikipedia.pem -url http://ocsp.quovadisglobal.com/
+Response Verify Failure                                                                            # Ответ проверки неудачен
+140735308649312:error:27069070:OCSP routines:OCSP_basic_verify:root ca not trusted:ocsp_vfy.c:152:
+wikipedia.pem: unknown                                                                             # wikipedia.pem: неизвестно
+    This Update: Apr 9 12:09:18 2014 GMT                                                           # Это обновление: 9 апреля 2014 года в 12:09:18 по Гринвичу</pre>
+
+		<p>Опция <b>-text</b> покажет больше информации:</p>
+
+		<pre class="console">OCSP Response Data:                                                                                         # Данные ответа OCSP
+    OCSP Response Status: successful (0x0)                                                                  # Статус ответа OCSP: успешно (0x0)
+    Response Type: Basic OCSP Response                                                                      # Тип ответа: Базовый ответ OCSP
+    Version: 1 (0x0)                                                                                        # Версия: 1 (0x0)
+    Responder Id: C = CH, O = QuoVadis Limited, OU = OCSP Responder, CN = QuoVadis OCSP Authority Signature # Идентификатор ответчика: C = CH, O = QuoVadis Limited, OU = OCSP Responder, CN = QuoVadis     OCSP Authority Signature
+    Produced At: Apr 9 12:09:10 2014 GMT                                                                    # Сформирован: 9 апреля 2014 года в 12:09:10 по Гринвичу
+    Responses:                                                                                              # Ответы
+    Certificate ID:                                                                                         # Идентификатор сертификата:
+      Hash Algorithm: sha1                                                                                  # Алгоритм хэширования: sha1
+      Issuer Name Hash: ED48ADDDCB7B00E20E842AA9B409F1AC3034CF96                                            # Хэш имени эмитента: ED48ADDDCB7B00E20E842AA9B409F1AC3034CF96
+      Issuer Key Hash: 50EA7389DB29FB108F9EE50120D4DE79994883F7                                             # Хэш ключа эмитента: 50EA7389DB29FB108F9EE50120D4DE79994883F7
+      Serial Number: 0114195F66FAFF8FD66E12496E516F4F                                                       # Серийный номер: 0114195F66FAFF8FD66E12496E516F4F
+    Cert Status: good                                                                                       # Статус сертификата: неизвестно
+    This Update: Apr 9 12:09:10 2014 GMT                                                                    # Это обновление: 9 апреля 2014 года в 12:09:10 по Гринвичу
+
+    Response Extensions:                                                                                    # Расширения ответа</pre>
+
+		<h2>6. Источники</h2>
+
+		<ul>
+			<li><a href="https://www.openssl.org/docs/apps/s_client.html">https://www.openssl.org/docs/apps/s_client.html</a></li>
+
+			<li><a href="https://www.openssl.org/docs/apps/ocsp.html">https://www.openssl.org/docs/apps/ocsp.html</a></li>
+
+			<li><a href="https://en.wikipedia.org/wiki/OnlineCertificateStatus_Protocol">https://en.wikipedia.org/wiki/OnlineCertificateStatus_Protocol</a></li>
+		</ul>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Реми ван Элст. OpenSSL: Ручная проверка сертификата по OCSP, 2014">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

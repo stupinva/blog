@@ -1,0 +1,108 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="postgresql,mapnik" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2012-08-05 -->
+		<title>Установка генератора тайлов Mapnik</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Установка генератора тайлов Mapnik</h1>
+
+		<p>Продолжение серии заметок, посвящённых настройке тайлового сервера. Смотрите также предыдущие заметки <a href="../mapnik-part1/">Подготовка карт для генератора тайлов Mapnik</a> и <a href="../mapnik-part2/">Настройка базы данных для генератора тайлов Mapnik</a>.</p>
+
+		<p>На этот раз мы установим и настроим сам генератор тайлов, который по векторному описанию карты в базе данных будет генерировать растровые квадратные картинки, содержащие фрагменты карты в разных разрешениях.</p>
+
+		<h2>1. Ставим Mapnik, готовим границы мира и береговые линии</h2>
+
+		<p>Ставим генератор тайлов mapnik2:</p>
+
+		<pre class="console"># apt-get install python-mapnik2</pre>
+
+		<p>Скачиваем береговые линии, границы мира и т.п. с помощью скрипта:</p>
+
+		<pre class="console">$ wget http://svn.openstreetmap.org/applications/rendering/mapnik/get-coastlines.sh
+$ chmod +x get-coastlines.sh
+$ ./get-coastlines.sh</pre>
+
+		<p>Всё скачанное помещаем в каталог /usr/share/mapnik/world_boundaries:</p>
+
+		<pre class="console"># mkdir /usr/share/mapnik
+# mv world_boundaries /usr/share/mapnik</pre>
+
+		<h2>2. Настраиваем стиль отрисовки карты</h2>
+
+		<p>Скачиваем скрипты и файлы стилей Mapnik (может понадобиться установить subversion):</p>
+
+		<pre class="console">$ svn co http://svn.openstreetmap.org/applications/rendering/mapnik/</pre>
+
+		<p>И удаляем лишнее:</p>
+
+		<pre class="console">$ find . -name .svn -exec rm -Rf \{\} \;</pre>
+
+		<p>Перемещаем файлы стилей Mapnik в каталог /etc/mapnik-osm-data:</p>
+
+		<pre class="console"># mkdir /etc/mapnik-osm-data
+# mv mapnik/inc mapnik/symbols mapnik/osm.xml /etc/mapnik-osm-data/</pre>
+
+		<p>Переименовываем файлы шаблонов настроек:</p>
+
+		<pre class="console"># cd /etc/mapnik-osm-data/inc/
+# mv fontset-settings.xml.inc.template fontset-settings.xml.inc
+# mv datasource-settings.xml.inc.template datasource-settings.xml.inc
+# mv settings.xml.inc.template settings.xml.inc</pre>
+
+		<p>Исправляем настройки в соответствии с описанием <a href="http://switch2osm.org/serving-tiles/manually-building-a-tile-server/">Manually building a tile server</a>.</p>
+
+		<p>В файле settings.xml.inc заменим:</p>
+
+		<ol>
+			<li><b>&lt;!ENTITY symbols "%(symbols)s"&gt;</b> на <b>&lt;ENTITY symbols "symbols"&gt;</b></li>
+
+			<li><b>&lt;!ENTITY osm2pgsql_projection "&amp;srs%(epsg)s;"&gt;</b> на <b>&lt;!ENTITY osm2pgsql_projection "&amp;srs900913;"&gt;</b></li>
+
+			<li><b>&lt;!ENTITY dwithin_node_way "&amp;dwithin_%(epsg)s;"&gt;</b> на <b>&lt;!ENTITY dwithin_node_way "&amp;dwithin_900913;"&gt;</b></li>
+
+			<li><b>&lt;!ENTITY world_boundaries "%(world_boundaries)s"&gt;</b> на <b>&lt;!ENTITY world_boundaries "/usr/share/mapnik/world_boundaries"&gt;</b></li>
+
+			<li><b>&lt;!ENTITY prefix "%(prefix)s"&gt;</b> на <b>&lt;!ENTITY prefix "planet_osm"&gt;</b></li>
+		</ol>
+
+		<p>В файле datasource-settings.xml.inc прописываем настройки подключения к базе данных, заменив:</p>
+
+		<ol>
+			<li><b>&lt;Parameter name="password"&gt;%(password)&lt;/Parameter&gt;</b> на <b>&lt;Parameter name="password"&gt;password&lt;/Parameter&gt;</b></li>
+
+			<li><b>&lt;Parameter name="host"&gt;%(host)s&lt;/Parameter&gt;</b> закомментировав как <b>&lt;!-- &lt;Parameter name="host"&gt;%(host)s&lt;/Parameter&gt; --&gt;</b></li>
+
+			<li><b>&lt;Parameter name="port"&gt;%(port)s&lt;/Parameter&gt;</b> закомментировав как <b>&lt;!-- &lt;Parameter name="port"&gt;%(port)s&lt;/Parameter&gt; --&gt;</b></li>
+
+			<li><b>&lt;Parameter name="user"&gt;%(user)s&lt;/Parameter&gt;</b> на <b>&lt;Parameter name="user"&gt;osm&lt;/Parameter&gt;</b></li>
+
+			<li><b>&lt;Parameter name="dbname"&gt;%(dbname)s&lt;/Parameter&gt;</b> на <b>&lt;Parameter name="dbname"&gt;osm&lt;/Parameter&gt;</b></li>
+
+			<li><b>&lt;Parameter name="estimate_extent"&gt;%(estimate_extent)s&lt;/Parameter&gt;</b> на <b>&lt;Parameter name="estimate_extent"&gt;false&lt;/Parameter&gt;</b></li>
+
+			<li><b>&lt;Parameter name="extent"&gt;%(extent)s&lt;/Parameter&gt;</b> на <b>&lt;Parameter name="extent"&gt;-20037508,-19929239,20037508,19929239&lt;/Parameter&gt;</b></li>
+		</ol>
+
+		<p>Здесь указываются настройки подключения к базе данных, а также указывается прямоугольник, в пределах которого умещаются все данные карты. По прямоугольнику Mapnik определяет, стоит ли вообще обращаться к базе данных за этими данными - быть может запрос заведомо ничего не вернёт и будет выполнен вхолостую.</p>
+
+		<p>Ну и источников данных тоже может быть несколько - несколько баз данных на разных серверах могут обслуживать данные какого-то определённого участка карты. Например, вполне возможно настроить два сервера, один из которых будет возвращать информацию по северному полушарию, а другой - по южному. В этом случае Mapnik по границам прямоугольника может определить, стоит ли обращаться к этому серверу.</p>
+
+		<p>Будьте крайне внимательны с настройками extent - если вы их укажете неправильно, Mapnik может не обращаться к базе данных, несмотря на то, что они в ней есть. Как следствие, Mapnik будет рисовать только береговые линии и границы мира.</p>
+
+		<p>Настройки адреса и порта сервера комментируем, поскольку сервер базы данных установлен на том же компьютере, что и Mapnik - подключение к серверу базы данных будет осуществляться через Unix-сокет.</p>
+
+		<p>Файл fontset-settings.xml.inc не меняем.</p>
+
+		<p>На этом настройка самого генератора тайлов Mapnik закончена. В следующей заметке я расскажу, как настроить верхушку всей инфраструктуры - тайловый сервер.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Установка генератора тайлов Mapnik">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

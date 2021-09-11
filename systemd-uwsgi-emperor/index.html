@@ -1,0 +1,119 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="jessie,uwsgi,debian,linux" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2015-08-16 -->
+		<title>systemd и uwsgi в режиме Emperor</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>systemd и uwsgi в режиме Emperor</h1>
+
+		<p>Изо всех щелей рассказывают о том, какой systemd хороший. На эти рассказы даже купились в Debian, устраивали голосования одно за другим вплоть до достижения "нужного" исхода. Решение пропихнули и в Jessie теперь systemd идёт по умолчанию. Только вот в Jessie service-файлов кот наплакал и большей частью всё происходит по старинке - через те же скрипты /etc/init.d/, только теперь запускает их процесс с другим именем. Непонятно, то ли происходит саботаж этого решения, то ли на самом деле не так уж важны эти фишки systemd. А вы думали только в России бывает такое головотяпство?</p>
+
+		<p>Скрипт /etc/init.d/uwsgi кроме команды типа start/stop/restart опционально может принимать ещё имя экземпляра, так что с помощью этого скрипта можно было легко перезапускать отдельные экземпляры uwsgi, обслуживающие разные приложения. Теперь при попытке воспользоваться этим скриптом происходит перехват управления, в результате чего этот скрипт выполняется через systemctl. systemctl о дополнительном аргументе ничего не знает, поэтому указать нужный экземпляр uwsgi не представляется возможным. Перехват происходит через файл-хук /lib/lsb/init-functions.d/40-systemd, который используется в файле /lib/lsb/init-functions, который в свою очередь используется во всех скриптах /etc/init.d/ в Debian.</p>
+
+		<p>Само собой напрашивалось решение с <a href="../systemd-part2/">многоэкземплярным</a> service-файлом, который вызывался бы примерно так:</p>
+
+		<pre class="console"># systemctl start uwsgi@redmine.service</pre>
+
+		<p>Но тут я вспомнил о том, что в Jessie поставляется новый uwsgi, в котором поддерживается режим Emperor. Emperor - это отдельный процесс uwsgi, который умеет заглядывать в указанный каталог и искать там файлы конфигурации экземпляров uwsgi. При появлении нового файла конфигурации он умеет самостоятельно порождать новые процессы master, которые в свою очередь порождают процессы worker. Соответственно, при пропадании файла конфигурации Emperor корректно завершает master-процесс, соответствующий пропавшему файлу конфигурации. Плюс к тому, он умеет следить за master-процессами, порождая их, если они вдруг неожиданно завершились.</p>
+
+		<p>Поиски документации привели меня сюда: <a href="http://uwsgi-docs.readthedocs.org/en/latest/Systemd.html">uwsgi - systemd</a>. В ходе экспериментов получилось рабочее решение, которым и спешу поделиться.</p>
+
+		<p>Для начала создадим service-файл /etc/systemd/system/uwsgi.service:</p>
+
+		<pre class="code">[Unit]
+Description=uWSGI Emperor
+After=syslog.target
+
+[Service]
+ExecStart=/usr/bin/uwsgi --ini /etc/uwsgi/emperor.ini
+Restart=always
+KillSignal=SIGQUIT
+Type=notify
+StandardError=syslog
+NotifyAccess=all
+
+[Install]
+WantedBy=multi-user.target</pre>
+
+		<p>Теперь создаём файл /etc/uwsgi/emperor.ini, который будет содержать конфигурацию "императора":</p>
+
+		<pre class="code">[uwsgi]
+
+emperor = /etc/uwsgi/apps-enabled/
+vassals-inherit = /etc/uwsgi/vassal-default.ini</pre>
+
+		<p>Теперь создаём файл с настройками по умолчанию для "вассалов". За основу возьмём файл /usr/share/uwsgi/conf/default.ini, который упоминался в файле /etc/default/uwsgi. Пути к файлам придётся изменить так, чтобы для создания любого из файлов не нужно было создавать соответствующий каталог - файл взятый за основу этим грешит, но в нём это не является проблемой, т.к. файл инициализации может создавать необходимые каталоги сам. Доведя файл конфигурации вассала до состояния, пригодного для использования, получим файл /etc/uwsgi/vassal-default.ini:</p>
+
+		<pre class="code">[uwsgi]
+
+autoload = true
+
+master = true
+workers = 2
+no-orphans = true
+
+pidfile = /run/uwsgi/%N.pid
+socket = /run/uwsgi/%N.socket
+chmod-socket = 660
+
+logto = /var/log/uwsgi/%N.log
+log-date = true
+
+uid = www-data
+gid = www-data</pre>
+
+		<p>Есть ещё один странный момент. Чтобы экземпляры заработали, у имён плагинов нужно убрать префикс uwsgi_. Например, имя плагина плагина uwsgi_rack_ruby21 нужно сократить до rack_ruby21.</p>
+
+		<p>Чтобы при перезагрузке компьютера создавался каталог /run/uwsgi, создадим файл /etc/tmpfiles.d/uwsgi.conf со следующей строчкой:</p>
+
+		<pre class="code">d /run/uwsgi 0750 www-data www-data -</pre>
+
+		<p>На всякий случай приведу команду, при помощи которой можно создать все каталоги, создаваемые в процессе загрузки системы:</p>
+
+		<pre class="console"># systemd-tmpfiles --create</pre>
+
+		<p>Поскольку пути к сокетам поменяются, нужно подготовить пути к новым сокетам в конфигурации nginx.</p>
+
+		<p>Теперь останавливаем uwsgi, запущенный скриптом /etc/init.d/uwsgi, включаем использование service-файла и запускаем uwsgi уже с его помощью:</p>
+
+		<pre class="console"># systemctl stop uwsgi.service
+# systemctl enable uwsgi.service
+# systemctl start uwsgi.service</pre>
+
+		<p>Чтобы nginx обращался к новым сокетам, размещающимся прямо в каталоге /run/uwsgi, перезапустим и его:</p>
+
+		<pre class="console"># systemctl restart nginx.service</pre>
+
+		<p>И как же теперь перезагрузить/перезапустить экземпляр uwsgi? К сожалению, это не так наглядно, как со скриптом /etc/init.d/uwsgi. Для перезагрузки конфигурации используется команда с PID-файлом экземпляра:</p>
+
+		<pre class="console"># uwsgi --reload /run/uwsgi/redmine.pid</pre>
+
+		<p>Перезапуск делается через остановку экземпляра, а systemd автоматически запустит его снова:</p>
+
+		<pre class="console"># uwsgi --stop /run/uwsgi/redmine.pid</pre>
+
+		<p>Чтобы остановить экземпляр, нужно удалить ссылку из каталога /etc/uwsgi/apps-enabled/:</p>
+
+		<pre class="console"># rm /etc/uwsgi/apps-enabled/redmine.ini</pre>
+
+		<p>Чтобы снова запустить экземпляр, нужно снова создать ссылку в каталоге /etc/uwsgi/apps-enabled/:</p>
+
+		<pre class="console"># ln -s /etc/uwsgi/apps-available/redmine.ini /etc/uwsgi/apps-enabled/redmine.ini</pre>
+
+		<p>Посмотреть список запущенных процессов можно при помощи systemctl:</p>
+
+		<pre class="console">$ systemctl status uwsgi.service</pre>
+
+		<p>На этом всё. Если у вас есть идеи, как сделать перезапуск экземпляров более наглядным, например при помощи многоэкземплярного service-файла, прошу делиться предложениями.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=systemd и uwsgi в режиме Emperor">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

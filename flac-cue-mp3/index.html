@@ -1,0 +1,70 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="mp3,ape,flac,linux,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2010-08-23 -->
+		<title>flac &amp; cue в mp3</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>flac &amp; cue в mp3</h1>
+
+		<p>Иногда попадаются рипы компакт-дисков, сделанные аудиофилами. Аудиофилам обычно очень важно, чтобы рип представлял собой точную копию компакт-диска, поэтому они часто делают рипы всего диска в виде одного файла формате flac, который они сопровождают ещё и файлом со списком дорожек в формате cue.</p>
+
+		<p>Чтобы закачать такую музыку на аудио-плеер, умеющий воспроизводить только mp3 или ogg, приходится разбивать flac на отдельные mp3-треки.</p>
+
+		<p>Кроме разбивки flac-файла на отдельные файлы и преобразования каждого из файлов в формат mp3 полезно также перенести всю полезную информацию из cue-файла в теги mp3-файла. Для этого нам понадобятся следующие пакеты: shntool, cuetools, lame, enca. Установим их:</p>
+
+		<pre class="console"># apt-get install shntool cuetools lame enca</pre>
+
+		<p>shntool потребуется для того, чтобы разбить flac-файл на отдельные wav-файлы, cuetools понадобится для извлечения полезной информации из cue-файла, lame - для кодирования wav-файлов в формат mp3 и простановки тегов, enca используется для автоматического определения кодировки текста в cue-файле (поскольку cue-файл мог быть создан как в Windows, так и в Linux и может иметь символы самых разных алфавитов).</p>
+
+		<p>Теперь можно попытаться соединить всё это в единый скрипт:</p>
+
+		<pre class="code">#!/bin/sh
+
+FROMCP=`enca -e *.cue`
+iconv -f $FROMCP -t UTF-8 *.cue &gt; /tmp/list.cue
+
+DATE=`grep "REM DATE" /tmp/list.cue | sed -e 's/REM DATE \(.*\)/\1/g'`
+GENRE=`grep "REM GENRE" /tmp/list.cue | sed -e 's/REM GENRE \(.*\)/\1/g'`
+COMMENT=`grep "REM COMMENT" /tmp/list.cue | sed -e 's/REM COMMENT \(.*\)/\1/g'`
+NUMBER=`cueprint -d "%N" /tmp/list.cue`
+
+shntool split -f /tmp/list.cue *.flac -t %n
+
+for((I=1;I&lt;=NUMBER;I++));
+do
+  cueprint -n $I -t "ARTIST=\"%p\"\nALBUM=\"%T\"\nTRACKNUMBER=\"%n\"\nTITLE=\"%t\"\n" /tmp/list.cue &gt; /tmp/tags
+  . /tmp/tags
+  J=`printf "%02d" $I`
+  lame -b 192 --cbr \
+    --ty "$DATE" \
+    --tg "$GENRE" \
+    --tc "$COMMENT" \
+    --ta "$ARTIST" \
+    --tl "$ALBUM" \
+    --tn "$TRACKNUMBER" \
+    --tt "$TITLE" \
+    --add-id3v2 \
+    --id3v2-only \
+    $J.wav $J.mp3
+  rm $J.wav
+done
+
+rm /tmp/list.cue /tmp/tags</pre>
+
+		<p>Скрипт рассчитан на то, что в текущем каталоге имеется только один cue-файл и один flac-файл.</p>
+
+		<p>Иногда вместо flac используется ape, который с лицензионной стороны намного хуже flac'а. В частности, существовавший когда-то на просторах опенсорса проект mac (Monkey's Audio Codec), исчез именно из-за лицензионных проблем. Не смотря на это, кое-где ещё можно найти как исходники, так и deb-пакет. После установки пакета shntool можно использовать прежним образом, единственное отличие будет заключаться лишь в том, что вместо flac-файла нужно будет указать ape-файл.</p>
+
+		<p>Обновлено 3 сентября 2010 года. При обновлении этой заметки и скрипта был использован комментарий к моей старой заметке <a href="../flac-mp3/">Конвертируем FLAC в MP3 под Debian</a>.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=flac &amp; cue в mp3">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

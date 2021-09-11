@@ -1,0 +1,196 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="dancer,dancer::session:dbi,perl" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2012-09-30 -->
+		<title>Хранение сессий в MySQL в Perl-фреймворке Dancer</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Хранение сессий в MySQL в Perl-фреймворке Dancer</h1>
+
+		<p>Для хранения сессий Dancer в базах данных существует модуль Dancer::Session::DBI. В настоящее время он поддерживает хранение сессий лишь в MySQL и SQLite.  В Debian этот модуль отсутствует, поэтому поставим его с помощью dh-make-perl:</p>
+
+		<pre class="console"># dh-make-perl --install --cpan Dancer::Session::DBI</pre>
+
+		<p>Также этому модулю понадобится пакет libjson-perl (фактически это модуль JSON для Perl), для того, чтобы сохранять переменные сессии в поле таблицы MySQL.</p>
+
+		<pre class="console"># apt-get install libjson-perl</pre>
+
+		<p>Теперь создадим в базе данных таблицу для хранения сессий. Судя по документации, у неё должно быть два обязательных поля: id - из 40 символов и session_data - текстовое поле, в которое и будут сохранятся переменные сессии. Также полезно добавить поле last_active, которое будет содержать дату и время последнего обновления записи. Это поле можно использовать для периодического удаления устаревших сессий.  Создадим таблицу:</p>
+
+		<pre class="code">mysql &gt;
+CREATE TABLE `session` (
+  `id` char(40) NOT NULL,
+  `session_data` text,
+  `last_active` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;</pre>
+
+		<p>Осталось настроить наше приложение на использование установленного модуля сессий и можно начинать им пользоваться. Настроим приложение, добавив следующие строчки в файл config.yml в каталоге проекта:</p>
+
+		<pre class="code">session: "DBI"
+session_options:
+  dsn:      "DBI:mysql:database=base;host=localhost;port=3306"
+  table:    "session"
+  user:     "session"
+  password: "session"
+
+serializer: "JSON"</pre>
+
+		<p>Теперь создадим шаблон страницы, который будет использоваться для запроса имени пользователя и пароля для аутентификации. Шаблон назовём login.tt и положим в каталог views проекта:</p>
+
+		<pre class="code">&lt;div align="center"&gt;
+  &lt;form method="POST"&gt;
+    &lt;table&gt;
+      &lt;tr&gt;
+        &lt;td&gt;
+          &lt;label for="login"&gt;Логин:&lt;/label&gt;
+        &lt;/td&gt;
+        &lt;td&gt;
+          &lt;input type="text" id="login" name="login"&gt;
+        &lt;/td&gt;
+      &lt;/tr&gt;
+      &lt;tr&gt;
+        &lt;td&gt;
+          &lt;label for="password"&gt;Пароль:&lt;/label&gt;
+        &lt;/td&gt;
+        &lt;td&gt;
+          &lt;input type="password" id="password" name="password"&gt;
+        &lt;/td&gt;
+      &lt;/tr&gt;
+      &lt;tr&gt;
+        &lt;td colspan="2" style="text-align: center;"&gt;
+          &lt;input type="submit" name="ok" value="Войти"&gt;
+        &lt;/td&gt;
+      &lt;/tr&gt;
+    &lt;/table&gt;
+  &lt;/form&gt;
+&lt;/div&gt;</pre>
+
+		<p>И создадим шаблон страницы, которая будет показываться только пользователям, прошедшим аутентификацию:</p>
+
+		<pre class="code">&lt;h3 align="center"&gt;&lt;TMPL_VAR NAME="name"&gt;&lt;/h3&gt;
+&lt;div align="center"&gt;&lt;a href="/logout"&gt;Выйти&lt;/a&gt;&lt;/div&gt;</pre>
+
+		<p>Теперь опишем поведение приложения, которое будет показывать эти страницы и обрабатывать ввод пользователя. Откроем файл test.pm в каталоге lib и добавим туда обработчики GET- и POST-запросов:</p>
+
+		<pre class="code">get '/login' =&gt; sub {
+  template 'login';
+};
+
+post '/login' =&gt; sub {
+  my $login = param "login";
+  my $password = param "password";
+
+  if (($login eq "stupin") &amp;&amp; ($password eq "test"))
+  {
+    session user_id =&gt; 1;
+    session name =&gt; "Владимир Ступин";
+  }
+  redirect '/restricted';
+};
+
+get '/logout' =&gt; sub {
+  session-&gt;destroy();
+  redirect '/login';
+};
+
+get '/restricted' =&gt; sub {
+  if (not session('user_id')) {
+    redirect '/login';
+  }
+  template 'restricted', { name =&gt; session('name') };
+};</pre>
+
+		<p>Здесь есть два обработчика страницы по адресу /login - первый просто выводит шаблон страницы аутентификации, второй - проверяет введённые логин и пароль, создаёт новую сессию и переадресует посетителя на страницу с ограниченным доступом /restricted, если логин и пароль введены правильно.</p>
+
+		<p>Обработчик страницы по адресу /logout. При попадании на неё сессия завершается, а посетитель перенаправляется на страницу /login.</p>
+
+		<p>Обработчик страницы по адресу /restricted проверяет, что имеется активный сеанс, в котором есть переменная с именем user_id. Если такой переменной или сессии нет, пользователь переадресуется на страницу входа /login. Если всё в порядке, то пользователю показывается страница с информацией для аутентифицированных пользователей.</p>
+
+		<p>К сожалению, не всё с модулем Dancer::Session::DBI оказалось так гладко. Пришлось немного доработать его напильником, чтобы русские буквы сохранялись в базе данных в правильной кодировке и чтобы он не выдавал ошибку, если пользователь приходит с идентификатором сессии, которой нет в базе.</p>
+
+		<p>Первая доработка в файле /usr/share/perl5/Dancer/Session/DBI.pm выглядит следующим образом:</p>
+
+		<pre class="code">sub _dbh {
+    my $self = shift;
+    my $settings = setting('session_options');
+
+    # Prefer an active DBH over a DSN.
+    return $settings-&gt;{dbh}-&gt;() if defined $settings-&gt;{dbh};
+
+    # Check the validity of the DSN if we don't have a handle
+    my $valid_dsn = DBI-&gt;parse_dsn($settings-&gt;{dsn} || '');
+
+    die "No valid DSN specified" if !$valid_dsn;
+
+    if (!defined $settings-&gt;{user} || !defined $settings-&gt;{password}) {
+        die "No user or password specified";
+    }
+
+    # If all the details check out, return a fresh connection
+    <b>my $dbh = DBI-&gt;connect($settings-&gt;{dsn}, $settings-&gt;{user}, $settings-&gt;{password});
+    if ((defined $dbh) &amp;&amp; (defined $settings-&gt;{charset}))
+    {
+      my $sth = $dbh-&gt;prepare("SET CHARACTER SET ?");
+      $sth-&gt;execute($settings-&gt;{charset});
+      $sth-&gt;finish();
+
+      $dbh-&gt;{mysql_enable_utf8} = 1 if $settings-&gt;{charset} eq "UTF8";
+    }
+    return $dbh;</b>
+}</pre>
+
+		<p>Вторая доработка в этом же файле выглядит следующим образом:</p>
+
+		<pre class="code">sub retrieve {
+    my ($self, $session_id) = @_;
+
+    my $session = try {
+        my $quoted_table = $self-&gt;_quote_table;
+
+        my $sth = $self-&gt;_dbh-&gt;prepare_cached(qq{
+            SELECT session_data
+            FROM $quoted_table
+            WHERE id = ?
+        });
+
+        $sth-&gt;execute( $session_id );
+        my ($session) = $sth-&gt;fetchrow_array();
+        $sth-&gt;finish();
+
+        <b>$session = "{}" unless defined $session;</b>
+        $self-&gt;_deserialize($session);
+    } catch {
+        warning("Could not retrieve session ID $session_id - $_");
+        return;
+    };
+
+    return bless $session, __PACKAGE__ if $session;
+}</pre>
+
+		<p>Первая доработка позволяет указать кодировку клиента, которую клиент должен установить сразу после подключения к базе данных. Настроим кодировку в файле настройки проекта config.yml, вместе с ней настройки модуля сессий примут следующий вид:</p>
+
+		<pre class="code">session: "DBI"
+session_options:
+  dsn:      "DBI:mysql:database=base;host=localhost;port=3306"
+  table:    "session"
+  user:     "session"
+  password: "session"
+  charset:  "UTF8"</pre>
+
+		<p>Само собой, это приложение лишь демонстрирует использование сессий в Dancer. В реальном приложении нужно написать функции аутентификации, использующие таблицу пользователей и функции, ограничивающие доступ к страницам и операциям, использующие таблицы групп пользователей и их прав.  Напоследок, пара снимков экрана с двумя страницами:</p>
+
+		<img src="login.png" />
+
+		<img src="restricted.png" />
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Хранение сессий в MySQL в Perl-фреймворке Dancer">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

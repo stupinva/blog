@@ -1,0 +1,142 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="python,django,перевод" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-07-09 -->
+		<title>Натан Йерглер. Обработка аутентификации в Django, 2013</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Натан Йерглер. Обработка аутентификации в Django, 2013</h1>
+
+		<p>Частичный перевод статьи: <a href="http://www.effectivedjango.com/tutorial/authzn.html">Handling Authentication &amp; Authorization</a></p>
+
+		<p>Автор: Натан Йерглер (Nathan Yergler)</p>
+
+		<p>Представим, что мы написали простую программу для управления контактными данными и добавили поддержку соответствующей модели для адреса. Есть несколько вещей, которые могут потребоваться прежде чем выпускать приложение во внешний мир. Одна из этих вещей - это аутентификация. В Django имеется встроенная поддержка функций аутентификации.</p>
+
+		<p>Чтобы воспользоваться встроенной поддержкой аутентификации, к проекту нужно подключить приложения django.contrib.auth и django.contrib.sessions.</p>
+
+		<p>Как можно увидеть в addressbook/settings.py, при создании проекта Django, они уже включены по умолчанию.</p>
+
+		<pre class="code">INSTALLED_APPS = (
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.sites',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    # Раскомментируйте следующую строку, чтобы включить интерфейс администрирования:
+    # 'django.contrib.admin',
+    # Раскомментируйте следующую строку, чтобы включить документацию на интерфейс администрирования:
+    # 'django.contrib.admindocs',
+    'contacts',
+)</pre>
+
+		<p>Кроме установки приложений, нужно также установить промежуточное программное обеспечение.</p>
+
+		<pre class="code">MIDDLEWARE_CLASSES = (
+    'django.middleware.common.CommonMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    # Раскомментируйте следующую строку для включения простой защиты от перехвата щелчков мыши:
+    # 'django.middleware.clickjacking.XFrameOptionsMiddleware',
+)</pre>
+
+		<p>Как мы помним, во время первого запуска syncdb Django задаёт вопрос - нужно ли создать учётную запись суперпользователя. Это происходит, потому что промежуточное программное обеспечение уже установлено.</p>
+
+		<p>В модуле auth из стандартной поставки Django имеются модели User - пользователь, Group - группа и Permission - права. Обычно этого бывает достаточно, если не нужно интегрировать приложение с другой системой аутентификации.</p>
+
+		<p>django.contrib.auth содержит несколько представлений, поддерживающих базовые действия по аутентификации, такие как вход, выход, сброс пароля и т.п. Отметим, что этот набор включает в себя представления, но не шаблоны. Поэтому в нашем проекте их необходимо создать.</p>
+
+		<p>Для рассматриваемого примера нужно просто добавить в наш проект представления login и logout. Для начала добавим представления в файл addressbook/urls.py.</p>
+
+		<pre class="code">urlpatterns = patterns('',
+    url(r'^login/$', 'django.contrib.auth.views.login'),
+    url(r'^logout/$', 'django.contrib.auth.views.logout'),</pre>
+
+		<p>У обоих представлений login и logout есть имена шаблонов по умолчанию (registration/login.html и registration/logged_out.html, соответственно). Поскольку эти представления специфичны для нашего проекта и не используются повторно приложением Contacts, мы создадим новый каталог templates/registration внутри каталога приложения addressbook:</p>
+
+		<pre class="console">$ mkdir -p addressbook/templates/registration</pre>
+
+		<p>И сообщим Django о необходимости искать шаблоны в этом каталоге, настроив TEMPLATE_DIRS в addressbook/settings.py.</p>
+
+		<pre class="code">TEMPLATE_DIRS = (
+    # Поместите здесь строки, такие как "/home/html/django_templates" или "C:/www/django/templates".
+    # Всегда используйте прямую косую черту, даже в Windows.
+    # Не забывайте, что нужно указывать полный путь, а не относительный.
+    'addressbook/templates',
+)</pre>
+
+		<p>Внутри этого каталога сначала создадим файл login.html.</p>
+
+		<pre class="code">{% extends "base.html" %}
+
+{% block content %}
+
+{% if form.errors %}
+&lt;p&gt;Ваше имя пользователя и пароль не подходят. Попробуйте ещё раз.&lt;/p&gt;
+{% endif %}
+
+&lt;form method="post" action="{% url 'django.contrib.auth.views.login' %}"&gt;
+{% csrf_token %}
+&lt;table&gt;
+&lt;tr&gt;
+    &lt;td&gt;{{ form.username.label_tag }}&lt;/td&gt;
+    &lt;td&gt;{{ form.username }}&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+    &lt;td&gt;{{ form.password.label_tag }}&lt;/td&gt;
+    &lt;td&gt;{{ form.password }}&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/table&gt;
+
+&lt;input type="submit" value="Войти" /&gt;
+&lt;input type="hidden" name="next" value="{{ next }}" /&gt;
+&lt;/form&gt;
+{% endblock %}</pre>
+
+		<p>Шаблон login наследуется от шаблона base.html и отображает форму входа, переданную в шаблон из представления. Скрытое поле next позволяет представлению впоследствии перенаправить пользователя на запрошенную страницу, если при запросе этой страницы пользователь был перенаправлен на страницу входа.</p>
+
+		<p>Шаблон выхода - logged_out.html - значительно проще.</p>
+
+		<pre class="code">{% extends "base.html" %}
+
+{% block content %}
+
+Вы вышли!
+
+{% endblock %}</pre>
+
+		<p>Всё, что нужно - только сообщить пользователю, что выход завершился успешно.</p>
+
+		<p>Если сейчас запустить сервер разработки с помощью runserver и перейти на страницу по ссылке http://localhost:8000/login, то можно увидеть страницу входа. При попытке входа с неправильными данными можно увидеть сообщение об ошибке. Теперь давайте попробуем войти с данными суперпользователя, который был создан ранее.</p>
+
+		<img src="authz-login-pagenotfound.png" />
+
+		<p>Погодите, что случилось? Почему мы попали на страницу /accounts/profile? Мы не вводили такой адрес. После успешного входа представление login перенаправляет пользователя на определённый URL и по умолчанию это страница /accounts/profile. Чтобы заменить её, нужно настроить значение LOGIN_REDIRECT_URL в addressbook/settings.py так, чтобы при первом входе пользователь перенаправлялся бы на страницу со списком контактов.</p>
+
+		<pre class="code">LOGIN_REDIRECT_URL = '/'</pre>
+
+		<p>Теперь, когда мы можем войти и выйти, было бы неплохо показывать в заголовке имя вошедшего пользователя и ссылки для входа/выхода. Добавим их в наш шаблон base.html, т.к. нам нужно отображать их везде.</p>
+
+		<pre class="code">&lt;body&gt;
+    &lt;div&gt;
+    {{ user }}
+    {% if user.is_anonymous %}
+    &lt;a href="{% url 'django.contrib.auth.views.login' %}"&gt;Войти&lt;/a&gt;
+    {% else %}
+    &lt;a href="{% url 'django.contrib.auth.views.logout' %}"&gt;Выйти&lt;/a&gt;
+    {% endif %}
+    &lt;/div&gt;</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Натан Йерглер. Обработка аутентификации в Django, 2013">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,109 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="netflow,cisco,flow-tools,linux,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2011-03-25 -->
+		<title>Настройка NetFlow сенсора на Cisco и коллектора на Debian</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка NetFlow сенсора на Cisco и коллектора на Debian</h1>
+
+		<p>В прошлом году, в середине декабря, вышестоящее руководство по моему департаменту запросило суточную статистику в разрезе по IP-адресам по загрузке канала, соединяющего наш филиал с корпоративной сетью. Канал этот с нашей стороны заходит на один из портов маршуртизатора Cisco 2821. Недолго думая я решил прибегнуть к проверенному средству - NetFlow и пакету flow-tools. Может потом когда-нибудь пригодится мне или кому-нибудь ещё.</p>
+
+		<p>Для начала настроим NetFlow-сенсор на маршрутизаторе:</p>
+
+		<pre class="console">ip flow-export version 5
+ip flow-export destination 192.168.0.1 9000
+ip flow-export source GigabitEthernet 0/0
+ip cef
+
+interface GigabitEthernet 0/1
+  ip flow ingress
+  ip flow egress
+  ip route-cache flow
+  no ip mroute-cache</pre>
+
+		<ul>
+			<li>192.168.0.1 - это адрес компьютера, на котором настроен коллектор,</li>
+
+			<li>9000 - это UDP-порт на этом компьютере, куда будет сыпаться статистика,</li>
+
+			<li>GigabitEthernet 0/0 - это интерфейс, с которого будет исходить поток статистики,</li>
+
+			<li>GigabitEthernet 0/0 - это интерфейс, статистика трафика которого будет сниматься.</li>
+		</ul>
+
+		<p>Теперь пришёл черёд NetFlow-коллектора. Поставим пакет flow-tools:</p>
+
+		<pre class="console"># apt-get install flow-tools</pre>
+
+		<p>И зададим настройки коллектора в файле /etc/flow-tools/flow-capture.conf:</p>
+
+		<pre class="code">-w /var/flow/cisco2821 -n 24 -N 3 192.168.0.1/192.168.0.2/9000</pre>
+
+		<ul>
+			<li>/var/flow/cisco2821 - каталог с отловленными файлами потоков,</li>
+
+			<li>192.168.0.1 - адрес компьютера, а точнее - того интерфейса, на который льётся поток,</li>
+
+			<li>192.168.0.2 - адрес маршуртизатора Cisco 2821, с которого будет идти поток,</li>
+
+			<li>9000 - UDP-порт компьютера, на который будет сваливаться поток,</li>
+
+			<li>24 - количество ротаций журналов с потоком в сутки (по какой-то непонятной причине количество ротаций и момент их срабатывания всё-же не поддаются точному расчёту, поэтому это лишь приблизительная настройка),</li>
+
+			<li>3 - расфасовка файлов по подкаталогам вида YYYY/YYYY-MM/YYYY-MM-DD/</li>
+		</ul>
+
+		<p>Обязательно нужно создать каталог для файлов /var/flow/cisco2821/:</p>
+
+		<pre class="console"># mkdir -p /var/flow/cisco2821/</pre>
+
+		<p>И можно запускать коллектор:</p>
+
+		<pre class="console"># /etc/init.d/flow-capture start</pre>
+
+		<p>С помощью следующей команды нужно убедиться, что коллектор запустился и приступил к работе:</p>
+
+		<pre class="console"># netstat -4nlp | grep 9000</pre>
+
+		<p>Нужно также не забыть проковырять дырочку в пакетном фильтре, чтобы он не отбрасывал пакеты (это вы сделайте сами).</p>
+
+		<p>Пока статистика собирается, можно заняться фильтрами. Например, можно создать фильтр, отбирающий статистику только за рабочее время (хотя была запрошена в первую очередь суточная статистика). Например, в файл /etc/flow-tools/cfg/filter.cfg пропишем вот такие правила:</p>
+
+		<pre class="code">filter-primitive work-time-start
+  type time
+  permit gt 9:00
+
+filter-primitive work-time-end
+  type time
+  permit lt 18:00
+
+filter-definition work-time
+  match start-time work-time-start
+  match end-time work-time-end</pre>
+
+		<p>Теперь этот фильтр можно использовать в команде flow-nfilter, которую можно включить в конвейер:</p>
+
+		<pre class="console">$ cd /var/flow/cisco2821/2010/2010-12/2010-12-16/
+$ flow-cat ft-v05.2010-12-16.1* \
+  | flow-nfilter -f /etc/flow-tools/cfg/filter.cfg -Fwork-time \
+  | flow-stat -f10 &gt; stat.txt</pre>
+
+		<ul>
+			<li>flow-cat объединяет отобранные файлы за сутки 2010-12-16,</li>
+
+			<li>flow-filter отбирает из объединённого потока ту информацию, которая соответствует правилу work-time,</li>
+
+			<li>flow-stat с опцией -f10 создаёт отчёт из пяти колонок: IP-адрес отправителя, IP-адрес получателя, количество соединений (уникальных триплетов протокол/порт-отправителя/порт-получателя), количество байт, количество пакетов.</li>
+		</ul>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка NetFlow сенсора на Cisco и коллектора на Debian">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

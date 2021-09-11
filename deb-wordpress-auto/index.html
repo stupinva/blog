@@ -1,0 +1,144 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="deb,wordpress,debian,linux" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2019-08-18 -->
+		<title>Сборка плагинов и тем Wordpress в deb-пакеты</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Сборка плагинов и тем Wordpress в deb-пакеты</h1>
+
+		<p>Как я уже говорил, я предпочитаю устанавливать программное обеспечение в систему с использованием системного пакетного менеджера. В простейших случаях пакеты можно собирать, формируя файлы и каталоги, образующие структуру, которую понимает команда dpkg-deb, формирующая двоичные пакеты. Команды, формирующие необходимую структуру каталогов и вызывающие dpkg-deb, можно оформить в виде скрипта. В некоторых случаях такой скрипт удаётся обобщить для сборки ряда однотипных приложений.</p>
+
+		<p>Например, плагины и темы на официальном сайте wordpress располагаются по ссылкам вполне предсказуемого формата. Благодаря этому, возможно обобщить скрипт сборки deb-пакетов с плагинами и темами для Wordpress. Получившийся скрипт оказывается способен собирать deb-пакеты с любыми плагинами и темами, имеющимися на официальном сайте:</p>
+
+		<pre style="background-color: lightgrey;">#!/bin/sh
+
+build()
+{
+TYPE="$1"
+NAME="$2"
+VERSION="$3"
+DEPENDS="$4" || ""
+
+if [ -n "$DEPENDS" ]
+then
+  DEPENDS=", $DEPENDS"
+fi
+
+case "$TYPE" in
+  plugin)
+    PACKAGE="wordpress-$NAME"
+    ;;
+
+  theme)
+    PACKAGE="wordpress-theme-$NAME"
+    ;;
+
+  *)
+    echo "$TYPE $NAME $VERSION: Unknown type"
+    return 2
+    ;;
+esac
+
+DIR="${PACKAGE}_${VERSION}"
+
+wget --quiet https://downloads.wordpress.org/$TYPE/$NAME.$VERSION.zip 2&gt;/dev/null \
+  || wget --quiet https://downloads.wordpress.org/$TYPE/$NAME.zip 2&gt;/dev/null \
+  || (echo "$TYPE $NAME $VERSION: Failed to download ZIP-file" &gt;/dev/stderr &amp;&amp; return 1)
+
+unzip -q $NAME.$VERSION.zip 2&gt;/dev/null \
+  || unzip -q $NAME.zip 2&gt;/dev/null \
+  || (echo "$TYPE $NAME $VERSION: Failed to unpack ZIP-file" &gt; /dev/stderr &amp;&amp; return 1)
+
+rm $NAME.$VERSION.zip 2&gt;/dev/null || rm $NAME.zip
+
+mkdir -p $DIR/DEBIAN
+
+# Формируем описание пакета
+cat - &gt; $DIR/DEBIAN/control &lt;&lt;END
+Package: $PACKAGE
+Version: $VERSION
+Architecture: all
+Depends: wordpress$DEPENDS
+Maintainer: Vladimir Stupin &lt;vladimir@stupin.su&gt;
+Description: $NAME $TYPE for Wordpress
+ $NAME $TYPE for Wordpress
+ Homepage: https://wordpress.org/${TYPE}s/$NAME/
+END
+
+chmod 755 $DIR/DEBIAN/control
+
+cat - &gt; $DIR/DEBIAN/postinst &lt;&lt;END
+#!/bin/sh
+# postinst script for Wordpress $TYPE $NAME
+
+set -e
+
+# summary of how this script can be called:
+#        * &lt;postinst&gt; \`configure' &lt;most-recently-configured-version&gt;
+#        * &lt;old-postinst&gt; \`abort-upgrade' &lt;new version&gt;
+#        * &lt;conflictor's-postinst&gt; \`abort-remove' \`in-favour' &lt;package&gt;
+#          &lt;new-version&gt;
+#        * &lt;deconfigured's-postinst&gt; \`abort-deconfigure' \`in-favour'
+#          &lt;failed-install-package&gt; &lt;version&gt; \`removing'
+#          &lt;conflicting-package&gt; &lt;version&gt;
+# for details, see http://www.debian.org/doc/debian-policy/ or
+# the debian-policy package
+
+case "\$1" in
+  configure)
+        # Change permissions to application files
+        if ! dpkg-statoverride --list /usr/share/wordpress/wp-content/${TYPE}s/$NAME &gt;/dev/null; then
+                chown -R root:root /usr/share/wordpress/wp-content/${TYPE}s/$NAME
+                chmod 755 /usr/share/wordpress/wp-content/${TYPE}s/$NAME
+                find /usr/share/wordpress/wp-content/${TYPE}s/$NAME -type d | xargs chmod 755
+                find /usr/share/wordpress/wp-content/${TYPE}s/$NAME -type f | xargs chmod 644
+        fi
+  ;;
+  abort-upgrade|abort-remove|abort-deconfigure)
+  ;;
+  *)
+    echo "postinst called with unknown argument \\\`\$1'" &gt;&amp;2
+    exit 1
+  ;;
+esac
+END
+
+chmod 0755 $DIR/DEBIAN/postinst
+
+# Формируем содержимое пакета
+mkdir -p $DIR/usr/share/wordpress/wp-content/${TYPE}s/
+cp -R $NAME $DIR/usr/share/wordpress/wp-content/${TYPE}s/
+rm -R $NAME
+
+FILE=${PACKAGE}_${VERSION}_all.deb
+
+# Формируем пакет
+dpkg-deb -b $DIR $FILE &gt;/dev/null 2&gt;&amp;1
+rm -R $DIR
+
+echo "$TYPE $NAME $VERSION: OK"
+return 0
+}
+
+build plugin simple-ldap-login 1.6.0 php-ldap
+build theme period 1.270
+build plugin the-events-calendar 4.2.7
+build plugin wise-chat 2.7
+build plugin site-sticky-notes 1.1.0
+build plugin so-widgets-bundle 1.9.10</pre>
+
+		<p>Скрипт состоит из одной функции, которая собственно и занимается сборкой пакета, и вызовов этой функции для сборки нескольких плагинов и тем. Скрипт использует для работы утилиты wget, unzip и dpkg-deb. При отсутствии в системе wget или unzip, их можно установить из одноимённых пакетов.</p>
+
+		<p>В скрипте выше указаны версии плагинов, работающие с Wordpress версии 3.6. У плагина simple-ldap-login указана также дополнительная зависимость - пакет php-ldap. Вы можете указать в скрипте свой список плагинов и тем, указав их версии и дополнительные зависимости. При необходимости указать несколько зависимостей, нужно перечислить их через запятую и заключить в кавычки.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Сборка плагинов и тем Wordpress в deb-пакеты">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,63 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2010-05-21 -->
+		<title>Резервная копия настроек сервера</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Резервная копия настроек сервера</h1>
+
+		<p>Всё написанное ниже ни в коем случае не стоит воспринимать как руководство к действию, это лишь информация к размышлению.</p>
+
+		<p>Для резервного копирования настроек сервера можно использовать простенький скрипт, ежедневно отправляющий на почтовый ящик резервную копию настроек сервера (для отправки используется пакет biabam). Главное достоинство таких резервных копий - их малый объём, а процесса резервного копирования - очень высокая скорость. Сам скрипт может быть, например, таким:</p>
+
+		<pre class="code">#!/bin/sh
+
+DATE=`date "+%Y-%m-%d"`
+
+dpkg --get-selections &gt; /root/backups/dpkg.list
+mysqldump -u root --password=password --all-databases &gt; /root/backups/mysql.sql
+
+tar -cjvf /root/backup-$DATE.tbz --files-from=- &lt;&lt; END
+/etc//root/bin/
+/home/stupin/bin/
+/usr/local/bin/
+/var/cache/bind/
+/var/spool/cron/crontabs/
+/root/backups/dpkg.list
+/root/backups/mysql.sql
+END
+rm /root/backups/dpkg.list /root/backups/mysql.sql
+
+echo "This is a Backup of your Debian Server!!! Keep this!" |\
+  biabam /root/backup-`date "+%Y-%m-%d"`.tbz \
+    -s "Daily backup Debian Server Configs: $DATE" stupin@mydomain.ru
+rm /root/backup-$DATE.tbz</pre>
+
+		<p>Будьте осторожны, т.к. злоумышленник, получивший доступ к этому сообщению, фактически получает полный доступ к серверу.</p>
+
+		<p>Файлик dpkg.list позволяет быстро установить все необходимые пакеты (перед этим лучше сначала перенести учётные записи).</p>
+
+		<pre class="console"># dpkg --set-selections &lt; dpkg.list
+# apt-get dselect-upgrade</pre>
+
+		<p>Файлик mysql.sql позволяет быстро восстановить состояние БД mysql:</p>
+
+		<pre class="console">$ mysql -u root --password=password &lt; mysql.sql</pre>
+
+		<p>Что делать с остальными файлами - я думаю вы догадаетесь сами. Можно, например, сделать rsync нужных каталогов:</p>
+
+		<pre class="console">$ rsync /root/backup/var/cache/bind/ /var/cache/bind/</pre>
+
+		<p>Можно сделать rsync каталога /etc/, но тут стоит соблюдать осторожность. Если восстановление происходит на другом оборудовании, то как минимум не стоит бездумно копировать /etc/fstab и /etc/udev/. Если перенос осуществляется ещё и на другую систему, то стоит подумать также о том, можно ли безболезненно скопировать /etc/passwd и /etc/shadow.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Резервная копия настроек сервера">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

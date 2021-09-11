@@ -1,0 +1,66 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="raid1,mdadm,linux,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-09-15 -->
+		<title>Решение проблемы с зеркалом mdadm после обновления ядра</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Решение проблемы с зеркалом mdadm после обновления ядра</h1>
+
+		<p>После обновления системы на одном сервере, в процессе последующей перезагрузки, система не поднялась с сообщением вида:</p>
+
+		<pre class="code">mdadm: Devices UUID-&lt;very long number&gt; and UUID-&lt;another number&gt; have the same name: md1
+mdadm: Duplicate MD device names in conf file were found.</pre>
+
+		<p>Система не грузится, а через некоторое время BusyBox выводит приглашение:</p>
+
+		<pre class="code">(initramfs)</pre>
+
+		<p>Один из симптомов заключается в том, что следующая команда не выдаёт ничего:</p>
+
+		<pre class="console"># mdadm --detail --scan</pre>
+
+		<p>Причина была в том, что в файле /etc/mdadm/mdadm.conf имеются устаревшие данные о дисковых разделах.</p>
+
+		<p>С помощью следующей команды убедился, что новые данные определяются.</p>
+
+		<pre class="console"># mdadm --examine --scan</pre>
+
+		<p>Записал обновлённые данные по разделам в конфиг mdadm:</p>
+
+		<pre class="console"># mdadm --examine --scan &gt; /etc/mdadm/mdadm.conf</pre>
+
+		<p>Запустил сборку массивов:</p>
+
+		<pre class="console"># mdadm --assemble --scan</pre>
+
+		<p>Массивы обнаружились и собрались.</p>
+
+		<p>Ввёл команду для выхода из BusyBox (initramfs) и дальнейшей загрузки системы:</p>
+
+		<pre class="console"># exit</pre>
+
+		<p>Залогинился в загрузившейся системе обновил файл /etc/mdadm/mdadm.conf в образе initramfs:</p>
+
+		<pre class="console"># mdadm --examine --scan &gt; /etc/mdadm/mdadm.conf
+# update-initramfs -u</pre>
+
+		<p>И отправил систему на перезагрузку. Система загрузилась нормально.</p>
+
+		<p>Если из системы вынимался один из дисков, то отсутствующую половину зеркала можно добавить командами вида:</p>
+
+		<pre class="console"># mdadm --manage  /dev/md1 --add /dev/sda1
+# mdadm --manage /dev/md3 --add /dev/sda3</pre>
+
+		<p>За процессом пересборки зеркала можно наблюдать в /proc/mdstat.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Решение проблемы с зеркалом mdadm после обновления ядра">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

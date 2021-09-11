@@ -1,0 +1,110 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="перевод,ssl,openssl" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2016-10-23 -->
+		<title>Команды OpenSSL для преобразования сертификатов на своём компьютере (перевод)</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Команды OpenSSL для преобразования сертификатов на своём компьютере (перевод)</h1>
+
+		<p>Перевод: <a href="https://www.sslshopper.com/ssl-converter.html">SSL Converter</a></p>
+
+		<p>Воспользуйтесь этим <b>преобразователем SSL для преобразования сертификатов SSL</b> между различными форматами, такими как <b>pem, der, p7b и pfx</b>.</p>
+
+		<p>Разные платформы и устройства требуют преобразовывать сертификаты SSL в разные форматы. Например, Windows-сервер экспортирует и импортирует файлы .pfx, а сервер Apache использует отдельные файлы PEM (.crt, .cer). Чтобы воспользоваться преобразователем SSL, просто выберите файл сертификата и его текущий тип (произойдёт попытка определить тип по расширению файла), затем выберите тип, в который нужно преобразовать сертификат и нажмите <b>Преобразовать сертификат</b>. Подробности о различных типах <a href="https://www.sslshopper.com/ssl-certificate-wizard.html">сертификатов SSL</a> и о том, как можно преобразовать сертификаты на своём компьютере с помощью OpenSSL, смотрите ниже.</p>
+
+		<h2>1. Формат PEM</h2>
+
+		<p>Формат PEM - наиболее распространённый формат сертификатов, выпускаемых <a href="https://www.sslshopper.com/certificate-authority-reviews.html">удостоверяющими центрами</a>. Сертификаты PEM обычно имеют расширения <b>.pem, .crt, .cer и .key</b>. Это ASCII-файлы с информацией, закодированной в Base64, и содержащие выражения "-----BEGIN CERTIFICATE-----" и "-----END CERTIFICATE-----". Сертификаты сервера, промежуточные сертификаты и приватные ключи могут быть записаны в формате PEM.</p>
+
+		<p><b>Apache и другие подобные серверы</b> используют сертификаты в формате PEM. Несколько сертификатов PEM и даже приватный ключ можно поместить в одном файле друг за другом, но большинство платформ, таких как Apache, берут сертификат и приватный ключ из отдельных файлов.</p>
+
+		<h2>2. Формат DER</h2>
+
+		<p>Формат DER - это просто двоичный вид сертификата, в отличие от PEM, который закодирован в символы ASCII. Иногда встречается расширение файла <b>.der</b>, но чаще у файла бывает расширение <b>.cer</b>. Чтобы узнать, имеет ли этот файл формат DER или PEM, можно открыть его в текстовом редакторе и поискать выражения BEGIN и END. Все типы сертификатов и приватных ключей могут быть представлены в формате DER. Обычно DER используется на <b>платформе Java</b>. Инструмент для преобразования SSL умеет преобразовывать в формат DER только сертификаты. Если нужно преобразовать в формат DER приватный ключ, воспользуйтесь <a href="http://openssl.org/docs/apps/rsa.html">командами OpenSSL, приведёнными на этой странице</a>.</p>
+
+		<h2>3. Формат PKCS#7/P7B</h2>
+
+		<p>Формат PKCS#7 или P7B обычно сохраняется в виде ASCII, закодированным в Base64, и имеет расширение <b>.p7b или .p7c</b>. Сертификаты P7B содержат выражения "-----BEGIN PKCS7-----" и "-----END PKCS7-----". Файл P7B содержит только сертификаты и цепочки сертификатов, но не приватные ключи. Некоторые платформы поддерживают файлы P7B, в том числе <b>Microsoft Windows и Java Tomcat</b>.</p>
+
+		<h2>4. Формат PKCS#12/PFX</h2>
+
+		<p>Формат PKCS#12 или PFX - это двоичный формат для хранения сертификата сервера, промежуточных сертификатов и приватного ключа в одном зашифрованном файле. Файлы PFX обычно имеют расширение <b>.pfx или .p12</b>. Файлы PFX обычно используются на <b>компьютерах под управлением Windows</b> для импорта и экспорта сертификатов и приватных ключей.</p>
+
+		<p>При преобразовании файла PFX в формат PEM, OpenSSL поместит все сертификаты и приватный ключ в один файл. Для этого нужно открыть файл в текстовом редакторе и скопировать каждый сертификат и приватный ключ (включая выражения BEGIN/END) в отдельные текстовые файлы и сохранить их под именами certificate.cer, CACert.cer и privateKey.key соответственно.</p>
+
+		<h2>5. Команды OpenSSL для преобразования сертификатов SSL на своём компьютере</h2>
+
+		<p>Настоятельно рекомендуется преобразовывать файлы .pfx на своём компьютере с помощью OpenSSL. Это позволит сохранить приватный ключ в тайне. Воспользуйтесь следующими командами OpenSSL для преобразования сертификата SSL в различные форматы на своём компьютере:</p>
+
+		<h3>5.1. Преобразование PEM с помощью OpenSSL</h3>
+
+		<ul>
+			<li>
+				<p>Преобразование PEM в DER:</p>
+
+				<pre class="console">openssl x509 -outform der -in <u>certificate.pem</u> -out <u>certificate.der</u></pre>
+			</li>
+
+			<li>
+				<p>Преобразование PEM в P7B:</p>
+
+				<pre class="console">openssl crl2pkcs7 -nocrl -certfile <u>certificate.cer</u> -out <u>certificate.p7b</u> -certfile <u>CACert.cer</u></pre>
+			</li>
+
+			<li>
+				<p>Преобразование PEM в PFX:</p>
+
+				<pre class="console">openssl pkcs12 -export -out <u>certificate.pfx</u> -inkey <u>privateKey.key</u> -in <u>certificate.crt</u> -certfile <u>CACert.crt</u></pre>
+			</li>
+		</ul>
+
+		<h3>5.2. Преобразование DER с помощью OpenSSL</h3>
+
+		<ul>
+			<li>
+				<p>Преобразование DER в PEM:</p>
+
+				<pre class="console">openssl x509 -inform der -in <u>certificate.cer</u> -out <u>certificate.pem</u></pre>
+			</li>
+		</ul>
+
+		<h3>5.3. Преобразование P7B с помощью OpenSSL</h3>
+
+		<ul>
+			<li>
+				<p>Преобразование P7B в PEM:</p>
+
+				<pre class="console">openssl pkcs7 -print_certs -in <u>certificate.p7b</u> -out <u>certificate.cer</u></pre>
+
+			</li>
+
+			<li>
+				<p>Преобразование P7B в PFX:</p>
+
+				<pre class="console">openssl pkcs7 -print_certs -in <u>certificate.p7b</u> -out <u>certificate.cer</u></pre>
+
+				<pre class="console">openssl pkcs12 -export -in <u>certificate.cer</u> -inkey <u>privateKey.key</u> -out <u>certificate.pfx</u> -certfile <u>CACert.cer</u></pre>
+			</li>
+		</ul>
+
+		<h3>5.4. Преобразование PFX с помощью OpenSSL</h3>
+
+		<ul>
+			<li>
+				<p>Преобразование PFX в PEM:</p>
+
+				<pre class="console">openssl pkcs12 -in <u>certificate.pfx</u> -out <u>certificate.cer</u> -nodes</pre>
+			</li>
+		</ul>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Команды OpenSSL для преобразования сертификатов на своём компьютере (перевод)">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

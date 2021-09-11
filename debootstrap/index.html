@@ -1,0 +1,179 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="перевод,debootstrap,linux,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2009-09-18 -->
+		<title>chantra. Установка Debian Etch из работающей системы, основанной на Debian, 2006</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>chantra. Установка Debian Etch из работающей системы, основанной на Debian, 2006</h1>
+
+		<p>Перевод статьи: <a href="http://www.debuntu.org/2006/05/14/51-how-to-installing-debian-etch-from-a-running-debian-based-system">How To: Installing Debian Etch From a running Debian based system</a></p>
+
+		<p>Этот урок иллюстрирует каким образом вы можете установить Debian Etch и в общем любой дистрибутив, основанный на Debian из окружения chroot. Воспользовавшись этим способом вам не потребуется ни скачивать установочные диски, ни записывать их.</p>
+
+		<p>Это хороший способ понять, как работает система debian.</p>
+
+		<h2>1. Введение</h2>
+
+		<p>Долгое время с тех пор как я запустил debian на своей системе, я каким-то образом потерял её и вынужден был использовать 5G, которые остались на моём жёстком диске, для установки Debian Etch.</p>
+
+		<p>Я захотел установить её прямо из окружения Ubuntu Dapper. В прошлом использовать её было проще, поскольку можно было воспользоваться base-config, который проводил вас через процесс установки. Но недавно (2 месяца назад), вышел Debian Installer Etch beta 2, отрывок из новости о котором от <a href="http://www.debian.org/devel/debian-installer/News/2006/20060315">15 марта 2006</a> приведён ниже:</p>
+
+		<blockquote>
+			<p>15 марта 2006</p>
+
+			<p><a href="http://wiki.debian.org/DebianInstaller/Team">Команда</a> Debian Installer счастлива представить второй предварительный релиз установщика для Debian GNU/Linux Etch.</p>
+
+			<p>Улучшения в этом выпуске установщика включают:</p>
+
+			<p>* base-config был отправлен на пенсию: установка теперь полностью выполняется до перезагрузки. Наконец, весь процесс установки пакетов Debian происходит на фоне дружественной полосы прогресса.</p>
+
+			<p>* ....</p>
+		</blockquote>
+
+		<p>Что ж, установщик debian теперь работает с установочного компакт-диска и base-config был удалён из репозитория, что означает что я должен выполнить всю работу base-config'а вручную. Например настройка locale, console-data, часового пояса, сети и fstab.</p>
+
+		<h2>2. Подготовка вашей системы</h2>
+
+		<p>Первая вещь, которую вам нужно сделать, это подготовить раздел, на котором будет размещаться ваша новая система. Ваша файловая система может быть более или менее сложной (иметь отдельные разделы /boot, /usr, /var ...). В моём случае у меня было очень мало места, я создал раздел / на диске sda11 с типом файловой системы ext3 и раздел для каталога /home (поскольку я уже использую систему с Ubuntu Dapper), который находится на разделе /dev/sda5 и его тип файловой системы - reiserfs. Разделом для подкачки был тот, который использовался запущенной системой, имеющий имя sda9.</p>
+
+		<p>И так, приступаем, нам нужно отформатировать /, смонтировать / в нашу файловую систему и подготовить будущую файловую систему с помощью debootstrap, который является инструментом для развёртывания базовой системы Debian.</p>
+
+		<p>Приступим, откроем терминал и введём:</p>
+
+		<pre class="console">root@laptop:/# mkfs.ext3 /dev/sda11
+root@laptop:/# mkdir /mnt/debian
+root@laptop:/# mount /dev/sda11 /mnt/debian/</pre>
+
+		<p>Файловая система готова и мы смонтировали её в /mnt/debian. Теперь нам нужно установить базовую систему с помощью debootstrap:</p>
+
+		<pre class="console">root@laptop:/# debootstrap etch /mnt/debian/ ftp://ftp.de.debian.org/debian/
+I: Retrieving Release
+I: Retrieving Packages
+I: Validating Packages
+I: Resolving dependencies of required packages...
+I: Resolving dependencies of base packages...
+I: Found additional base dependencies: libdb4.2 libgnutls12 libreadline5 libsigc
+++-2.0-0c2aopenbsd-inetd readline-common
+...
+...
+I: Configuring netbase...
+I: Configuring openbsd-inetd...
+I: Base system installed successfully.</pre>
+
+		<p>Готово! теперь мы сменим корневой каталог с помощью chroot (этот инструмент поставляется в пакете coreutils), chroot запускает команду или интерактивную оболочку в указанном корневом каталоге, чтобы проинформировать нашу новую систему о том что это за система, нам нужно смонтировать файловую систему /proc:</p>
+
+		<pre class="console">root@laptop:/# mount -t proc none /mnt/debian/proc
+root@laptop:/# chroot /mnt/debian/</pre>
+
+		<p>Будьте осторожны в настройке.</p>
+
+		<h2>3. Установка вспомогательных пакетов и настройка новой системы</h2>
+
+		<p>Теперь нам нужно установить некоторые дополнительные пакеты (например, ядро :D), настроить часовой пояс, разделы, имя узла, создать главного пользователя, определить новый пароль для пользователя root...</p>
+
+		<pre class="console">root@laptop:/# apt-get install locales console-data console-common
+root@laptop:/# dpkg-reconfigure locales console-data</pre>
+
+		<p>Введите подходящее для вашей системы значение. Установите ядро:</p>
+
+		<pre class="console">root@laptop:/# apt-get install initrd-tools
+root@laptop:/# apt-get install linux-headers-2.6-686 linux-image-2.6.15-1-686</pre>
+
+		<p>Заголовки Linux не нужны большинству пользователей, но поскольку я собираюсь скомпилировать модуль ядра для использования моей беспроводной сетевой карты, мне заголовки ядра нужны.</p>
+
+		<p>Вам может потребоваться установить полезные пакеты, вот хороший набор:</p>
+
+		<pre class="console">root@laptop:/# apt-get install usbutils pciutils bzip2 sysfsutils wireless-tools dhcp3-client resolvconf cpufreqd cpufrequtils acpid acpi</pre>
+
+		<p>Теперь мы перейдём к настройке системы. Начнём с файла /etc/hosts, отредактировав и записав следующее:</p>
+
+		<pre class="console"># /etc/hosts
+127.0.0.1 localhost</pre>
+
+		<p>Зададим имя узла в файле /etc/hostname и добавим имя вашего узла. Вы можете захотеть настроить /etc/network/interfaces, чтобы сетевые интерфейсы настраивались автоматически, например:</p>
+
+		<pre class="code">iface lo inet loopback
+iface eth0 inet dhcp
+  wireless-essid XXXXXX
+auto eth0</pre>
+
+		<p>Мы покончили с сетью, теперь настроим часовой пояс:</p>
+
+		<pre class="console"># ln -sf /usr/share/zoneinfo/Zone/Town /etc/localtime</pre>
+
+		<p>и с файловой системой, отредактируем файл /etc/fstab и добавим:</p>
+
+		<pre class="code">proc /proc proc defaults 0 0
+/dev/sda11 / ext3 defaults,errors=remount-ro 0 1
+/dev/sda5 /home reiserfs defaults 0 2
+/dev/sda9 none swap sw 0 0
+/dev/hda /media/cdrom0 iso9660 ro,user,noauto 0 0</pre>
+
+		<p>Замените sdaX на подходящие для вашей системы значения.</p>
+
+		<p>Важное замечание: Вам нужно задать пароль пользователя root по умолчанию, или вы не сможете войти. Введите:</p>
+
+		<pre class="console">root@laptop:/# passwd</pre>
+
+		<p>и определите ваш новый пароль.</p>
+
+		<h2>4. Установка загрузчика (GRUB)</h2>
+
+		<p>В моём случае я использую загрузчик из моей запущенной системы. Отредактируем /boot/grub/menu.lst и добавим в конец файла:</p>
+
+		<pre class="code">title Debian Etch, kernel 2.6.15-1-686 (on /dev/sda11)
+root (hd0,10)
+kernel /boot/vmlinuz-2.6.15-1-686 root=/dev/sda11 ro quiet splash
+initrd /boot/initrd.img-2.6.15-1-686
+savedefault
+boot</pre>
+
+		<p>Здесь вам тоже потребуется заменить sdaX на подходящие для вашей системы значения.</p>
+
+		<p>Теперь вы можете выйти из вашего изменённого корневого каталога и перезагрузиться в вашу новую систему. Вам всё ещё нужно установить и настроить Xorg.</p>
+
+		<pre class="console">root@laptop:/# exit
+root@laptop:~# umount /mnt/debian/proc
+root@laptop:~# umount /mnt/debian
+root@laptop:~# reboot</pre>
+
+		<h2>5. Установка и настройка Xorg</h2>
+
+		<p>Во время перезагрузки вашей системы вы должны наблюдать за появлением ошибок или предупреждений, они могут помешать системе приносить пользу :).</p>
+
+		<p>Теперь установим x-сервер и x-клиент:</p>
+
+		<pre class="console">root@laptop:~#apt-get install xserver-common xserver-xorg
+root@laptop:~# apt-get install x-window-system-core x-window-system
+root@laptop:~# apt-get install x-window-system-core x-window-system</pre>
+
+		<p>плюс те пакеты, которые вы хотите.</p>
+
+		<p>Откройте /etc/X11/xorg.conf и проверьте, что драйвер соответствует вашей видеокарте, проверьте раскладки клавиатуры и попытайтесь запустить X.</p>
+
+		<pre class="console">root@laptop:~# X</pre>
+
+		<p>Если что-то не так, google будет вашим лучшим другом :).</p>
+
+		<p>Чтобы X работал правильно, вам нужно создать для себя обычную учётную запись. На моём разделе /home идентификатор пользователя uid и идентификатор группы gid равны 1000, поэтому мне нужно создать группу и пользователя с теми же идентификаторами:</p>
+
+		<pre class="console">root@laptop:~#addgroup --gid 1000 myuser
+root@laptop:~# adduser --id 1000 --gid 1000 myuser</pre>
+
+		<p>Запустим gdm, и войдём под вашей учётной записью обычного пользователя ;).</p>
+
+		<p>Теперь вам всё ещё нужно установить другие пакеты (xmms, mplayer, gaim...), но ваша система работает.</p>
+
+		<p>Счастливого пути.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Установка Debian с флешки по SSH">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

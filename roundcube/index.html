@@ -1,0 +1,224 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="lighttpd,linux,debian,php,wheezy,roundcube,mysql" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2014-02-23 -->
+		<title>Установка и настройка Roundcube</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Установка и настройка Roundcube</h1>
+
+		<p>Заключительная статья из серии статей о настройке почтовой системы. В прошлых заметках была рассмотрена настройка серверной части почтовой системы, настройка SSL/TLS и настройка почтового клиента Thunderbird/Icedove: <a href="../postfixadmin-2/">Установка и настройка Postfixadmin</a>, <a href="../dovecot/">Установка и настройка Dovecot</a>, <a href="../postfix/">Установка и настройка Postfix, OpenDKIM, ClamAV-Milter, Milter-Greylist</a> и <a href="../ssl-postfix-dovecot-lighttpd/">Настройка SSL/TLS в Postfix, Dovecot, Lighttpd</a>, <a href="../thunderbird-icedove-addons/">Дополнения Thunderbird/Icedove</a>.</p>
+
+		<p>На этот раз мы рассмотрим настройку почтового веб-клиента Roundcube.</p>
+
+		<p>Для работы Roundcube понадобится веб-сервер с поддержкой PHP и одна из СУБД: MySQL, PostgreSQL (в настройках самого Roundcube была ещё замечена возможность работы с SQLite, однако в пакетах никаких признаков поддержки SQLite обнаружено не было).</p>
+
+		<h2>1. Установка пакетов и создание базы данных</h2>
+
+		<p>Установим необходимые пакеты, если они ещё не установлены:</p>
+
+		<pre class="console"># apt-get install mysql-server mysql-client lighttpd php5-cgi</pre>
+
+		<p>Установим Roundcube и пакеты с дополнительными плагинами:</p>
+
+		<pre class="console"># apt-get install roundcube php-auth-sasl roundcube-plugins roundcube-plugins-extra</pre>
+
+		<p>В процессе установки пакета roundcube-core будет предложено настроить базу данных для Roundcube:</p>
+
+		<img src="roundcube1.png" alt="Запрос автоматической настройки базы данных" />
+
+		<img src="roundcube2.png" alt="Запрос пароля администратора СУБД" />
+
+		<h2>2. Настройка веб-сервера</h2>
+
+		<p>Подготовим файл /etc/lighttpd/conf-available/50-roundcube.conf, используя для его составления информацию из файлов /etc/roundcube/lighttpd.conf и /usr/share/roundcube/.htaccess:</p>
+
+		<pre class="code">$HTTP["host"] == "mail.domain.tld" {
+
+  server.document-root = "/var/lib/roundcube"
+
+  alias.url += ( "program/js/tiny_mce" =&gt; "/usr/share/tinymce/www",
+                 "favicon.ico" =&gt; "/usr/share/roundcube/skins/default/images/favicon.ico" )
+
+  $HTTP["url"] =~ "^/config|/temp|/logs" {
+    url.access-deny = ( "" )
+  }
+}</pre>
+
+		<p>Создадим файл /etc/php5/mods-available/roundcube.ini, используя при его составлении информацию из файла /usr/share/roundcube/.htaccess:</p>
+
+		<pre class="code">upload_max_filesize=5M
+;post_max_size=6M
+;session.gc_maxlifetime=21600
+;session.gc_divisor=500
+;session.gc_probability=1
+;mbstring.func_overload=0</pre>
+
+		<p>В этот файл я вписал лишь те настройки, которые отличаются от дистрибутивных. Настройки сессии я не считаю столь важными, чтобы заменять ими стандартные, поэтому их я закомментировал. Также я закомментировал настройку post_max_size, потому что другое приложение использует большее значение. Из всех настроек я оставил только upload_max_filesize, зато закомментировал её в другом приложении, т.к. там её значение было меньше.</p>
+
+		<h2>3. Настройка приложения</h2>
+
+		<p>Настроим roundcube, прописав настройки в файл /etc/roundcube/main.inc.php:</p>
+
+		<pre class="code">$rcmail_config['default_host'] = 'tls://%n';
+$rcmail_config['username_domain'] = '%d';
+$rcmail_config['mail_domain'] = '%d';
+$rcmail_config['smtp_server'] = 'tls://%n';
+$rcmail_config['smtp_user'] = '%u';
+$rcmail_config['smtp_pass'] = '%p';
+$rcmail_config['smtp_helo_host'] = '';
+$rcmail_config['force_https'] = true;</pre>
+
+		<p>О настройках:</p>
+
+		<ul>
+			<li>default_host - имя узла, выбираемое при входе в веб интерфейс. Можно указать список узлов, который будет отображаться в виде выпадающего меню. Можно использовать шаблоны: %n - использовать доменное имя из URL, %d - использовать доменное имя из URL без первой части, %s - использовать доменное имя, указанное после символа @ в логине пользователя. Можно указать префикс ssl:// или tls:// для использования защищённого соединения,</li>
+
+			<li>username_domain - автоматически добавлять домен к логинам пользователей. Можно задать ассоциативный массив для отображения доменного имени из URL в почтовый домен, можно использовать шаблоны: %h - имя IMAP-узла пользователя (что бы это ни значило), %n - доменное имя из URL, %d - доменное имя из URL без первой части, %z - доменное имя IMAP-узла без первой части,</li>
+
+			<li>mail_domain - доменное имя для формирования адресов новых пользователей. Правила такие же, как и для username_domain,</li>
+
+			<li>smtp_server - имя узла, выбираемое для отправки почты. Можно использовать шаблоны: %h - имя SMTP-узла пользователя (что бы это ни значило), %n - доменное имя из URL, %d - доменное имя из URL без первой части, %z - доменное имя SMTP-узла без первой части. Можно указать префикс ssl:// или tls:// для использования защищённого соединения,</li>
+
+			<li>smtp_user - если для отправки почты требуется аутентификация, то здесь можно указать имя пользователя или шаблон %u, чтобы имя пользователя бралось из веб-интерфейса,</li>
+
+			<li>smtp_pass - аналогично, если для отправки почты требуется аутентификация, то здесь можно указать пароль пользователя или шаблон %p, чтобы пароль пользователя брался из веб-интерфейса,</li>
+
+			<li>smtp_helo_host - подставлять в команду HELO/EHLO указанное имя узла. Если оставить строку пустой, то имя узла будет браться из переменной SERVER_NAME веб-сервера или же будет использоваться имя localhost,</li>
+
+			<li>force_https - настройка, предписывающая RoundCube переадресовывать пользователя на защищённую версию протокола HTTP - HTTPS.</li>
+		</ul>
+
+		<h2>4. Проверка работы</h2>
+
+		<p>Теперь можно подключать оба файла к использованию:</p>
+
+		<pre class="console"># ln -s ../mods-available/roundcube.ini conf.d/30-roundcube.ini
+# lighty-enable-mod roundcube
+# /etc/init.d/lighttpd restart</pre>
+
+		<p>И войти в веб-интерфейс Roundcube по ссылке http://mail.domain.tld:</p>
+
+		<img src="roundcube3.png" alt="Страница входа в Roundcube" />
+
+		<h2>5. Настройка плагинов</h2>
+
+		<p>Из всех плагинов меня в первую очередь заинтересовали три:</p>
+
+		<ul>
+			<li>Плагин password для смены пароля на почтовый ящик (находится в пакете roundcube-plugins),</li>
+
+			<li>Плагин acl для настройки IMAP ACL (находится в пакете roundcube-plugins),</li>
+
+			<li>Плагин dkimstatus для проверки DKIM-подписей полученных сообщений (находится в пакете roundcube-plugins-extra),</li>
+
+			<li>Плагин sieverules для управления правилами фильтрации Sieve на IMAP-сервере по протоколу ManageSieve (находится в пакете roundcube-plugins-extra).</li>
+
+		</ul>
+
+		<h3>5.1. Настройка плагина password</h3>
+
+		<p>Для настройки плагина password впишем в файл /etc/roundcube/plugins/password/config.inc.php следующие настройки:</p>
+
+		<pre class="code">&lt;?php
+// Empty configuration for password
+// See /usr/share/roundcube/plugins/password/config.inc.php.dist for instructions
+
+$rcmail_config['password_driver'] = 'sql';
+$rcmail_config['password_confirm_current'] = true;
+$rcmail_config['password_minimum_length'] = 7;
+$rcmail_config['password_db_dsn'] = 'mysql://roundcube:roundcube_password@localhost/postfixadmin';
+$rcmail_config['password_query'] = 'UPDATE mailbox SET password=%c, modified=NOW() WHERE username=%u';
+?&gt;</pre>
+
+		<p>И дадим пользователю roundcube права на изменение пароля:</p>
+
+		<pre class="code">INSERT INTO tables_priv(host, db, user, table_name, table_priv, column_priv) VALUES
+('localhost', 'postfixadmin', 'roundcube', 'mailbox', '', 'Select,Update');
+
+INSERT INTO columns_priv(host, db, user, table_name, column_name, column_priv) VALUES
+('localhost', 'postfixadmin', 'roundcube', 'mailbox', 'username', 'Select'),
+('localhost', 'postfixadmin', 'roundcube', 'mailbox', 'password', 'Update'),
+('localhost', 'postfixadmin', 'roundcube', 'mailbox', 'modified', 'Update');
+
+FLUSH PRIVILEGES;</pre>
+
+		<p>Теперь включим использование плагина password, добавив его в настройку plugins в файле /etc/roundcube/main.inc.php:</p>
+
+		<pre class="code">$rcmail_config['plugins'] = array('password');</pre>
+
+		<p>После этого в веб-интерфейсе Roundcube появится дополнительная вкладка для смены пароля:</p>
+
+		<img src="roundcube_password.png" alt="Плагин password в Roundcube" />
+
+		<h3>5.2. Настройка плагина acl</h3>
+
+		<p>У этого плагина, на мой взгляд, есть лишь одна настройка, заслуживающая внимания - acl_advanced_mode, с помощью которой можно включить более тонкую настройку IMAP ACL. Для её включения нужно вписать в файл /etc/roundcube/plugins/acl/config.inc.php следующую строку:</p>
+
+		<pre class="code">$rcmail_config['acl_advanced_mode'] = true;</pre>
+
+		<p>Для включения самого плагина acl нужно добавить его в настройку plugins в файле /etc/roundcube/main.inc.php:</p>
+
+		<pre class="code">$rcmail_config['plugins'] = array('password', 'acl');</pre>
+
+		<p>После добавления плагина в настройках папок появится новая вкладка Sharing:</p>
+
+		<img src="roundcube_acl.png" alt="Плагин acl в Roundcube" />
+
+		<h3>5.3. Настройка плагина dkimstatus</h3>
+
+		<p>Плагин не требует настройки и для его включения нужно добавить его в настройку plugins в файле /etc/roundcube/main.inc.php:</p>
+
+		<pre class="code">$rcmail_config['plugins'] = array('password', 'acl', 'dkimstatus');</pre>
+
+		<p>После его включения у каждого письма с правильной DKIM-подписью появится значок в виде галочки в зелёном кружке (пример письма, полученного от отправителя в Yandex-почте):</p>
+
+		<img src="roundcube_dkimstatus.png" alt="Плагин dkimstatus в Roundcube" />
+
+		<h3>5.4. Настройка плагина sieverules</h3>
+
+		<p>В пакетах roundcube-pugins и roundcube-plugins-extra были найдены два плагина для настройки правил фильтрации почты на IMAP-сервере через протокол ManageSieve: managesieve и sieverules. Как оказалось, второй плагин был написан на основе первого и по сути заменяет его собой. Поэтому я решил настроить именно плагин sieverules.</p>
+
+		<p>Для настройки плагина sieverules скопируем файл /usr/share/roundcube/plugins/sieverules/config.inc.php.dist в файл /etc/roundcube/plugins/sieverules/config.inc.php. Нужно именно скопировать файл, т.к. при добавлении настроек в имеющийся пустой файл, плагин работает неправильно - выпадающий список действий оказывается пустым. Изменим в нём значения следующих настроек:</p>
+
+		<pre class="code">$rcmail_config['sieverules_host'] = '%n';
+$rcmail_config['sieverules_port'] = 4190;
+$rcmail_config['sieverules_usetls'] = TRUE;</pre>
+
+		<p>Краткое описание изменённых настроек:</p>
+
+		<ul>
+			<li>sieverules_host - задаёт сервер ManageSieve. Поддерживаются шаблоны: %h - имя IMAP-сервера, %n - имя сервера из URL, %d - доменное имя из URL без первой части.</li>
+
+			<li>sieverules_port - задаёт номер порта сервера ManageSieve. Ранее использовался TCP-порт с номером 2000, однако позже он был объявлен устаревшим и теперь используется TCP-порт с номером 4190.</li>
+
+			<li>sieverules_usetls - настройка задаёт использование защищённого соединения для связи с сервером ManageSieve.</li>
+
+		</ul>
+
+		<p>Осталось включить использование плагина в настройках RoundCube, добавив имя плагина в настройку plugins в файле /etc/roundcube/main.inc.php:</p>
+
+		<pre class="code">$rcmail_config['plugins'] = array('password', 'acl', 'dkimstatus', 'sieverules');</pre>
+
+		<p>После добавления плагина в настройках появляется вкладка "Фильтры":</p>
+
+		<img src="roundcube_sieverules.png" alt="Плагин sieverules в Roundcube" />
+
+		<p>По умолчанию имеется только один набор правил, а доступ к прямому редактированию правил отключен - редактирование осуществляется при помощи веб-интерфейса плагина.</p>
+
+		<p>Настройка sieverules_multiplerules позволяет создавать несколько наборов правил, из которых активным может быть только одни набор.</p>
+
+		<p>При помощи настройки sieverules_adveditor можно включить прямой доступ к редактированию скриптов фильтрации Sieve. При этом появляется возможность писать более сложные правила, однако и увеличивается вероятность ошибок в синтаксисе или непонимания семантики фильтра.</p>
+
+		<p>Это была заключительная статья из серии статей о настройке почтовой системы.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Установка и настройка Roundcube">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

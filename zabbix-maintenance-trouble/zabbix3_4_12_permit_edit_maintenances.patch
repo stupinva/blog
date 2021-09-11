@@ -1,0 +1,96 @@
+Index: zabbix-3.4.12-1+buster/frontends/php/include/classes/api/services/CMaintenance.php
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/frontends/php/include/classes/api/services/CMaintenance.php
++++ zabbix-3.4.12-1+buster/frontends/php/include/classes/api/services/CMaintenance.php
+@@ -276,7 +276,6 @@ class CMaintenance extends CApiService {
+ 		// hosts permissions
+ 		$options = [
+ 			'hostids' => $hostids,
+-			'editable' => true,
+ 			'output' => ['hostid'],
+ 			'preservekeys' => true
+ 		];
+@@ -289,7 +288,6 @@ class CMaintenance extends CApiService {
+ 		// groups permissions
+ 		$options = [
+ 			'groupids' => $groupids,
+-			'editable' => true,
+ 			'output' => ['groupid'],
+ 			'preservekeys' => true
+ 		];
+@@ -458,7 +456,6 @@ class CMaintenance extends CApiService {
+ 			'selectGroups' => ['groupid'],
+ 			'selectHosts' => ['hostid'],
+ 			'selectTimeperiods' => API_OUTPUT_EXTEND,
+-			'editable' => true,
+ 			'preservekeys' => true
+ 		]);
+ 
+@@ -580,7 +577,6 @@ class CMaintenance extends CApiService {
+ 			$db_hosts = API::Host()->get([
+ 				'output' => [],
+ 				'hostids' => $hostids,
+-				'editable' => true,
+ 				'preservekeys' => true
+ 			]);
+ 
+@@ -598,7 +594,6 @@ class CMaintenance extends CApiService {
+ 			$db_groups = API::HostGroup()->get([
+ 				'output' => [],
+ 				'groupids' => $groupids,
+-				'editable' => true,
+ 				'preservekeys' => true
+ 			]);
+ 
+Index: zabbix-3.4.12-1+buster/frontends/php/maintenance.php
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/frontends/php/maintenance.php
++++ zabbix-3.4.12-1+buster/frontends/php/maintenance.php
+@@ -105,7 +105,6 @@ if (isset($_REQUEST['maintenanceid'])) {
+ 	$dbMaintenance = API::Maintenance()->get([
+ 		'output' => API_OUTPUT_EXTEND,
+ 		'selectTimeperiods' => API_OUTPUT_EXTEND,
+-		'editable' => true,
+ 		'maintenanceids' => getRequest('maintenanceid'),
+ 	]);
+ 	if (empty($dbMaintenance)) {
+@@ -412,7 +411,6 @@ if (!empty($data['form'])) {
+ 			'maintenanceids' => $data['maintenanceid'],
+ 			'real_hosts' => true,
+ 			'output' => ['hostid'],
+-			'editable' => true
+ 		]);
+ 		$data['hostids'] = zbx_objectValues($data['hostids'], 'hostid');
+ 
+@@ -458,7 +456,6 @@ if (!empty($data['form'])) {
+ 
+ 	// get groups
+ 	$data['all_groups'] = API::HostGroup()->get([
+-		'editable' => true,
+ 		'output' => ['groupid', 'name'],
+ 		'real_hosts' => true,
+ 		'preservekeys' => true
+@@ -475,7 +472,6 @@ if (!empty($data['form'])) {
+ 	$data['hosts'] = API::Host()->get([
+ 		'output' => ['hostid', 'name'],
+ 		'real_hosts' => true,
+-		'editable' => true,
+ 		'groupids' => $data['twb_groupid']
+ 	]);
+ 
+@@ -483,7 +479,6 @@ if (!empty($data['form'])) {
+ 	$hostsSelected = API::Host()->get([
+ 		'output' => ['hostid', 'name'],
+ 		'real_hosts' => true,
+-		'editable' => true,
+ 		'hostids' => $data['hostids']
+ 	]);
+ 	$data['hosts'] = array_merge($data['hosts'], $hostsSelected);
+@@ -532,7 +527,6 @@ else {
+ 		'search' => [
+ 			'name' => ($filter['name'] === '') ? null : $filter['name']
+ 		],
+-		'editable' => true,
+ 		'sortfield' => $sortField,
+ 		'sortorder' => $sortOrder,
+ 		'limit' => $config['search_limit'] + 1

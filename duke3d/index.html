@@ -1,0 +1,75 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="игры,linux,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2010-08-21 -->
+		<title>Duke Nukem 3D в Debian GNU/Linux</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Duke Nukem 3D в Debian GNU/Linux</h1>
+
+		<p>Продолжаю серию заметок о запуске старых игр - стрелялок от первого лица:</p>
+
+		<ol>
+			<li><a href="../quake/">Quake в Linux</a></li>
+
+			<li><a href="../quake-nexuiz/">Запуск Quake на движке Nexuiz</a></li>
+
+			<li><a href="../quake2/">Quake2 на Debian GNU/Linux</a></li>
+		</ol>
+
+		<p>На этот раз я откопал современный порт Duke Nukem 3D, который называется Eduke32. Официальный сайт проекта находится по следующему адресу: <a href="http://www.eduke32.com/">http://www.eduke32.com/</a> Для установки движка игры воспользуемся репозиторием Debian на сайте проекта. На странице <a href="http://wiki.eduke32.com/wiki/APT_repository">Apt Repository</a> находим интересующий нас раздел <a href="http://wiki.eduke32.com/wiki/APT_repository#Lenny">Lenny</a>. В соответствии с инструкциями добавляем репозиторий в систему, прописав следующие две строчки в файл /etc/apt/sources.list:</p>
+
+		<pre class="code">deb http://apt.duke4.net lenny main
+deb-src http://apt.duke4.net lenny main</pre>
+
+		<p>Теперь добавим PGP-ключ репозитория с помощью следующей команды:</p>
+
+		<pre class="console"># wget http://apt.duke4.net/key/eduke32.gpg -O- | apt-key add -</pre>
+
+		<p>Обновим список пакетов:</p>
+
+		<pre class="console"># apt-get update</pre>
+
+		<p>И установим интересующие нас пакеты с движком игры и с условно-бесплатной версией самой игры:</p>
+
+		<pre class="console"># apt-get install eduke32 duke3d-shareware</pre>
+
+		<p>Кроме этих двух пакетов в репозитории имеются ещё два пакета: build-engine-utils - коллекция инструментов, предназначенных для манипуляции данными игр, основанных на движке Build (из таковых я припоминаю ещё игры Blood, Redneck Rampage и Outlaws) и mapster32 - редактор карт, работающий в режиме OpenGL. В общем, в этом репозитории, похоже, есть всё необходимое, чтобы делать новые карты и модификации игры.</p>
+
+		<p>Но это ещё не всё. Ещё я нашёл проект <a href="http://hrp.duke4.net/">High Resolution Pack</a>, в рамках которого люди занимаются повышением разрешения текстур и заменой всех спрайтов на модели: <a href="http://www.duke4.org/files/nightfright/beta/polymer_hrp132.zip">polymer_hrp132.zip</a>, архивчик уже достиг объёма 466 мегабайт!</p>
+
+		<p>Скачаем последний релиз HRP и распакуем его в каталог с настройками личными игры текущего пользователя:</p>
+
+		<pre class="console">$ wget http://www.duke4.org/files/nightfright/beta/polymer_hrp132.zip
+$ unzip polymer_hrp132.zip -d ~/.eduke32</pre>
+
+		<p>Теперь при запуске игры, в окошке выбора разрешения нужно указать использование движка Polymer, который как раз и умеет рисовать трёхмерные модели.</p>
+
+		<p>Вот так игра выглядит на разрешении 1280x1024 без использования HRP:</p>
+
+		<img src="duke0000.png" />
+
+		<p>А вот так выглядит на разрешении 800x600 с использованием HRP:</p>
+
+		<img src="duke0003.png" />
+
+		<p>Ещё пара снимков с использованием HRP. Этот с разрешением 1280x1024:</p>
+
+		<img src="duke0001.png" />
+
+		<p>Этот с разрешением 800x600:</p>
+
+		<img src="duke0002.png" />
+
+		<p>Имеются, однако, и недостатки - игра довольно сильно тормозит, требует много ресурсов (на моём компьютере игра отъела полгигабайта памяти в режиме без HRP), отчего иногда замораживается секунд на 5-10 и иногда падает. Если хотите поиграть в игру полноценно, советую найти полную, не условно-бесплатную версию файла ресурсов и уменьшить настройки качества картинки.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Duke Nukem 3D в Debian GNU/Linux">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,132 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="jessie,chromium,ppapi,debian,linux,firefox,flashplayer,npapi,iceweasel,freshplayer" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-06-18 -->
+		<title>Flash-плагин для Chromium и Iceweasel/Firefox в Debian</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Flash-плагин для Chromium и Iceweasel/Firefox в Debian</h1>
+
+		<p>В 2012 году Adobe объявил о прекращении выхода новых версий Flash-плагина для Linux: <a href="https://www.opennet.ru/opennews/art.shtml?num=33502">01.04.2012 14:29 Релиз Adobe Flash 11.2, последней версии с поддержкой Linux</a>. Мне этот плагин не нужен, но вот люди, любящие играть во Flash-игры под Linux в социальных сетях, опечалились - многие игры отказываются работать в старых версиях плагина.</p>
+
+		<p>Надо сказать, что браузер Iceweasel/Firefox, являющийся далёким потомком браузера Netscape, предоставляет интерфейс для подключения к нему плагинов. Этот интерфейс называется NPAPI - Netscape Plugin Application Programming Interface - программный интерфейс подключаемых модулей Netscape.</p>
+
+		<p>У браузера Chromium, являющегося свободной версией браузера Chrome, разрабатываемого Google, имеется собственный интерфейс для подключения плагинов. В Google решили не использовать NPAPI, посчитав что в нём имеется масса проблем и нет нужных функций. Взамен Google предложили новый интерфейс - PPAPI - Pepper Plugin Application Program Interface - программный интерфейс подключаемых модулей Pepper.</p>
+
+		<p>Когда Adobe объявил, что новые версии Flash-плагина для Linux выпускаться не будут, это объявление не касалось Flash-плагина, который выпускался Google. Google продолжил поддержку выпуска Flash-плагина в варианте PPAPI для своего браузера Chrome. Этот плагин можно было использовать и в Linux.</p>
+
+		<p>И вот в прошлом году я прочитал такие две новости: <a href="https://www.opennet.ru/opennews/art.shtml?num=45084">05.09.2016 16:52 Adobe возобновляет выпуск NPAPI-плагина с Flash Player для Linux</a>, <a href="https://www.opennet.ru/opennews/art.shtml?num=45724">20.12.2016 12:10 Релиз Adobe Flash 24 для Linux</a>. "Неплохо" - сказал я и решил попробовать обновить Flash-плагин. На тот момент плагины без проблем обновились штатными средствами.</p>
+
+		<h2>1. Штатная установка Flash-плагинов</h2>
+
+		<h3>1.1. Штатная установка Flash-плагина в Chromium</h3>
+
+		<p>Штатно Flash-плагин для Chromium устанавливается так:</p>
+
+		<pre class="console"># apt-get install pepperflashplugin-nonfree
+# update-pepperflashplugin-nonfree --install</pre>
+
+		<h3>1.2. Штатная установка Flash-плагина в Iceweasel/Chromium</h3>
+
+		<p>Для Iceweasel/Firefos штатно Flash-плагин устанавливается так:</p>
+
+		<pre class="console"># apt-get install flashplugin-nonfree
+# update-flashplugin-nonfree --install</pre>
+
+		<h2>2. Проблемы при установке Flash-плагинов</h2>
+
+		<h3>2.1. Проблемы при установке Flash-плагина в Chromium</h3>
+
+		<p>Я бы и не стал писать эту небольшую заметку, если бы штатные средства продолжали бы работать и сейчас. Но, к сожалению, сейчас они работать перестали. Например, при попытке обновить Flash-плеер PPAPI для Chromium выдаются такие ошибки:</p>
+
+		<pre class="console"># update-pepperflashplugin-nonfree --install
+--2017-03-28 22:28:55--  http://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_57.0.2987.110-1_amd64.deb
+Распознаётся dl.google.com (dl.google.com)… 209.85.233.190, 209.85.233.91, 209.85.233.136, ...
+Подключение к dl.google.com (dl.google.com)|209.85.233.190|:80... соединение установлено.
+HTTP-запрос отправлен. Ожидание ответа... 200 OK
+Длина: 47312644 (45M) [application/x-debian-package]
+Сохранение в: «/tmp/pepperflashplugin-nonfree.VjH7fdoXcK/google-chrome-stable_57.0.2987.110-1_amd64.deb»
+
+     0K .......... .......... .......... .......... ..........  0%  483K 95s
+------------------8&lt;------------------8&lt;------------------8&lt;------------------
+ 46150K .......... .......... .......... .......... .......... 99% 5,47M 0s
+ 46200K ...                                                   100% 7160G=11s
+
+2017-03-28 22:29:07 (4,01 MB/s) - «/tmp/pepperflashplugin-nonfree.VjH7fdoXcK/google-chrome-stable_57.0.2987.110-1_amd64.deb» сохранён [47312644/47312644]
+
+mv: не удалось выполнить stat для «unpackchrome/opt/google/chrome/PepperFlash/libpepflashplayer.so»: Нет такого файла или каталога</pre>
+
+		<h3>2.2. Проблемы при установке Flash-плагина в Iceweasel/Firefox</h3>
+
+		<p>При попытке обновить Flash-плагин для Iceweasel/Firefox происходит другая ошибка:</p>
+
+		<pre class="console"># update-flashplugin-nonfree --install
+--2017-03-28 22:48:07--  https://fpdownload.adobe.com/get/flashplayer/pdc/24.0.0.186/flash_player_npapi_linux.x86_64.tar.gz
+Распознаётся fpdownload.adobe.com (fpdownload.adobe.com)… 2.17.215.70
+Подключение к fpdownload.adobe.com (fpdownload.adobe.com)|2.17.215.70|:443... соединение установлено.
+HTTP-запрос отправлен. Ожидание ответа... 404 Not Found
+2017-03-28 22:48:07 ОШИБКА 404: Not Found.
+
+ERROR: wget failed to download https://fpdownload.adobe.com/get/flashplayer/pdc/24.0.0.186/flash_player_npapi_linux.x86_64.tar.gz
+More information might be available at:
+  http://wiki.debian.org/FlashPlayer</pre>
+
+		<h2>3. Решение проблем с установкой Flash-плагинов</h2>
+
+		<h3>3.1. Решение проблемы с установкой Flash-плагина в Chromium</h3>
+
+		<p>Чинить будем в том же порядке. Во-первых, чтобы починить Flash-плагин для Chromium, из браузера Chromium заходим на официальную страницу <a href="http://www.adobe.com/ru/">Adobe</a>, переходим по ссылке внизу <a href="http://www.adobe.com/ru/products/catalog.html">Продукты</a>, справа в списке "Загрузить" переходим по ссылке <a href="http://get.adobe.com/ru/flashplayer/">Adobe Flash Player</a>, в выпадающем списке выбираем формат ".tar.gz для Linux" и жмём на кнопку "Загрузить".</p>
+
+		<p>Извлечём из скачанного архива с именем "flash_player_ppapi_linux.x86_64.tar.gz" интересующий нас файл динамической библиотеки и поместим его в нужное место:</p> 
+
+		<pre class="console"># tar xzvf flash_player_ppapi_linux.x86_64.tar.gz libpepflashplayer.so
+# mv libpepflashplayer.so /usr/lib/pepperflashplugin-nonfree/
+# chown root:root /usr/lib/pepperflashplugin-nonfree/libpepflashplayer.so
+# chmod u=rw,go=r /usr/lib/pepperflashplugin-nonfree/libpepflashplayer.so</pre>
+
+		<h3>3.2. Решение проблемы с установкой Flash-плагина в Iceweasel/Firefox</h3>
+
+		<p>Теперь точно такие же действия можно проделать из браузера Iceweasel/Firefox. В результате должен скачаться архив с именем "flash_player_npapi_linux.x86_64.tar.gz". Поступаем с ним аналогично - извлекаем интересующий нас файл динамической библиотеки и помещаем его в нужное место. В случае Iceweasel кладём файл в каталог /usr/lib/flashplugin-nonfree/:</p>
+
+		<pre class="console"># tar xzvf flash_player_npapi_linux.x86_64.tar.gz libflashplayer.so
+# mv libflashplayer.so /usr/lib/flashplugin-nonfree/libflashplayer.so
+# chown root:root /usr/lib/flashplugin-nonfree/libflashplayer.so
+# chmod u=rw,go=r /usr/lib/flashplugin-nonfree/libflashplayer.so</pre>
+
+		<p>В случае Firefox кладём файл в каталог /usr/lib/mozillz/plugins/:</p>
+
+		<pre class="console"># tar xzvf flash_player_npapi_linux.x86_64.tar.gz libflashplayer.so
+# mv libflashplayer.so /usr/lib/mozilla/plugins/libflashplayer.so
+# chown root:root /usr/lib/mozilla/plugins/libflashplayer.so
+# chmod u=rw,go=r /usr/lib/mozilla/plugins/libflashplayer.so</pre>
+
+		<h2>4. Использование PPAPI-плагина в Iceweasel/Firefox</h2>
+
+		<p>Когда Adobe объявила о прекращении поддержки NPAPI-плагина для Linux, наш соотечественник Ринат Ибрагимов - программист из Казани, занялся разработкой специального адаптера интерфейсов, который бы позволил использовать PPAPI-плагин в браузерах, предоставляющих NPAPI-интерфейс. Проект называется <a href="https://github.com/i-rinat/freshplayerplugin">FreshPlayer</a> и устанавливается в браузер как NPAPI-плагин.</p>
+
+		<p>Вместо использования git-репозитория и сборки адаптера из исходных текстов мы воспользуемся готовым репозиторием для Debian Jessie. Добавим в файл /etc/apt/sources.list такую строчку:</p>
+
+		<pre class="code">deb http://http.debian.net/debian jessie-backports main contrib</pre>
+
+		<p>Теперь обновим списки пакетов, доступных для установки из репозиториев:</p>
+
+		<pre class="console"># apt-get update</pre>
+
+		<p>И установим пакет с адаптером:</p>
+
+		<pre class="console"># apt-get install browser-plugin-freshplayer-pepperflash</pre>
+
+		<h2>5. Заключение</h2>
+
+		<p>Как правило, Flash-плагин без проблем работает в Chromium. А вот с Iceweasel/Firefox могут возникнуть сложности. Например, в Iceweasel плагин NPAPI у меня не заработал, зато заработал PPAPI-плагин через адаптер FreshPlayer. В Firefox заработали оба варианта - и плагин NPAPI и плагин PPAPI через адаптер FreshPlayer. Если не получается заставить работать первый попавшийся вариант - попробуйте другой: попробуйте сначала плагин NPAPI, затем попробуйте обновить Iceweasel до Firefox, а если это не поможет - вместо плагина NPAPI можно попробовать воспользоваться плагином PPAPI через FreshPlayer.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Flash-плагин для Chromium и Iceweasel/Firefox в Debian">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

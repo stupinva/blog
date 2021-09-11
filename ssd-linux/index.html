@@ -1,0 +1,190 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="buster,tmpfs,ssd,hdparm,linux,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2020-09-06 -->
+		<title>Оптимизация Linux при использовании SSD</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Оптимизация Linux при использовании SSD</h1>
+
+		<p>В прошлых статьях были описаны <a href="../ssd-firmware/">процедура обновления прошивки твердотельного накопителя Micron модели SSD 5200 MAX</a> и <a href="../zabbix-template-smart-ssd/">шаблон Zabbix для контроля основных показателей его состояния</a>. В этой статье пойдёт речь о том, какие дополнительные настройки Linux можно сделать для того, чтобы увеличить производительность системы при работе с твердотельными накопителями и увеличить срок службы самих накопителей.</p>
+
+		<h2>1. Изменение планировщика ввода-вывода</h2>
+
+		<p>По умолчанию Linux использует планировщик ввода-вывода cfq, который стремится упорядочить блоки данных так, чтобы уменьшить количество позиционирований головки с дорожки на дорожку диска. Для SSD это не имеет смысла, но приводит к задержке мелких операций ввода-вывода. Вместо планировщика cfq рекомендуется использовать планировщик deadline, который стремится сократить время ожидания выполнения каждой из операций ввода-вывода.</p>
+
+		<p>Изменить планировщик диска sda можно при помощи следующей команды:</p>
+
+		<pre class="console"># echo "deadline" &gt; /sys/block/sda/queue/scheduler</pre>
+
+		<p>Для того, чтобы выбранный планировщик диска применялся при загрузке системы, можно поставить пакет sysfsutils:</p>
+
+		<p>Оптимизация Linux при использовании SSD</p>
+
+		<pre class="console"># apt-get install sysfsutils</pre>
+
+		<p>И прописать планировщик в файл /etc/sysfs.conf:</p>
+
+		<pre class="code">block/sda/queue/scheduler = deadline</pre>
+
+		<p>Другой способ сделать изменения постоянными - создать файл /etc/udev/rules.d/60-ssd.rules со следующими правилами udev:</p>
+
+		<pre class="code">ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/rotational}=="0", ATTR{queue/scheduler}="deadline"</pre>
+
+		<p>Это правило для всех не вращающихся дисков с именем sd* будет устанавливать планировщик deadline.</p>
+
+		<h2>2. Размер страницы</h2>
+
+		<p>Коэффициент усиления записи можно несколько уменьшить, если операционная система знает о размере страниц. В таком случае операционная система будет объединять изменения в смежных логических секторах, принадлежащих одной и той же странице, в одну операцию записи.</p>
+
+		<p>Например, по данным SMART размер логического сектора диска равен 512 байтам, а размер страницы равен 4096 байт:</p>
+
+		<pre class="console"># smartctl -i /dev/sda | grep Sector
+Sector Sizes:     512 bytes logical, 4096 bytes physical</pre>
+
+		<p>Убедиться в том, что ядро операционной системы Linux знает о размере физического сектора, можно следующим образом:</p>
+
+		<pre class="console"># cat /sys/block/sda/queue/physical_block_size 
+4096</pre>
+
+		<h2>3. Увеличение резерва страниц</h2>
+
+		<p>Т.к. каждая страница SSD имеет ограниченный ресурс перезаписи, контроллер SSD в общем случае не записывает изменившиеся данные в ту же страницу, а использует другую. Чтобы с точки зрения операционной системы записанные данные оставались доступными по тому же адресу, контроллер использует специальный каталог соответствия страниц, который отображает линейное адресное пространство диска в реальные страницы. Чем больше неиспользуемых страниц имеется в распоряжении контроллера, тем больше у него возможностей выбирать наименее изношенные страницы для очередной операции записи, тем больше возможностей для уменьшения количества операций очистки блоков.</p>
+
+		<p>Часть общего объёма страниц диска закладывается в резерв. Напрмер, SSD объёмом 480 Гигабайт может иметь реальный объём 512 Гигабайт, а разница используется как раз для равномерного использования ресурса всех страниц.</p>
+
+		<p>Кроме того, в файловой системе может иметься свободное место, не занятое никакими данными. Это свободное место на SSD можно приобщить к резерву. Для этого операционная система может сообщать диску о неиспользуемых ею страницах при помощи ATA-команды <a href="https://ru.wikipedia.org/wiki/TRIM">TRIM</a>. Для этого SSD должен поддерживать операцию TRIM, а файловая система должна поддерживать опцию монитрования discard.</p>
+
+		<p>Проверить наличие поддержки TRIM в SSD можно при помощи утилиты hdparm:</p>
+
+		<pre class="console"># hdparm -I /dev/sda | grep TRIM
+           * Data Set Management TRIM supported (limit 8 blocks)
+           * Deterministic read ZEROs after TRIM</pre>
+
+		<p>Вторая строчка означает, что секторы, над которыми произведена команда TRIM, при попытке чтения будут возвращать нули. Другим возможным режимом может быть «Deterministic read after TRIM», когда при чтении возвращаются не нули, а какая-то другая всегда одинаковая последовательность данных.</p>
+
+		<p>Если на странице руководства man mount среди опций интересующей файловой системы имеется опция discard, то файловую систему можно перемонтировать с поддержкой этой опции.</p>
+
+		<p>Сначала посмотрим, с какими опциями смонтирована файловая система:</p>
+
+		<pre class="console"># findmnt /
+TARGET SOURCE   FSTYPE OPTIONS
+/      /dev/md0 ext4   rw,relatime,errors=remount-ro,data=ordered</pre>
+
+		<p>Перемонтируем файловую систему, добавив к списку опций remount и discard:</p>
+
+		<pre class="console"># mount -o remount,rw,relatime,errors=remount-ro,data=ordered,discard /</pre>
+
+		<p>Убеждаемся, что новая опция добавилась к текущему списку:</p>
+
+		<pre class="console"># findmnt /
+TARGET SOURCE   FSTYPE OPTIONS
+/      /dev/md0 ext4   rw,relatime,discard,errors=remount-ro,data=ordered</pre>
+
+		<p>Чтобы отключить опцию discard, можно повторить процедуру перемонтирования, указав вместо опции discard опцию nodiscard.</p>
+
+		<p>Чтобы при перезагрузке операционная система монтировала файловую систему с опцией discard, нужно добавить её к списку опций монитрования в файле /etc/fstab. Например, строчка монтирования может выглядеть следующим образом:</p>
+
+		<pre class="code">UUID=324f1a70-5229-4376-afbb-eb274c8e60aa /               ext4    errors=remount-ro,discard 0       1</pre>
+
+		<p>Чтобы сообщить диску о неиспользуемых секторах, которые были освобождены до включения опции discard, или при отключенной опции discard, можно воспользоваться командой fstrim:</p>
+
+		<pre class="console"># fstrim -v /
+/: 146,6 MiB (153755648 bytes) trimmed</pre>
+
+		<p>Кроме увеличения ресурса диска, использование TRIM и discard может приводить к увеличению скорости операций записи и чтения. Т.к. у контроллера есть в распоряжении много очищенных блоков, ему не придётся тратить время на их очистку для записи новых данных. При этом операция очистки блока может выполняться в фоновом режиме, когда SSD не занят выполнением операций чтения или записи.</p>
+
+		<p>Если на пути между файловой системой и диском имеются менеджер томов LVM или RAID-массив, то информация о неиспользуемых секторах может застревать в этих подсистемах и не доходить до SSD. Чтобы LVM сообщал о неиспользуемых секторах на нижележащий уровень, нужно в секции devices из файла конфигурации /etc/lvm/lvm.conf выставить следующую опцию:</p>
+
+		<pre class="code">issue_discards = 1</pre>
+
+		<p>Убедиться в том, что TRIM корректно передаётся нижележащему хранилищу, можно при помощи команды:</p>
+
+		<pre class="console"># lsblk -D</pre>
+
+		<p>Если TRIM поддерживается на всех уровнях, то в столбцах DISC-GRAN и DISC-MAX будут ненулевые значения:</p>
+
+		<pre class="console">NAME    DISC-ALN DISC-GRAN DISC-MAX DISC-ZERO
+sda            0        4K       2G         0
+└─sda1         0        4K       2G         0
+  └─md0        0        4K       2G         0
+sdb            0        4K       2G         0
+└─sdb1         0        4K       2G         0
+  └─md0        0        4K       2G         0</pre>
+
+		<p>Если же TRIM не используется, то можно увидеть такую картину:</p>
+
+		<pre class="console">NAME                     DISC-ALN DISC-GRAN DISC-MAX DISC-ZERO
+sda                             0        0B       0B         0
+├─sda1                          0        0B       0B         0
+│ └─md0                         0        0B       0B         0
+└─sda2                          0        0B       0B         0
+  └─md1                         0        0B       0B         0
+    ├─vg0-mon--disk             0        0B       0B         0
+    └─vg0-mon--swap             0        0B       0B         0
+sdb                             0        0B       0B         0
+├─sdb1                          0        0B       0B         0
+│ └─md0                         0        0B       0B         0
+└─sdb2                          0        0B       0B         0
+  └─md1                         0        0B       0B         0
+    ├─vg0-mon--disk             0        0B       0B         0
+    └─vg0-mon--swap             0        0B       0B         0</pre>
+
+		<p>Возможны промежуточные варианты, когда файловая система отправляет операции TRIM на нижележащий уровень, но дальше эти операции не проходят.</p>
+
+		<h2>4. Файловые системы в оперативной памяти</h2>
+
+		<p>Т.к. интенсивный ввод-вывод снижает ресурс SSD, лучше избегать использовать SSD для хранения временных файлов. Например, раздел /tmp можно расположить в оперативной памяти. Временно это можно сделать при помощи такой команды:</p>
+
+		<pre class="console"># mount -t tmpfs tmpfs -o relatime,nodev,nosuid,noexec,mode=1777 /tmp</pre>
+
+		<p>Если нужно ограничить максимальный размер файлов во временной файловой системе, к опциям noatime и nosuid можно добавить опцию size с указанием этого размера:</p>
+
+		<pre class="console"># mount -t tmpfs tmpfs -o relatime,nodev,nosuid,noexec,mode=1777,size=1G /tmp</pre>
+
+		<p>Если временную файловую систему нужно монтировать автоматически при загрузке системы, нужно добавить в файл /etc/fstab соответствующую строчку:</p>
+
+		<pre class="code">tmpfs /tmp tmpfs relatime,nodev,nosuid,noexec,mode=1777,size=1G 0 0</pre>
+
+		<p>Если файловая система уже не смонтирована, то теперь смонтировать её можно простой командоу:</p>
+
+		<pre class="console"># mount /tmp</pre>
+
+		<p>Аналогичным образом можно монтировать другие временные файловые системы. Например:</p>
+
+		<pre class="console">tmpfs /var/tftp tmpfs relatime,nodev,nosuid,noexec,uid=tftp,gid=tftp,mode=0760,size=32M 0 0</pre>
+
+		<h2>5. Использованные материалы</h2>
+
+		<ul>
+			<li><a href="https://ru.wikipedia.org/wiki/TRIM">TRIM</a></li>
+
+			<li><a href="https://habr.com/ru/post/203578/">Как обуздать усиление записи в SSD?</a></li>
+
+			<li><a href="https://habr.com/ru/post/205100/">Усиление записи. Часть 2</a></li>
+
+			<li><a href="http://vasilisc.com/trim-ssd">Включение TRIM на SSD</a></li>
+
+			<li><a href="https://blog.elcomsoft.com/ru/2018/12/zhizn-posle-trim-kak-vosstanovit-udalyonnyie-dannyie-s-nakopiteley-ssd/">Жизнь после Trim: как восстановить удалённые данные с накопителей SSD</a></li>
+
+			<li><a href="http://blog.neutrino.es/2013/howto-properly-activate-trim-for-your-ssd-on-linux-fstrim-lvm-and-dmcrypt/">How to properly activate TRIM for your SSD on Linux: fstrim, lvm and dm-crypt</a></li>
+
+			<li><a href="https://klondike-studio.ru/blog/raid-ssd-trim/">RAID+SSD TRIM мифы и реальность</a></li>
+
+			<li><a href="https://flashdba.com/2014/06/20/understanding-flash-blocks-pages-and-program-erases/">Understanding Flash: Blocks, Pages and Program / Erases</a></li>
+
+			<li><a href="https://flashdba.com/2014/09/17/understanding-flash-the-flash-translation-layer/">Understanding Flash: The Flash Translation Layer</a></li>
+
+			<li><a href="https://wiki.debian.org/SSDOptimization">SSDOptimization</a></li>
+		</ul>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Оптимизация Linux при использовании SSD">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,735 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="styles.css" type="text/css" />
+		<meta name="author" content="Владимир Ступин" />
+		<title>Ещё один блог сисадмина</title>
+	</head>
+	<body>
+		<h1>Ещё один блог сисадмина</h1>
+
+		<ul>
+			<li>2020-11-29 - <a href="zabbix-clickhouse-part6/">Временный запрет на чтение данных из таблиц истории при запуске Zabbix 3.4</a></li>
+
+			<li>2020-11-22 - <a href="zabbix-clickhouse-part5/">Предзагрузка кэша значений при запуске сервера Zabbix 3.4</a></li>
+
+			<li>2020-11-15 - <a href="zabbix-clickhouse-part4/">Поддержка хранилища ClickHouse в сервере Zabbix 3.4</a></li>
+
+			<li>2020-11-08 - <a href="zabbix-clickhouse-part3/">Поддержка нескольких типов хранилищ в сервере Zabbix 3.4</a></li>
+
+			<li>2020-11-01 - <a href="zabbix-clickhouse-part2/">Доработка веб-интерфейса Zabbix 3.4 для работы с ClickHouse</a></li>
+
+			<li>2020-10-25 - <a href="zabbix-clickhouse-part1/">Подготовка ClickHouse для хранения истории и тенденций Zabbix</a></li>
+
+			<li>2020-10-18 - <a href="clickhouse/">Установка и настройка сервера ClickHouse</a></li>
+
+			<li>2020-10-11 - <a href="clickhouse-without-sse42/">Пересборка ClickHouse для процессоров без поддержки SSE 4.2</a></li>
+
+			<li>2020-10-04 - <a href="zabbix-snmpv3-auth-trouble/">Ошибки аутентификации SNMPv3 в Zabbix 3.4</a></li>
+
+			<li>2020-09-27 - <a href="zabbix-snmp-timeout-retries/">Настройки таймаута и количества попыток для запросов SNMP в Zabbix 3.4</a></li>
+
+			<li>2020-09-20 - <a href="zabbix-maintenance-trouble/">Исправление доступа к периодам обслуживания в Zabbix 3.4</a></li>
+
+			<li>2020-09-13 - <a href="zabbix-dashboard-location/">Местонахождение устройства в панели проблем Zabbix 3.4</a></li>
+
+			<li>2020-09-06 - <a href="ssd-linux/">Оптимизация Linux при использовании SSD</a></li>
+
+			<li>2020-08-30 - <a href="zabbix-template-smart-ssd/">Контроль параметров S.M.A.R.T. накопителей SSD через Zabbix</a></li>
+
+			<li>2020-08-23 - <a href="ssd-firmware/">Обновление прошивок на SSD Micron 5200 MAX</a></li>
+
+			<li>2020-08-16 - <a href="zabbix-tokudb/">История и тенденции Zabbix в TokuDB</a></li>
+
+			<li>2020-08-09 - <a href="mysql-tuning/">Настройка сервера MySQL</a></li>
+
+			<li>2020-08-02 - <a href="snmptrapd-systemd-trouble/">Правка service-файла snmptrapd</a></li>
+
+			<li>2020-07-26 - <a href="net-snmp-noise-trouble/">Отключение сообщений об ошибках на стандартный ввод-вывод в net-snmp</a></li>
+
+			<li>2020-07-19 - <a href="ad-cert/">Сертификат удостоверяющего центра Active Directory для веб-серверов</a></li>
+
+			<li>2019-12-29 - <a href="sylpheed-ssl-trouble/">Решение проблемы с SSL/TLS в Sylpheed</a></li>
+
+			<li>2019-12-22 - <a href="quilt/">Использование quilt для подготовки заплат</a></li>
+
+			<li>2019-12-15 - <a href="opensmtpd-relay/">OpenSMTPd как локальный SMTP-ретранслятор</a></li>
+
+			<li>2019-12-08 - <a href="ssh-backup/">Резервное копирование файлов и баз данных через SSH</a></li>
+
+			<li>2019-12-01 - <a href="iptables-ipset-ipfw-tables-auto/">Скрипты управления списком IP-адресов в iptables/ipset и ipfw/table</a></li>
+
+			<li>2019-11-24 - <a href="aptly-add-arch/">Добавление в репозиторий aptly пакетов новой архитектуры</a></li>
+
+			<li>2019-11-17 - <a href="urllib2-ssl-validation/">Проверка действительности SSL-сертификата в urllib2</a></li>
+
+			<li>2019-11-10 - <a href="zabbix-template-dhcp/">Контроль работоспособности DHCP-сервера в Zabbix</a></li>
+
+			<li>2019-10-13 - <a href="zabbix-template-smart-lsi/">Контроль в Zabbix параметров SMART дисков, подключенных к аппаратному RAID-массиву</a></li>
+
+			<li>2019-10-06 - <a href="minecraft/">Установка Minecraft в Debian Buster</a></li>
+
+			<li>2019-09-29 - <a href="nvidia/">Установка и настройка драйверов nvidia для X-сервера</a></li>
+
+			<li>2019-09-22 - <a href="quagga-bgp/">Настройка BGP в Quagga</a></li>
+
+			<li>2019-09-15 - <a href="ansible/">Управление конфигурациями с помощью Asnible</a></li>
+
+			<li>2019-09-08 - <a href="serial-console-virsh/">Настройка текстового терминала для использования в virsh</a></li>
+
+			<li>2019-09-01 - <a href="virt-manager/">Virt-manager для управления виртуальными машинами под управлением KVM и Xen</a></li>
+
+			<li>2019-08-25 - <a href="ipv6/">IPv6 от Дом.ру (ЭР-Телеком) в Debian Stretch</a></li>
+
+			<li>2019-08-18 - <a href="deb-wordpress-auto/">Сборка плагинов и тем Wordpress в deb-пакеты</a></li>
+
+			<li>2019-08-11 - <a href="aptly/">Создание своего репозитория Debian при помощи aptly</a></li>
+
+			<li>2019-08-04 - <a href="gitea/">Установка и настройка Gitea</a></li>
+
+			<li>2019-07-28 - <a href="gogs/">Установка и настройка Gogs</a></li>
+
+			<li>2019-07-21 - <a href="gitblit/">Установка Gitblit</a></li>
+
+			<li>2019-07-14 - <a href="cgit/">Установка и настройка cgit</a></li>
+
+			<li>2019-07-07 - <a href="gitweb/">Установка и настройка Gitweb</a></li>
+
+			<li>2019-06-30 - <a href="exim-dovecot-quota-status/">Exim и Dovecot quota-status</a></li>
+
+			<li>2019-06-23 - <a href="zabbix-template-pgbouncer/">Контроль использования пулов подключений в PgBouncer при помощи Zabbix</a></li>
+
+			<li>2019-06-16 - <a href="zabbix-template-uwsgi/">Контроль количества процессов приложений uWSGI через Zabbix</a></li>
+
+			<li>2019-06-09 - <a href="zabbix-manual-close-troubles/">Исправление ручного закрытия проблем в Zabbix 3.4</a></li>
+
+			<li>2019-06-02 - <a href="zabbix-libiksemel-trouble/">Пересборка libiksemel для решения проблемы JABBER tls handshake failed в Zabbix</a></li>
+
+			<li>2019-05-26 - <a href="jappix/">Установка, настройка и использование Jappix - веб-клиента Jabber</a></li>
+
+			<li>2019-05-19 - <a href="prosody-dovecot-sasl/">Настройка Jabber-сервера Prosody с аутентификацией пользователей через Dovecot SASL</a></li>
+
+			<li>2019-05-12 - <a href="parled12/">Программы для управления светодиодным индикатором на параллельном порту</a></li>
+
+			<li>2019-05-05 - <a href="parled/">Светодиодный индикатор для подключения к параллельному порту</a></li>
+
+			<li>2019-04-28 - <a href="parport-part3/">Тим Во. Подсистема параллельного порта Linux 2.4 - часть 3, parport - справочник программного интерфейса драйвера параллельного порта Linux, 2000</a></li>
+
+			<li>2019-04-21 - <a href="parport-part2/">Тим Во. Подсистема параллельного порта Linux 2.4 - часть 2, ppdev - драйверы устройств, работающие в пространстве пользователя, 2000</a></li>
+
+			<li>2019-04-14 - <a href="parport-part1/">Тим Во. Подсистема параллельного порта Linux 2.4 - часть 1, обзор, 2000</a></li>
+
+			<li>2019-04-07 - <a href="parport/">Маури Марковиц и др. Параллельный порт, 2019</a></li>
+
+			<li>2019-03-31 - <a href="usr/">Программа для обнаружения и настройки преобразователей интерфейсов USR-TCP232-24</a></li>
+
+			<li>2019-03-24 - <a href="xfce-trouble/">Проблема с XFCE</a></li>
+
+			<li>2019-03-17 - <a href="letsencrypt/">Получение SSL-сертификата от удостоверяющего центра Let's Encrypt в Debian Stretch</a></li>
+
+			<li>2018-09-23 - <a href="lsi-rebuild/">Сборка RAID-массива на контроллере LSI MegaSAS в Linux</a></li>
+
+			<li>2018-09-16 - <a href="multiarch/">Multiarch в Debian Stretch</a></li>
+
+			<li>2018-09-09 - <a href="flash-2/">Flash-плеер в Debian Stretch</a></li>
+
+			<li>2018-09-02 - <a href="bind-openresolv/">Настройка кэширующего DNS-сервера BIND в связке с openresolv</a></li>
+
+			<li>2018-08-26 - <a href="pppoe-configuring/">Настройка PPPoE-подключения к ЭР-Телеком/Дом.ru (Уфанет, Башинформсвязь)</a></li>
+
+			<li>2018-06-10 - <a href="vdi-ntfs-resize/">Изменение размера NTFS-раздела в образе диска в формате VDI</a></li>
+
+			<li>2018-04-22 - <a href="virtualbox/">VirtualBox в Debian Stretch</a></li>
+
+			<li>2018-04-15 - <a href="cclive-mpv-rename/">Локальный просмотр роликов с Youtube: утилиты cclive, mpv, rename</a></li>
+
+			<li>2018-03-18 - <a href="ping-capabilities/">Джим Макдоннелл. Linux Capabilities и ping, 2016</a></li>
+
+			<li>2018-03-11 - <a href="uwsgi-capabilities/">Пересборка uwsgi с поддержкой Linux Capabilities</a></li>
+
+			<li>2017-10-22 - <a href="zabbix-template-freebsd-temperature/">Контроль температуры с датчиков sysctl во FreeBSD через Zabbix</a></li>
+
+			<li>2017-10-15 - <a href="preseed-full/">Эндрю Гамильтон. Совместное использование expert_recipe, mdraid, LVM, GPT и GRUB2 в Ubuntu Lucid и Debian Squeeze, 2012</a></li>
+
+			<li>2017-10-08 - <a href="preseed/">Эндрю Гамильтон. Заметки по использованию expert_recipe в файлах автоматизации установки Debian/Ubuntu, 2012</a></li>
+
+			<li>2017-10-01 - <a href="preseed-lvm/">Джеймс Тран. Автоматизация установки Ubuntu/Debian с LVM, 2012</a></li>
+
+			<li>2017-09-24 - <a href="openvswitch-trouble/">Решение проблемы с Open vSwitch после обновления Debian до Stretch</a></li>
+
+			<li>2017-09-17 - <a href="ssl-ejabberd/">Реми ван Элст. SSL-сертификат для ejabberd, 2013</a></li>
+
+			<li>2017-09-10 - <a href="ejabberd/">Реми ван Элст. Настройка ejabberd для обмена мгновенными сообщениями по протоколу XMPP - своя альтернатива Google Talk Hangouts, 2013</a></li>
+
+			<li>2017-09-03 - <a href="ca/">Реми ван Элст. Командная строка OpenSSL: Корневой и промежуточный удостоверяющий центры, включая OCSP, CRL и отзыв сертификатов, 2015</a></li>
+
+			<li>2017-08-27 - <a href="gpg/">Эндрю Бикхоф. Краткое руководство по GPG, 2013</a></li>
+
+			<li>2017-08-20 - <a href="dockerfile/">Соня Гамильтон. Заметки о Dockerfile, 2015</a></li>
+
+			<li>2017-08-13 - <a href="microservices-cargo-cult/">Ставрос Корокитакис. Карго-культ микросервисов, 2015</a></li>
+
+			<li>2017-08-06 - <a href="bottle/">Тьяго Авелино. Bottle - полный веб-стек без Django, 2014</a></li>
+
+			<li>2017-07-30 - <a href="django-orm/">Джэми Мэтьюз. Построение высокоуровневого API запросов: правильный способ использования ORM Django, 2012</a></li>
+
+			<li>2017-07-23 - <a href="django-choices/">Джеймс Беннет. Правильная обработка choices в полях моделей Django, 2007</a></li>
+
+			<li>2017-07-16 - <a href="django-ldap/">Бэкенд для LDAP-аутентификации в Django</a></li>
+
+			<li>2017-07-09 - <a href="django-auth-errors/">Натан Йерглер. Обработка аутентификации в Django, 2013</a></li>
+
+			<li>2017-07-02 - <a href="django/">Краткий учебник по Django</a></li>
+
+			<li>2017-06-25 - <a href="perl-unix/">Аарон Крейн. Unix для Perl-программистов: каналы и процессы, 2009</a></li>
+
+			<li>2017-06-18 - <a href="flash-1/">Flash-плагин для Chromium и Iceweasel/Firefox в Debian</a></li>
+
+			<li>2017-06-11 - <a href="zswap/">Настройка zswap в Debian</a></li>
+
+			<li>2017-06-04 - <a href="zabbix-template-diskstats-linux/">Статистика ввода-вывода diskstats в Linux через Zabbix</a></li>
+
+			<li>2017-05-28 - <a href="zabbix-template-iostat-freebsd/">Статистика ввода-вывода iostat во FreeBSD через Zabbix</a></li>
+
+			<li>2017-05-21 - <a href="zabbix-template-smart/">Контроль параметров S.M.A.R.T. жёстких дисков через Zabbix</a></li>
+
+			<li>2017-05-14 - <a href="zabbix-template-lsi-freebsd/">Контроль аппаратного RAID-контроллера LSI MegaRAID SAS во FreeBSD через Zabbix</a></li>
+
+			<li>2017-05-07 - <a href="zabbix-template-gmirror/">Контроль программного RAID-массива FreeBSD через Zabbix</a></li>
+
+			<li>2017-04-30 - <a href="zabbix-template-mdadm/">Контроль программного RAID-массива Linux через Zabbix</a></li>
+
+			<li>2017-04-23 - <a href="zabbix-template-postfix/">Контроль длины очереди отложенных писем Postfix через Zabbix</a></li>
+
+			<li>2017-04-16 - <a href="debian-flash-ssh/">Установка Debian с флешки по SSH</a></li>
+
+			<li>2017-04-09 - <a href="tcp-ack-trouble/">Решение проблемы с паразитным трафиком TCP ACK</a></li>
+
+			<li>2017-04-02 - <a href="lsi-raid-trouble/">Решение проблемы с остановкой загрузки из-за RAID-контроллера Intel RS2WC040</a></li>
+
+			<li>2017-03-26 - <a href="openntpd-dns-timeout/">Таймаут DNS в OpenNTPd</a></li>
+
+			<li>2017-03-19 - <a href="postfix-subject/">Смена темы письма в Postfix</a></li>
+
+			<li>2017-03-12 - <a href="urllib2/">Использование urllib2 в Python</a></li>
+
+			<li>2017-03-05 - <a href="hkpk/">Реми ван Элст. HKPK - расширение для фиксации публичного ключа HTTP в Apache, nginx и Lighttpd, 2014</a></li>
+
+			<li>2017-02-26 - <a href="hsts/">Реми ван Элст. HSTS - строгая безопасность транспорта HTTP в Apache, nginx и Lighttpd, 2016</a></li>
+
+			<li>2017-02-19 - <a href="ocsp-apache/">Реми ван Элст. Вшивание OCSP в Apache, 2014</a></li>
+
+			<li>2017-02-12 - <a href="ocsp-nginx/">Реми ван Элст. Вшивание OCSP в nginx, 2014</a></li>
+
+			<li>2017-02-05 - <a href="ssl-apache/">Реми ван Элст. Высокая безопасность SSL в Apache, 2015</a></li>
+
+			<li>2017-01-29 - <a href="ssl-lighttpd/">Реми ван Элст. Высокая безопасность SSL в Lighttpd, 2015</a></li>
+
+			<li>2017-01-22 - <a href="ssl-nginx/">Реми ван Элст. Высокая безопасность SSL в nginx, 2015</a></li>
+
+			<li>2017-01-15 - <a href="ca-configs/">Джэми Нгуен. Файлы конфигурации корневого и промежуточного удостоверяющих центров, 2015</a></li>
+
+			<li>2017-01-08 - <a href="ocsp/">Джэми Нгуен. Протокол интерактивного статуса сертификата - OCSP, 2015</a></li>
+
+			<li>2017-01-01 - <a href="crl/">Джэми Нгуен. Списки отозванных сертификатов - CRL, 2015</a></li>
+
+			<li>2016-12-25 - <a href="ca-signing-certs/">Джэми Нгуен. Подписание сертификатов сервера и клиента, 2015</a></li>
+
+			<li>2016-12-18 - <a href="ca-intermediate-pair/">Джэми Нгуен. Создание промежуточной пары, 2015</a></li>
+
+			<li>2016-12-11 - <a href="ca-root-pair/">Джэми Нгуен. Создание корневой пары, 2015</a></li>
+
+			<li>2016-12-04 - <a href="openssl-ca/">Джэми Нгуен. Удостоверяющий центр OpenSSL, 2015</a></li>
+
+			<li>2016-11-27 - <a href="openssl-x509-chains-part1/">Дитер Клюнтер. Как создавать и администрировать цепочки сертификатов X.509, часть I, 2013</a></li>
+
+			<li>2016-11-20 - <a href="openssl-crypting-decrypting/">Реми ван Элст. Шифрование и расшифровывание файлов публичными ключами с помощью OpenSSL из командной строки, 2015</a></li>
+
+			<li>2016-11-13 - <a href="openssl-signing-validation/">Реми ван Элст. Подписание и проверка текстов/файлов публичными ключами с помощью OpenSSL из командной строки, 2015</a></li>
+
+			<li>2016-11-06 - <a href="ocsp-manual-validation/">Реми ван Элст. OpenSSL: Ручная проверка сертификата по OCSP, 2014</a></li>
+
+			<li>2016-10-30 - <a href="crl-manual-validation/">Реми ван Элст. OpenSSL: Ручная проверка сертификата по CRL, 2015</a></li>
+
+			<li>2016-10-23 - <a href="openssl-convert/">Команды OpenSSL для преобразования сертификатов на своём компьютере (перевод)</a></li>
+
+			<li>2016-10-16 - <a href="openssl-commands/">Наиболее часто используемые команды OpenSSL (перевод)</a></li>
+
+			<li>2016-10-09 - <a href="tv-motion-detector-vg/">Хакинг TV Motion Detector VG</a></li>
+
+			<li>2016-10-02 - <a href="ipfw/">Настройка ipfw во FreeBSD</a></li>
+
+			<li>2016-09-25 - <a href="net-snmp-snmpv3-trouble/">Стандарт SNMPv3 и суровая действительность USM_TIME_WINDOW</a></li>
+
+			<li>2016-09-18 - <a href="zabbix-snmpv3-trouble/">Zabbix и проблемы с опросом по SNMPv3 при дублировании EngineID</a></li>
+
+			<li>2016-09-11 - <a href="snmpv3-engineid/">Михаэль Шварцкопф. Системы мониторинга, SNMPv3 и engineID, 2013</a></li>
+
+			<li>2016-09-04 - <a href="snmpv3/">msinadinovic. Концепции SNMP версии 3, 2016</a></li>
+
+			<li>2016-06-19 - <a href="openvswitch/">Установка и настройка Open vSwitch в Debian</a></li>
+
+			<li>2016-06-12 - <a href="xen-altlinux/">Запуск AltLinux как domU в Xen</a></li>
+
+			<li>2016-06-05 - <a href="raid1-lvm/">Перенос системы с mdadm RAID1 на mdadm RAID1+LVM</a></li>
+
+			<li>2016-05-29 - <a href="xen-windows-xp/">Установка Windows XP в Xen</a></li>
+
+			<li>2016-05-22 - <a href="zabbix-template-asterisk/">Мониторинг Asterisk по протоколу SNMP</a></li>
+
+			<li>2016-05-15 - <a href="sflphone/">Краткий обзор программного телефона SFLphone</a></li>
+
+			<li>2016-05-08 - <a href="asterisk-ekiga-video/">Настройка видео в Asterisk и Ekiga</a></li>
+
+			<li>2016-05-01 - <a href="ekiga/">Краткий обзор программного телефона и клиента обмена мгновенными сообщениями Ekiga</a></li>
+
+			<li>2016-04-24 - <a href="asterisk-iax2-part2/">Соединение двух Asterisk через раздельные учётные записи IAX2 для входящих и исходящих звонков</a></li>
+
+			<li>2016-04-17 - <a href="asterisk-sip-part4/">Соединение двух Asterisk через раздельные учётные записи SIP для входящих и исходящих звонков</a></li>
+
+			<li>2016-04-10 - <a href="asterisk-iax2-part1/">Соединение двух Asterisk через IAX2</a></li>
+
+			<li>2016-04-03 - <a href="asterisk-sip-part3/">Соединение двух Asterisk через SIP</a></li>
+
+			<li>2016-03-27 - <a href="asterisk-sip-part2/">Шаблоны и настройка звонков между SIP-клиентами в Asterisk</a></li>
+
+			<li>2016-03-20 - <a href="asterisk-sip-part1/">Настройка SIP-клиента и тестовых номеров в Asterisk</a></li>
+
+			<li>2016-03-13 - <a href="cisco-ata186/">Автоматическая настройка голосового шлюза Cisco ATA 186</a></li>
+
+			<li>2016-03-06 - <a href="postfix-relay-freebsd/">Postfix как локальный SMTP-ретранслятор во FreeBSD</a></li>
+
+			<li>2016-02-14 - <a href="python-netsnmp-freebsd/">Исправление Python-прослойки библиотеки Net-SNMP во FreeBSD</a></li>
+
+			<li>2016-02-07 - <a href="python-netsnmp/">Исправление Python-прослойки библиотеки Net-SNMP</a></li>
+
+			<li>2016-01-31 - <a href="tftpd-hpa-freebsd/">Настройка TFTP-сервера tftpd-hpa во FreeBSD</a></li>
+
+			<li>2015-11-22 - <a href="kaminsky/">Кори Райт. Разбор уязвимости DNS Каминского, 2008</a></li>
+
+			<li>2015-11-08 - <a href="manpages-2/">Переводы страниц руководства на manpages.stupin.su</a></li>
+
+			<li>2015-11-01 - <a href="ipsec-debian-mikrotik/">IPSec между Debian и MikroTik</a></li>
+
+			<li>2015-09-27 - <a href="nut/">NUT и APC Smart-UPS 1500VA</a></li>
+
+			<li>2015-09-20 - <a href="apcupsd/">apcupsd и APC Smart-UPS 1500VA</a></li>
+
+			<li>2015-08-30 - <a href="php-fpm-chroot/">php5-fpm и chroot</a></li>
+
+			<li>2015-08-23 - <a href="debian-cleaning/">Чистка системы от устаревших и ненужных пакетов</a></li>
+
+			<li>2015-08-16 - <a href="systemd-uwsgi-emperor/">systemd и uwsgi в режиме Emperor</a></li>
+
+			<li>2015-08-09 - <a href="wordpress-migration/">Перенос сайта Wordpress на другой домен</a></li>
+
+			<li>2015-08-02 - <a href="pgbouncer/">Проксирование запросов к PostgreSQL через PgBouncer</a></li>
+
+			<li>2015-07-26 - <a href="redmine-mysql-postgresql/">Миграция Redmine с MySQL на PostgreSQL</a></li>
+
+			<li>2015-07-19 - <a href="redmine-upgrade-trouble/">Чиним Redmine после обновления Debian до Jessie</a></li>
+
+			<li>2015-07-12 - <a href="zabbix-mysql-postgresql/">Миграция Zabbix с MySQL на PostgreSQL</a></li>
+
+			<li>2014-11-02 - <a href="nut-eaton/">NUT и Eaton Powerware 5110</a></li>
+
+			<li>2014-10-05 - <a href="redmine-mail/">Настройка почты в Redmine, обновление структуры базы данных</a></li>
+
+			<li>2014-09-28 - <a href="redmine/">Установка Redmine в Debian Wheezy</a></li>
+
+			<li>2014-09-07 - <a href="mapnik-bottle/">Тайловый сервер на основе Python, Mapnik и Bottle</a></li>
+
+			<li>2014-08-24 - <a href="nginx-php-fpm-uwsgi/">Настройка nginx, php5-fpm и uwsgi</a></li>
+
+			<li>2014-06-15 - <a href="wifi/">Настройка WiFi</a></li>
+
+			<li>2014-06-08 - <a href="postfix-relay/">Postfix как локальный SMTP-ретранслятор</a></li>
+
+			<li>2014-06-01 - <a href="xen/">Памятка по настройке Xen</a></li>
+
+			<li>2014-05-25 - <a href="exim-dovecot/">Exim и Dovecot без SQL</a></li>
+
+			<li>2014-05-11 - <a href="tftpd-hpa/">Настройка TFTP-сервера tftpd-hpa</a></li>
+
+			<li>2014-05-04 - <a href="lsi-freebsd/">Сборка RAID-массива на контроллере LSI MegaSAS во FreeBSD</a></li>
+
+			<li>2014-04-20 - <a href="exim/">Настройка Exim</a></li>
+
+			<li>2014-03-30 - <a href="minidlna-wdtvplay/">Настройка MiniDLNA для цифрового мультимедийного плеера WD TV Play</a></li>
+
+			<li>2014-03-23 - <a href="ttrss/">Установка и настройка TinyTinyRSS</a></li>
+
+			<li>2014-03-16 - <a href="dokuwiki/">Установка и настройка dokuwiki</a></li>
+
+			<li>2014-03-09 - <a href="maxsite/">Установка MaxSite CMS</a></li>
+
+			<li>2014-03-02 - <a href="wordpress/">Установка и настройка Wordpress</a></li>
+
+			<li>2014-02-23 - <a href="roundcube/">Установка и настройка Roundcube</a></li>
+
+			<li>2014-02-16 - <a href="thunderbird-icedove-addons/">Дополнения Thunderbird/Icedove</a></li>
+
+			<li>2014-02-09 - <a href="ssl-postfix-dovecot-lighttpd/">Настройка SSL/TLS в Postfix, Dovecot, Lighttpd</a></li>
+
+			<li>2014-02-02 - <a href="postfix/">Установка и настройка Postfix, OpenDKIM, ClamAV-Milter, Milter-Greylist</a></li>
+
+			<li>2014-01-26 - <a href="dovecot/">Установка и настройка Dovecot</a></li>
+
+			<li>2014-01-19 - <a href="postfixadmin-2/">Установка и настройка Postfixadmin</a></li>
+
+			<li>2013-12-15 - <a href="zabbix220/">Установка и настройка Zabbix 2.2.0 в Debian Wheezy</a></li>
+
+			<li>2013-12-08 - <a href="vnc-rdp-lightdm/">Настройка сервера VNC и RDP совместно с LightDM</a></li>
+
+			<li>2013-11-24 - <a href="perl-design-patterns-part3/">Фил Кроу. Шаблоны проектирования в Perl, часть 3, 2003</a></li>
+
+			<li>2013-11-17 - <a href="perl-design-patterns-part2/">Фил Кроу. Шаблоны проектирования в Perl, часть 2, 2003</a></li>
+
+			<li>2013-11-10 - <a href="perl-design-patterns-part1/">Фил Кроу. Шаблоны проектирования в Perl, часть 1, 2003</a></li>
+
+			<li>2013-11-03 - <a href="sqsh/">Подключение к MS SQL Server из Debian Wheezy</a></li>
+
+			<li>2013-10-27 - <a href="ingeo/">Настройка клиента ИнГео в Debian Wheezy</a></li>
+
+			<li>2013-10-13 - <a href="raid1-migration/">Перевод работающей системы Debian на RAID 1</a></li>
+
+			<li>2013-10-06 - <a href="deb-python/">Создание deb-пакетов для модулей Python</a></li>
+
+			<li>2013-09-29 - <a href="xfce-dict/">Англо-русский словарь в XFCE</a></li>
+
+			<li>2013-09-22 - <a href="postfix-simpliest-relay/">Простейший почтовый релей на основе Postfix</a></li>
+
+			<li>2013-09-15 - <a href="mdadm-trouble/">Решение проблемы с зеркалом mdadm после обновления ядра</a></li>
+
+			<li>2013-09-08 - <a href="e303-beeline/">Настройка 3G-модема Huawei HiLink E303 Билайн для Debian Wheezy</a></li>
+
+			<li>2013-09-01 - <a href="rs2wc040-freebsd82/">Intel RS2WC040 во FreeBSD 8.2</a></li>
+
+			<li>2013-08-25 - <a href="deb-zabbix/">Сборка deb-пакета с Zabbix 2 для Debian Wheezy</a></li>
+
+			<li>2013-08-18 - <a href="perl/">Хеннинг Кох. Написание серьёзных приложений на Perl. Безусловный минимум, который вам необходимо знать, 2004</a></li>
+
+			<li>2013-08-11 - <a href="flask-uploading/">Армин Роначер. Загрузка файлов во Flask, 2012</a></li>
+
+			<li>2013-08-04 - <a href="smbnetfs/">Настройка smbnetfs</a></li>
+
+			<li>2013-07-28 - <a href="flask-view-decorators/">Армин Роначер. Декораторы представлений во Flask, 2012</a></li>
+
+			<li>2013-07-28 - <a href="flask-caching/">Армин Роначер. Кэширование во Flask, 2012</a></li>
+
+			<li>2013-07-21 - <a href="flask-logging/">Армин Роначер. Журналирование ошибок приложения на Flask, 2012</a></li>
+
+			<li>2013-07-14 - <a href="thunar-sftp/">Thunar: доступ по SFTP и миниатюры</a></li>
+
+			<li>2013-07-07 - <a href="flask-messages/">Армин Роначер. Всплывающие сообщения во Flask, 2012</a></li>
+
+			<li>2013-06-30 - <a href="flask-fastcgi/">Армин Роначер. Настройка приложения Flask в режиме FastCGI, 2012</a></li>
+
+			<li>2013-06-23 - <a href="scanner/">Настройка сканера</a></li>
+
+			<li>2013-06-16 - <a href="flask-apache-mod_wsgi/">Армин Роначер. Настройка mod_wsgi (Apache) для Flask, 2012</a></li>
+
+			<li>2013-06-09 - <a href="flask-layout/">Армин Роначер. Большие приложения во Flask, 2012</a></li>
+
+			<li>2013-06-02 - <a href="flask-sqlalchemy/">Армин Роначер. SQLAlchemy во Flask, 2012</a></li>
+
+			<li>2013-05-19 - <a href="cups-hp-lj1018-2/">Настройка принтера HP LaserJet 1018 в Debian Wheezy</a></li>
+
+			<li>2013-05-26 - <a href="flask-blueprints/">Армин Роначер. Модульные приложения Flask с использованием blueprint'ов, 2012</a></li>
+
+			<li>2013-05-12 - <a href="flask-extensions/">Армин Роначер. Расширения Flask, 2012</a></li>
+
+			<li>2013-05-12 - <a href="flask-errorpages/">Армин Роначер. Собственные страницы ошибок во Flask, 2012</a></li>
+
+			<li>2013-05-05 - <a href="flask-jinja2/">Армин Роначер. Шаблоны Jinja2 во Flask, 2012</a></li>
+
+			<li>2013-04-28 - <a href="ufanet-xl2tpd/">VPN-подключение к Уфанет с помощью xl2tpd</a></li>
+
+			<li>2013-04-21 - <a href="flask-reqcontext/">Армин Роначер. Контекст запроса Flask, 2012</a></li>
+
+			<li>2013-04-14 - <a href="flask-appcontext/">Армин Роначер. Контекст приложения Flask, 2012</a></li>
+
+			<li>2013-04-07 - <a href="flask-account/">Программа генерации учётных записей на Flask</a></li>
+
+			<li>2013-03-31 - <a href="flask-config/">Армин Роначер. Обработка конфигурации Flask, 2012</a></li>
+
+			<li>2013-03-24 - <a href="flask-design/">Армин Роначер. Проектные решения во Flask, 2012</a></li>
+
+			<li>2013-03-03 - <a href="systemd-part3/">systemd. Часть 3. Безопасность и ограничение использования ресурсов</a></li>
+
+			<li>2013-02-24 - <a href="systemd-part2/">systemd. Часть 2. service-файлы</a></li>
+
+			<li>2013-02-17 - <a href="systemd-part1/">systemd. Часть 1. Установка и использование</a></li>
+
+			<li>2013-02-10 - <a href="ext4/">Переход на ext4</a></li>
+
+			<li>2013-02-03 - <a href="mysqldb/">Проблема с кодировками в пакете MySQLdb</a></li>
+
+			<li>2013-01-27 - <a href="python-generators-part2/">Генераторы и сопрограммы Python. Часть 2</a></li>
+
+			<li>2013-01-20 - <a href="pup/">Распаковщик и упаковщик игровых ресурсов PUP</a></li>
+
+			<li>2013-01-13 - <a href="nouveau-xrandr/">Nouveau + Xrandr: Монитор и телевизор</a></li>
+
+			<li>2013-01-06 - <a href="python-generators-part1/">Генераторы и сопрограммы Python</a></li>
+
+			<li>2012-12-23 - <a href="postadmin-perl/">Postadmin 2</a></li>
+
+			<li>2012-11-04 - <a href="dancer-plugin-database/">Подключение к базе данных с помощью Dancer::Plugin::Database</a></li>
+
+			<li>2012-10-28 - <a href="freebsd/">Удобная FreeBSD</a></li>
+
+			<li>2012-10-21 - <a href="tilestache/">Настройка тайлового сервера TileStache</a></li>
+
+			<li>2012-10-14 - <a href="tilelite/">Настройка тайлового сервера TileLite</a></li>
+
+			<li>2012-09-30 - <a href="dancer-session-dbi/">Хранение сессий в MySQL в Perl-фреймворке Dancer</a></li>
+
+			<li>2012-09-23 - <a href="nginx/">Настройка nginx</a></li>
+
+			<li>2012-09-16 - <a href="dancer-html-template/">Шаблоны HTML::Template в Perl-фреймворке Dancer</a></li>
+
+			<li>2012-09-09 - <a href="perl-utf8/">Perl и UTF-8</a></li>
+
+			<li>2012-09-02 - <a href="vtun/">Настройка vtun в Debian</a></li>
+
+			<li>2012-08-26 - <a href="mysql-charset-trouble/">Проблема с кодировками в MySQL</a></li>
+
+			<li>2012-08-19 - <a href="mapnik-part5/">Тайловый сервер - что с ним делать?</a></li>
+
+			<li>2012-08-12 - <a href="mapnik-part4/">Установка renderd и mod_tile - системы отрисовки тайлов по запросу</a></li>
+
+			<li>2012-08-05 - <a href="mapnik-part3/">Установка генератора тайлов Mapnik</a></li>
+
+			<li>2012-07-29 - <a href="mapnik-part2/">Настройка базы данных для генератора тайлов Mapnik</a></li>
+
+			<li>2012-07-22 - <a href="mapnik-part1/">Подготовка карт для генератора тайлов Mapnik</a></li>
+
+			<li>2012-07-15 - <a href="twinview/">TwinView: монитор и телевизор</a></li>
+
+			<li>2012-07-07 - <a href="e352-megafon/">Настройка 3G-модема E352 от Мегафон в Debian Wheezy</a></li>
+
+			<li>2012-05-20 - <a href="x/">Настройка X-сервера</a></li>
+
+			<li>2012-05-19 - <a href="lvm-boot/">Настройка загрузки с раздела LVM</a></li>
+
+			<li>2012-05-18 - <a href="midi/">Настройка воспроизведения MIDI в Debian GNU/Linux</a></li>
+
+			<li>2012-05-17 - <a href="rsync/">Настройка rsync-сервера и использование rsync-клиента</a></li>
+
+			<li>2012-05-16 - <a href="mysql/">Краткая справка по MySQL</a></li>
+
+			<li>2012-05-15 - <a href="bash/">Настройки bash</a></li>
+
+			<li>2012-05-14 - <a href="mozilla-sqlite/">Оптимизация баз данных Firefox/Iceweasel и Seamonkey/Iceape</a></li>
+
+			<li>2012-05-13 - <a href="apt-key/">Добавление публичного GPG-ключа репозитория Debian</a></li>
+
+			<li>2012-04-22 - <a href="lineakd/">Настройка мультимедиа-клавиатуры A4Tech KD-600 в XFCE</a></li>
+
+			<li>2012-04-06 - <a href="zabbix/">Установка системы мониторинга Zabbix</a></li>
+
+			<li>2012-03-27 - <a href="lighttpd/">Шпаргалка по настройке веб-сервера Lighttpd</a></li>
+
+			<li>2012-03-24 - <a href="postadmin-php/">Веб-интерфейс Postadmin для управления почтовым сервером</a></li>
+
+			<li>2012-03-19 - <a href="net-ldap/">Запросы и обновления Active Directory</a></li>
+
+			<li>2012-02-24 - <a href="postfix-bcc-alias/">Совмещение таблиц bcc и alias в Postfix</a></li>
+
+			<li>2012-02-15 - <a href="rrdtool/">Мониторинг SNMP-устройств с помощью RRDTool</a></li>
+
+			<li>2012-02-03 - <a href="procurve/">Краткая справка по командам коммутаторов HP ProCurve Switch 26xx</a></li>
+
+			<li>2012-01-31 - <a href="lightdm/">Дисплейный менеджер LightDM</a></li>
+
+			<li>2012-01-27 - <a href="cugrapher/">Настройка fprobe, flow-capture, flowscan, CUFlow и CUGrapher</a></li>
+
+			<li>2011-11-24 - <a href="dovecot-postfix-quotas/">Настройка квот в Dovecot и Postfix с хранением счётчиков и правил в словаре MySQL</a></li>
+
+			<li>2011-11-17 - <a href="dovecot-pop-before-smtp/">Обновление времени последнего входа пользователя dovecot и авторизация POP before SMTP</a></li>
+
+			<li>2011-11-11 - <a href="windows-xp-migration/">Перенос Windows XP на другой диск средствами Linux</a></li>
+
+			<li>2011-11-11 - <a href="fancontrol/">Настройка fancontrol - демона управления вентиляторами компьютера</a></li>
+
+			<li>2011-10-26 - <a href="fastcgi-php/">silverjam и др. Настройка FastCGI и PHP с индивидуальными правами пользователей, 2010</a></li>
+
+			<li>2011-10-14 - <a href="postfix-umask/">Postfix maildir umask</a></li>
+
+			<li>2011-10-04 - <a href="remmina/">Remmina</a></li>
+
+			<li>2011-10-03 - <a href="favorite-programs11/">Программы, которыми я пользуюсь в Debian GNU/Linux</a></li>
+
+			<li>2011-07-31 - <a href="flac/">Перекодирование FLAC</a></li>
+
+			<li>2011-07-21 - <a href="dyndns-2/">Настройка DynDNS</a></li>
+
+			<li>2011-07-13 - <a href="xinerama/">Xinerama: монитор и телевизор</a></li>
+
+			<li>2011-04-22 - <a href="postgrey-db/">Базы данных postgrey</a></li>
+
+			<li>2011-04-14 - <a href="firefox-autocompletion/">Настройка автодополнения адреса в Firefox</a></li>
+
+			<li>2011-03-25 - <a href="cisco-netflow/">Настройка NetFlow сенсора на Cisco и коллектора на Debian</a></li>
+
+			<li>2011-03-25 - <a href="postfix-tnef/">Декодирование писем в формате TNEF в Postfix</a></li>
+
+			<li>2011-03-25 - <a href="kaku/">Мичио Каку. Что случится, когда компьютеры перестанут уменьшаться? 2011</a></li>
+
+			<li>2011-02-18 - <a href="manpages-1/">Новости проекта manpages.ylsoftware.com</a></li>
+
+			<li>2010-11-02 - <a href="xdm/">Настройка xdm</a></li>
+
+			<li>2010-10-27 - <a href="freerdp/">FreeRDP</a></li>
+			
+			<li>2010-10-27 - <a href="autofs/">Автомонтирование с помощью autofs</a></li>
+
+			<li>2010-10-27 - <a href="dhcp-migration/">Перенос DHCP-сервера</a></li>
+
+			<li>2010-10-18 - <a href="audioplayers/">Аудиоплееры в Debian</a></li>
+
+			<li>2010-10-08 - <a href="sharepoint-domains/">Добавление альтернативных имён портала SharePoint Services</a></li>
+
+			<li>2010-08-23 - <a href="flac-cue-mp3/">flac &amp; cue в mp3</a></li>
+
+			<li>2010-08-21 - <a href="duke3d/">Duke Nukem 3D в Debian GNU/Linux</a></li>
+
+			<li>2010-08-13 - <a href="lighttpd-gamin/">Lighttpd и gamin</a></li>
+
+			<li>2010-08-04 - <a href="xclip/">Эрик Фэлор. Доступ к буферу обмена X Window System из командной строки с помощью xclip, 2009</a></li>
+
+			<li>2010-08-04 - <a href="bash-volume-control/">Митч Фрэзер. Изменение громкости из сценария Bash, 2008</a></li>
+
+			<li>2010-08-04 - <a href="wget/">Дашамир Хоксха. Скачать весь веб-сайт с помощью wget, 2008</a></li>
+
+			<li>2010-08-04 - <a href="gawk/">Джеймс Хайннэнт. Наслаждайтесь Gawk, 2010</a></li>
+
+			<li>2010-08-04 - <a href="lowercase/">Фил Хьюз. Преобразовать имена файлов к нижнему регистру, 2008</a></li>
+
+			<li>2010-08-04 - <a href="bash-ip-validation/">Митч Фрэзер. Проверка правильности IP-адресов из сценария Bash, 2008</a></li>
+
+			<li>2010-07-25 - <a href="quake2/">Quake2 на Debian GNU/Linux</a></li>
+
+			<li>2010-06-19 - <a href="sharepoint/">Миграция портала SharePoint Services в домен Active Directory</a></li>
+
+			<li>2010-06-18 - <a href="ad-group-policies/">Применение групповых политик</a></li>
+
+			<li>2010-06-10 - <a href="ipsec-cisco-freebsd/">Настройка IPSEC туннеля между Cisco и FreeBSD</a></li>
+
+			<li>2010-05-30 - <a href="centos-network/">Недостатки инициализации сети в CentOS</a></li>
+
+			<li>2010-05-21 - <a href="backup-to-email/">Резервная копия настроек сервера</a></li>
+
+			<li>2010-01-09 - <a href="exif/">Переименование фотографий по EXIF-тегам</a></li>
+
+			<li>2009-12-22 - <a href="po4a/">Легкий перевод страниц руководства с помощью po4a</a></li>
+
+			<li>2009-11-05 - <a href="postfix-dovecot-postfixadmin/">Настройка почтовой системы на основе Postfix, Dovecot, PostfixAdmin</a></li>
+
+			<li>2009-10-25 - <a href="prboom-music-part2/">Музыка MIDI - улучшаем звук</a></li>
+
+			<li>2009-10-17 - <a href="prboom-music-part1/">Музыка в PrBoom</a></li>
+
+			<li>2009-10-14 - <a href="rtorrent-rutorrent/">rtorrent + rutorrent</a></li>
+
+			<li>2009-09-25 - <a href="postfixadmin-1/">PostfixAdmin на Debian</a></li>
+
+			<li>2009-09-18 - <a href="minicom/">chantra. Как настроить клиент последовательной консоли, 2008</a></li>
+
+			<li>2009-09-18 - <a href="serial-console-ubuntu/">chantra. Как настроить консоль на последовательном порту в Ubuntu, 2008</a></li>
+
+			<li>2009-09-18 - <a href="serial-console-debian/">chantra. Как настроить консоль на последовательном порту в Debian, 2008</a></li>
+
+			<li>2009-09-18 - <a href="debootstrap/">chantra. Установка Debian Etch из работающей системы, основанной на Debian, 2006</a></li>
+
+			<li>2009-09-18 - <a href="cron-apt/">chantra. Почтовые уведомления от cron-apt о доступных обновлениях пакетов, 2008</a></li>
+
+			<li>2009-09-18 - <a href="apt-cacher/">chantra. Как настроить кэш репозитория с помощью apt-cacher, 2006</a></li>
+
+			<li>2009-09-17 - <a href="spamassassin/">chantra. Postfix и Spamassassin: Как фильтровать спам, 2006</a></li>
+
+			<li>2009-09-17 - <a href="postgrey/">chantra. Postfix и Postgrey: Проактивный способ фильтрации спама, 2006</a></li>
+
+			<li>2009-09-10 - <a href="bind-resolvconf/">Настройка кэширующего DNS-сервера BIND в связке с resolvconf</a></li>
+
+			<li>2009-09-10 - <a href="pptpd/">Настройка PPTP-сервера</a></li>
+
+			<li>2009-08-04 - <a href="icewm/">IceWM</a></li>
+
+			<li>2009-06-07 - <a href="deb-wordpress/">deb-пакеты с плагинами и темой для Wordpress</a></li>
+
+			<li>2009-06-07 - <a href="pppoe/">Настройка PPPoE-релея в Debian</a></li>
+
+			<li>2009-05-23 - <a href="domino/">Системный эффект (или эффект домино)</a></li>
+
+			<li>2009-05-09 - <a href="netbsd/">Раскручиваем свежеустановленную NetBSD</a></li>
+
+			<li>2009-05-04 - <a href="k530i-gprs-bluetooth/">Настройка GPRS (Sony Ericsson K530i) в Linux (Debian) через Bluetooth-контроллер</a></li>
+
+			<li>2009-04-27 - <a href="k530i-gprs/">Настройка GPRS (Sony Ericsson K530i) в Linux (Debian)</a></li>
+
+			<li>2009-04-20 - <a href="firefox-addons/">Дополнения Firefox, которыми я пользуюсь</a></li>
+
+			<li>2009-04-18 - <a href="qemu-network/">QEmu и настройка сети</a></li>
+
+			<li>2009-04-02 - <a href="ufanet-pptp-ethernet/">VPN-подключение к Уфанет и локальные ресурсы через Ethernet</a></li>
+
+			<li>2009-03-26 - <a href="default-browser/">Полчаса на смену браузера по умолчанию</a></li>
+
+			<li>2009-02-26 - <a href="id3/">Редактирование тегов mp3 в Linux (Debian)</a></li>
+
+			<li>2009-02-23 - <a href="deb-pppoe/">deb-пакет и сценарии для запуска PPPoE сервера</a></li>
+
+			<li>2009-02-22 - <a href="pppoe-server/">Настройка PPPoE-сервера в Debian</a></li>
+
+			<li>2009-02-21 - <a href="virtualbox-qemu/">Эмуляторы VirtualBox и QEmu в Debian</a></li>
+
+			<li>2009-02-11 - <a href="rp-pppoe/">Пакет RP-PPPoE</a></li>
+
+			<li>2009-01-18 - <a href="quake-nexuiz/">Запуск Quake на движке Nexuiz</a></li>
+
+			<li>2009-01-17 - <a href="quake/">Quake в Linux</a></li>
+
+			<li>2009-01-11 - <a href="famd-gamin/">famd vs gamin</a></li>
+
+			<li>2009-01-10 - <a href="favorite-programs09/">Программы, которыми я пользуюсь в Linux</a></li>
+
+			<li>2009-01-04 - <a href="ufanet-pptp-pptp/">Два VPN-подключения к Уфанет</a></li>
+
+			<li>2008-12-26 - <a href="deb-dokuwiki-arctic/">deb-пакет: тема arctic для dokuwiki</a></li>
+
+			<li>2008-12-16 - <a href="dnat-pbr/">DNAT и Policy Based Routing (portmapping и два канала)</a></li>
+
+			<li>2008-12-14 - <a href="cd-rippers/">CD-рипперы в Linux</a></li>
+
+			<li>2008-12-02 - <a href="rj-45-split/">Разводка розетки RJ-45 на компьютер и телефон</a></li>
+
+			<li>2008-10-17 - <a href="jigdo/">Скачивание образов дисков Debian с использованием jigdo-lite</a></li>
+
+			<li>2008-10-13 - <a href="linux-games/">Игры в Linux</a></li>
+
+			<li>2008-10-04 - <a href="pure-ftpd-config/">Замена pure-ftpd-wrapper на pure-config в Debian</a></li>
+
+			<li>2008-10-04 - <a href="ufanet-pptp/">Настраиваем VPN-соединение с Уфанетом в Debian</a></li>
+
+			<li>2008-10-04 - <a href="cups-hp-lj1018-1/">Настройка принтера HP LaserJet 1018 в Debian</a></li>
+
+			<li>2008-09-10 - <a href="ufanet/">Кое-что об Ufanet</a></li>
+
+			<li>2008-09-01 - <a href="fonts/">Опять о шрифтах в Linux (Debian)</a></li>
+
+			<li>2008-08-19 - <a href="dyndns-1/">Настройка DynDNS на Debian</a></li>
+
+			<li>2008-08-11 - <a href="flac-mp3/">Конвертируем FLAC в MP3 под Debian</a></li>
+
+			<li>2008-07-31 - <a href="clutch/">Настройка веб-интерфейса Clutch</a></li>
+
+			<li>2008-07-27 - <a href="transmission-daemon/">Настройка торрент-клиента transmission-daemon в Debian</a></li>
+
+			<li>2008-07-01 - <a href="pppoe-ethernet-freebsd/">Настройка ADSL-моста, PPPoE во FreeBSD, два провайдера</a></li>
+
+			<li>2008-06-23 - <a href="ipfw-dnat/">DNAT с помощью ipfw и natd</a></li>
+		</ul>
+	</body>
+</html>

@@ -1,0 +1,188 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="zabbix,debian,linux,3.4,wheezy,uwsgi" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2019-06-16 -->
+		<title>Контроль количества процессов приложений uWSGI через Zabbix</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Контроль количества процессов приложений uWSGI через Zabbix</h1>
+
+		<p>Задумался как-то о том, чтобы подобрать подходящее количество рабочих процессов для каждого из приложений, работающих под управлением uwsgi. Если рабочих процессов не хватает, то приложение работает не в полную силу и часть поступающих запросов встаёт в очередь до освобождения рабочего процесса. Если же процессов слишком много, то часть из них окажутся неиспользуемыми и будут просто занимать свободную оперативную память. Чтобы задать подходящее количество рабочих процессов, нужно понять, сколько обычно их используется в действительности.</p>
+
+		<p>В uwsgi новых версий есть множество разных способов контролировать его работу, но в имеющейся у меня версии 1.2.3 из репозитория Debian Wheezy поддерживается не так-то много вариантов для его контроля. Я остановился на варианте с механизмом <a href="http://uwsgi-docs.readthedocs.io/en/latest/StatsServer.html">Stats Server</a>.</p>
+
+		<h2>1. Настройка сокет-файлов</h2>
+
+		<p>Чтобы включить Stats Server для каждого из приложений, нужно добавить соответствующую опцию в конфигурацию каждого из приложений в файлах /etc/uwsgi/apps-available/. Однако, чтобы не редактировать много файлов конфигурации, можно изменить файл с настройками по умолчанию. Копируем из файла /usr/share/uwsgi/conf/default.ini настройки в файл /etc/uwsgi/uwsgi.ini и добавляем опцию:</p>
+
+		<pre class="code">stats = /run/uwsgi/%(deb-confnamespace)/%(deb-confname)/stats</pre>
+
+		<p>В результате у меня получился файл с таким содержимым:</p>
+
+		<pre class="code">[uwsgi]
+autoload = true
+master = true
+workers = 2
+no-orphans = true
+pidfile = /run/uwsgi/%(deb-confnamespace)/%(deb-confname)/pid
+socket = /run/uwsgi/%(deb-confnamespace)/%(deb-confname)/socket
+stats = /run/uwsgi/%(deb-confnamespace)/%(deb-confname)/stats
+chmod-socket = 660
+log-date = true
+uid = www-data
+gid = www-data</pre>
+
+		<p>Теперь пропишем использование этого файла с настройками по умолчанию в файле /etc/default/uwsgi, прописав в него соответствующую настройку:</p>
+
+		<pre class="code">INHERITED_CONFIG=/etc/uwsgi/uwsgi.ini</pre>
+
+		<p>Теперь нужно перезапустить все приложения:</p>
+
+		<pre class="console"># /etc/init.d/uwsgi restart</pre>
+
+		<p>В каталогах приложений /var/run/uwsgi/app/&lt;приложение&gt;/ должны появиться файлы stats.</p>
+
+		<h2>2. Скрипт обнаружения и опроса</h2>
+
+		<p>К сожалению, права доступа к этому файлу точно такие же, как у файла сокета и поменять их через файл конфигурации приложения нельзя, поэтому для доступа к файлу статистики от имени пользователя zabbix придётся либо воспользоваться sudo, либо включить пользователя zabbix в группу www-data. Я воспользовался sudo. Однако, прежде чем перейти к настройкам sudo и Zabbix-агента, нужно написать скрипт, с помощью которого Zabbix-агент будет извлекать необходимые данные из сокетов статистики.</p>
+
+		<p>У меня получился скрипт на языке Python со следующим содержимым:</p>
+
+		<pre class="code">#!/usr/bin/python
+
+import sys, os, socket, json
+
+def discover():
+    data = []
+    for app in os.listdir('/run/uwsgi/app/'):
+        data.append({'{#UWSGI_APP}': app})
+    data = {'data': data}
+    return json.dumps(data)
+
+def read_stats(unix_socket):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.connect(unix_socket)
+    except socket.error:
+        return None
+
+    data = ''
+    while True:
+        buf = s.recv(4096)
+        if len(buf) &lt; 1:
+            break
+        data += buf
+    s.close()
+
+    data = data.decode('UTF-8')
+    return json.loads(data)
+
+def analyze_stats(data):
+    listen_queue = data['listen_queue']
+    listen_queue_errors = data['listen_queue_errors']
+    
+    total = 0
+    idle = 0
+    busy = 0
+    for worker in data['workers']:
+        total += 1
+        if worker['status'] == 'idle':
+            idle += 1
+        elif worker['status'] == 'busy':
+            busy += 1
+
+    pidle = idle * 100.0 / total
+    pbusy = busy * 100.0 / total
+
+    return listen_queue, listen_queue_errors, total, idle, busy, pidle, pbusy
+
+if __name__ == '__main__':
+    if len(sys.argv) == 2:
+        if sys.argv[1] == 'discover':
+            print discover()
+    elif len(sys.argv) == 3:
+        app = sys.argv[2]
+        data = read_stats('/run/uwsgi/app/%s/stats' % app)
+        if data is None:
+            print 'No stats'
+            sys.exit()
+
+        listen_queue, listen_queue_errors, total, idle, busy, pidle, pbusy = analyze_stats(data)
+        if sys.argv[1] == 'listen_queue':
+            print listen_queue
+        elif sys.argv[1] == 'listen_queue_errors':
+            print listen_queue_errors
+        elif sys.argv[1] == 'total':
+            print total
+        elif sys.argv[1] == 'idle':
+            print idle
+        elif sys.argv[1] == 'busy':
+            print busy
+        elif sys.argv[1] == 'pidle':
+            print pidle
+        elif sys.argv[1] == 'pbusy':
+            print pbusy</pre>
+
+		<p>Я поместил этот скрипт в файл /etc/zabbix/uwsgi.py. Не забудьте поменять права доступа к файлу:</p>
+
+		<pre class="console"># chown root:root /etc/zabbix/uwsgi.py
+# chmod ugo=rx /etc/zabbix/uwsgi.py</pre>
+
+		<h2>3. Настройка sudo и Zabbix-агента</h2>
+
+		<p>Теперь дадим пользователю zabbix права на запуск этого скрипта от имени пользователя root. Запускаем visudo и добавляем в файл конфигурации две строчки:</p>
+
+		<pre class="code">Defaults:zabbix !requiretty
+zabbix ALL=(www-data:ALL) NOPASSWD:/etc/zabbix/uwsgi.py *</pre>
+
+		<p>Отредактируем файл конфигурации Zabbix-агента /etc/zabbix/zabbix_agentd.conf:</p>
+
+		<pre class="code">UserParameter=uwsgi.discover,/usr/bin/sudo -u www-data /etc/zabbix/uwsgi.py discover
+UserParameter=uwsgi.total[*],/usr/bin/sudo -u www-data /etc/zabbix/uwsgi.py total $1
+UserParameter=uwsgi.idle[*],/usr/bin/sudo -u www-data /etc/zabbix/uwsgi.py idle $1
+UserParameter=uwsgi.busy[*],/usr/bin/sudo -u www-data /etc/zabbix/uwsgi.py busy $1
+UserParameter=uwsgi.pidle[*],/usr/bin/sudo -u www-data /etc/zabbix/uwsgi.py pidle $1
+UserParameter=uwsgi.pbusy[*],/usr/bin/sudo -u www-data /etc/zabbix/uwsgi.py pbusy $1
+UserParameter=uwsgi.listen_queue[*],/usr/bin/sudo -u www-data /etc/zabbix/uwsgi.py listen_queue $1
+UserParameter=uwsgi.listen_queue_errors[*],/usr/bin/sudo -u www-data /etc/zabbix/uwsgi.py listen_queue_errors $1</pre>
+
+		<p>И перезапустим Zabbix-агента, чтобы новые настройки вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/zabbix-agentd restart</pre>
+
+		<h2>4. Шаблоны Zabbix</h2>
+
+		<p>Я подготовил два шаблона для Zabbix 3.4:</p>
+
+		<ul>
+			<li><a href="Template_App_uWSGI.xml">Template_App_uWSGI.xml</a> - шаблон с элементами данных типа "Zabbix-агент",</li>
+
+			<li><a href="Template_App_uWSGI_Active.xml">Template_App_uWSGI_Active.xml</a> - шаблон с элементами данных типа "Zabbix-агент (активный)".</li>
+		</ul>
+
+		<p>В обоих шаблонах имеется элемент данных для низкоуровневого обнаружения, который находит все имеющиеся сокет-файлы для статистики приложений.  Обнаружение происходит раз в час:</p>
+
+		<img src="uwsgi_lld.png" />
+
+		<p>Есть прототипы элементов данных, с помощью которых контролируется: длина очереди, количество ошибок в очереди, общее количество процессов приложения, количество занятых процессов, количество свободных процессов, процент занятых процессов и процент свободных процессов. Значения этих данных для каждого из приложений снимаются раз в минуту:</p>
+
+		<img src="uwsgi_itemprototypes.png" />
+
+		<h2>5. Пример графика</h2>
+
+		<p>Приведу пример графика с реального сервера:</p>
+
+		<img src="uwsgi_zabbix.png" />
+
+		<p>Из графиков видно, что приложения maps и bottle иногда используют 100% рабочих процессов, а вот приложение ncc постоянно использует не более 30% рабочих процессов.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Контроль количества процессов приложений uWSGI через Zabbix">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

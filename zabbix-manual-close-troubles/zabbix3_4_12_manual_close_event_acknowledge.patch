@@ -1,0 +1,34 @@
+Description: Fixed manual closing problems for users without rights to edit trigger
+Fixed manual closing problems for users without rights to edit trigger
+
+Author: Vladimir Stupin <stupin_va@ufanet.ru>
+Last-Update: <2019-03-01>
+
+--- zabbix-3.4.12-1+wheezy.orig/frontends/php/app/controllers/CControllerAcknowledgeEdit.php
++++ zabbix-3.4.12-1+wheezy/frontends/php/app/controllers/CControllerAcknowledgeEdit.php
+@@ -132,7 +132,6 @@ class CControllerAcknowledgeEdit extends
+ 			'output' => [],
+ 			'triggerids' => $triggerids,
+ 			'filter' => ['manual_close' => ZBX_TRIGGER_MANUAL_CLOSE_ALLOWED],
+-			'editable' => true,
+ 			'preservekeys' => true
+ 		]);
+--- zabbix-3.4.12-1+wheezy.orig/app/controllers/CControllerAcknowledgeCreate.php	2019-03-01 16:15:28.931300319 +0500
++++ zabbix-3.4.12-1+wheezy/app/controllers/CControllerAcknowledgeCreate.php	2019-03-01 16:15:14.211550047 +0500
+@@ -87,7 +87,6 @@
+ 				'output' => [],
+ 				'triggerids' => $triggerids,
+ 				'filter' => ['manual_close' => ZBX_TRIGGER_MANUAL_CLOSE_ALLOWED],
+-				'editable' => true,
+ 				'preservekeys' => true
+ 			]);
+--- zabbix-3.4.12-1+wheezy.orig/include/classes/api/services/CEvent.php	2019-03-01 16:18:17.636438283 +0500
++++ zabbix-3.4.12-1+wheezy/include/classes/api/services/CEvent.php	2019-03-01 16:18:24.272325613 +0500
+@@ -860,7 +860,6 @@
+ 			'eventids' => $eventids,
+ 			'source' => EVENT_SOURCE_TRIGGERS,
+ 			'object' => EVENT_OBJECT_TRIGGER,
+-			'editable' => true
+ 		]);
+ 
+ 		if ($events_count != count($events)) {

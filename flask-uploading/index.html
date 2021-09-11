@@ -1,0 +1,147 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="python,перевод,flask" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-08-11 -->
+		<title>Армин Роначер. Загрузка файлов во Flask, 2012</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Армин Роначер. Загрузка файлов во Flask, 2012</h1>
+
+		<p>Перевод статьи: <a href="http://flask.pocoo.org/docs/patterns/fileuploads/">Uploading Files</a></p>
+
+		<p>Автор: Армин Роначер (Armin Ronacher)</p>
+
+		<p>Ну да, старая добрая проблема загрузки файлов. Основная мысль загрузки файлов на самом деле очень проста. В общих чертах это работает так:</p>
+
+		<ol>
+			<li>Тег &lt;form&gt; помечается атрибутом enctype=multipart/form-data, а в форму помещается тег &lt;input type=file&gt;.</li>
+
+			<li>Приложение получает доступ к файлу через словарь в объекте запроса.</li>
+
+			<li>Воспользуйтесь методом save() для того чтобы сохранить временный файл в файловой системе для последующего использования.</li>
+		</ol>
+
+		<h2>1. Введение</h2>
+
+		<p>Начнём с простейшего приложения, которое загружает файл в определённый каталог и отображает его пользователю. Вот начало нашего приложения:</p>
+
+		<pre class="code">import os
+from flask import Flask, request, redirect, url_for
+from werkzeug import secure_filename
+
+UPLOAD_FOLDER = '/path/to/the/uploads'
+ALLOWED_EXTENSIONS = set(['txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif'])
+
+app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER</pre>
+
+		<p>Сначала нужно выполнить серию импортов. Большая часть понятна,  werkzeug.secure_filename() рассматривается чуть позже. UPLOAD_FOLDER - это путь, куда будут загружаться файлы, а ALLOWED_EXTENSIONS - это набор допустимых расширений. Теперь вручную добавим в приложение правило для URL. Обычно мы так не делаем, но почему мы делаем это сейчас? Причина в том, что мы хотим заставить веб-сервер (или наш сервер приложения) обслуживать эти файлы и поэтому нам нужно генерировать правила для связывания URL с этими файлами.</p>
+
+		<p>Почему мы ограничили список допустимых расширений? Наверное вам совсем не хочется, чтобы пользователи могли загружать что угодно, если сервер напрямую отправляет данные клиенту. В таком случае вам нужно быть уверенными в том, что пользователи не загрузят файлы HTML, которые могут вызвать проблему XSS (см. <a href="http://flask.pocoo.org/docs/security/#xss">Cross-Site Scripting (XSS)</a> - межсайтовый скриптинг). Также убедитесь в том, что запрещены файлы с расширением .php, если сервер их выполняет. Правда, кому нужен PHP на сервере? :)</p>
+
+		<p>Следующая функция проверяет, что расширение файла допустимо, загружает файл и перенаправляет пользователя на URL с загруженным файлом:</p>
+
+		<pre class="code">def allowed_file(filename):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1] in ALLOWED_EXTENSIONS
+
+@app.route('/', methods=['GET', 'POST'])
+def upload_file():
+    if request.method == 'POST':
+        file = request.files['file']
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+            return redirect(url_for('uploaded_file', filename=filename))
+    return '''
+&lt;!doctype html&gt;
+&lt;title&gt;Загрузить новый файл&lt;/title&gt;
+&lt;h1&gt;Загрузить новый файл&lt;/h1&gt;
+&lt;form action="" method=post enctype=multipart/form-data&gt;
+  &lt;p&gt;&lt;input type=file name=file&gt;
+    &lt;input type=submit value="Загрузить"&gt;
+&lt;/form&gt;
+
+'''</pre>
+
+		<p>Что делает функция secure_filename()? Мы исходим из принципа "никогда не доверяй тому, что ввёл пользователь". Это справедливо и для имени загружаемого файла. Все отправленные из формы данные могут быть поддельными и имя файла может представлять опасность. Сейчас главное запомнить: всегда используйте эту функцию для получения безопасного имени файла, если собираетесь поместить файл прямо в файловую систему.</p>
+
+		<h2>2. Информация для профи</h2>
+
+		<p>Может быть вам интересно, что делает функция secure_filename() и почему нельзя обойтись без её использования? Просто представьте, что кто-то хочет отправить следующую информацию в ваше приложение в качестве имени файла:</p>
+
+		<pre class="code">filename = "../../../../home/username/.bashrc"</pre>
+
+		<p>Если считать, что ../ - это нормально, то при соединении этого имени с UPLOAD_FOLDER, пользователь может получить возможность изменять на файловой системе сервера те файлы, который он не должен изменять. Нужно немного разбираться в устройстве вашего приложения, но поверьте мне, хакеры настойчивы :)</p>
+
+		<p>Посмотрим, как отработает функция:</p>
+
+		<pre class="console">&gt;&gt;&gt; secure_filename('../../../../home/username/.bashrc')
+'home_username_.bashrc'</pre>
+
+		<p>Осталась последняя вещь: обслуживание загруженных файлов. Начиная с Flask 0.5 для этого можно использовать соответствующую функцию:</p>
+
+		<pre class="code">from flask import send_from_directory
+
+@app.route('/uploads/&lt;имя_файла&gt;')
+def uploaded_file(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)</pre>
+
+		<p>Другая возможность - зарегистрировать uploaded_file с помощью правила build_only и воспользоваться SharedDataMiddleware. Такой вариант будет работать и в более старых версиях Flask:</p>
+
+		<pre class="code">from werkzeug import SharedDataMiddleware
+
+app.add_url_rule('/uploads/&lt;имя_файла&gt;', 'uploaded_file', build_only=True)
+app.wsgi_app = SharedDataMiddleware(app.wsgi_app, {
+    '/uploads': app.config['UPLOAD_FOLDER']
+})</pre>
+
+		<p>Теперь, если запустить приложение, всё должно работать как положено.</p>
+
+		<h2>3. Улучшение загрузки</h2>
+
+		<p>Новинка версии 0.6</p>
+
+		<p>Как на самом деле Flask обрабатывает загрузку? Если файл достаточно мал, он сохраняется в памяти веб-сервера. В противном случае он помещается во временное место (туда, куда укажет tempfile.gettempdir()). Но как указать максимальный размер файла, после которого загрузка файла должна быть прервана? По умолчанию Flask не ограничивает размер файла, но вы можете задать лимит настройкой ключа конфигурации MAX_CONTENT_LENGTH:</p>
+
+		<pre class="code">from flask import Flask, Request
+
+app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024</pre>
+
+		<p>Код выше ограничит максимальный размер файла 16 мегабайтами. Если передаваемый файл окажется больше, Flask сгенерирует исключение <a href="http://werkzeug.pocoo.org/docs/exceptions/#werkzeug.exceptions.RequestEntityTooLarge">RequestEntityTooLarge</a>.</p>
+
+		<p>Эта функциональность была добавлена во Flask 0.6, но может быть реализована и в более ранних версиях при помощи наследовании от класса request. За более подробной информацией обратитесь к документации Werkzeug об обработке файлов.</p>
+
+		<h2>4. Индикаторы процесса загрузки</h2>
+
+		<p>Многие разработчики придумывают считывать файл мелкими частями, сохранять процент загрузки в базу данных и давать возможность JavaScript считывать эти данные из клиента. Короче говоря, клиент спрашивает у сервера каждые 5 секунд, сколько уже было передано. Почувствовали иронию ситуации? Клиент спрашивает у сервера о том, что уже и так знает.</p>
+
+		<p>Сейчас существуют способы получше, которые работают быстрее и более надёжны. В последнее время в вебе многое изменилось и теперь можно использовать HTML5, Java, Silverlight или Flash, чтобы сделать загрузку удобнее со стороны клиента. Посмотрите на следующие библиотеки, предназначенные именно для этого:</p>
+
+		<ul>
+			<li><a href="http://www.plupload.com/">Plupload</a> - HTML5, Java, Flash</li>
+
+			<li><a href="http://www.swfupload.org/">SWFUpload</a> - Flash</li>
+
+			<li><a href="http://jumploader.com/">JumpLoader</a> - Java</li>
+		</ul>
+
+		<h2>5. Простейшее решение</h2>
+
+		<p>Поскольку общая процедура загрузки файлов остаётся неизменной для всех приложений, занимающихся загрузкой файлов, для Flask есть расширение под названием Flask-Uploads, которое реализует полностью самостоятельный механизм загрузки с белым и чёрным списком расширений и т.п.</p>
+
+		<h2>6. Примечания переводчика</h2>
+
+		<p><a href="https://flask-russian-docs.readthedocs.org/ru/latest/patterns/fileuploads.html">Этот</a> и другие переводы можно найти на <a href="https://flask-russian-docs.readthedocs.org/">сайте проекта перевода документации по Flask</a>. Автор проекта - Виталий Кузьмин aka ferm32.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Армин Роначер. SQLAlchemy во Flask, 2012">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

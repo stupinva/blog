@@ -1,0 +1,74 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="stretch,opensmtpd,debian,linux" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2019-12-15 -->
+		<title>OpenSMTPd как локальный SMTP-ретранслятор</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>OpenSMTPd как локальный SMTP-ретранслятор</h1>
+
+		<p>В прошлом я писал заметки <a href="../postfix-relay/">Postfix как локальный SMTP-ретранслятор</a> и <a href="../postfix-relay-freebsd/">Postfix как локальный SMTP-ретранслятор во FreeBSD</a>, в которых описывал настройку Postfix для пересылки писем администратору системы.</p>
+
+		<p>К списку самых распространённых полноформатных SMTP-серверов для Unix, в который входят Sendmail, Exim, Postfix и, с некоторой натяжкой, qmail, присоединился ещё один - OpenSMTPd. Этот сервер был разработан в рамках проекта OpenBSD и по архитектуре напоминает Postfix и qmail: он тоже состоит из нескольких отдельных взаимодействующих друг с другом процессов.</p>
+
+		<p>OpenSMTPd появился в репозиториях Debian и я решил попробовать настроить его в качестве замены Postfix из указанных выше статей. Первым делом установим OpenSMTPd из пакетов:</p>
+
+		<pre class="console"># apt-get install opensmtpd</pre>
+
+		<p>Приводим файл конфигурации /etc/smtpd.conf к следующему виду:</p>
+
+		<pre class="code">listen on lo
+
+table aliases file:/etc/aliases
+table secrets file:/etc/secrets
+
+accept from local for local virtual &lt;aliases&gt; deliver to mbox
+accept from local for any relay via tls+auth://user@mail.server.net:25 auth &lt;secrets&gt; as "user@server.net"</pre>
+
+		<p>В файл /etc/aliases прописываем переадресации для получателей писем:</p>
+
+		<pre class="code">postmaster: root
+root: admin@domain.tld</pre>
+
+		<p>В файл /etc/secrets прописываем пароли для учётных записей:</p>
+
+		<pre class="code">user password</pre>
+
+		<p>Имя user должно совпадать с указанным в URL релея tls+auth://user@mail.server.net:25.</p>
+
+		<p>Поменяем права доступа к созданным файлам:</p>
+
+		<pre class="console"># chown root:root /etc/aliases /etc/secrets /etc/smtpd.conf
+# chmod u=rw,go=r /etc/aliases /etc/smtpd.conf
+# chmod u=rw,go= /etc/secrets</pre>
+
+		<p>Проверить правильность файла конфигурации можно при помощи следующей команды:</p>
+
+		<pre class="console"># smtpd -n</pre>
+
+		<p>Запускаем почтовый сервер:</p>
+
+		<pre class="console"># systemctl restart opensmtpd</pre>
+
+		<p>При редактировании файлов, указанных в опциях table, нужно сообщить об изменении демону, чтобы он перечитал содержимое таблиц. Например, после редактирования таблицы aliases нужно воспользоваться такой командой:</p>
+
+		<pre class="console"># smtpctl update table aliases</pre>
+
+		<p>К сожалению, пока что в OpenSMTPd нельзя менять тему писем таким же образом, как это было описано в заметке <a href="../postfix-subject/">Смена темы письма в Postfix</a>. У Postfix простой файл конфигурации, но большое количество настроек, взаимодействующих между собой неочевидным образом. В этом плане OpenSMTPd выглядит достойной альтернативой, т.к. сочетает простоту и наглядность настройки с безопасной архитектурой.</p>
+
+		<p>Использованные материалы:</p>
+
+		<ul>
+			<li><a href="https://cgar.github.io/posts/Simple-OpenSMTPD-Relay.html">A simple relay via OpenSMTPD</a></li>
+		</ul>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=OpenSMTPd как локальный SMTP-ретранслятор">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

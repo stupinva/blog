@@ -1,0 +1,73 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="renderd,lighttpd,mod_tile,apache2,mapnik" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2012-08-12 -->
+		<title>Установка renderd и mod_tile - системы отрисовки тайлов по запросу</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Установка renderd и mod_tile - системы отрисовки тайлов по запросу</h1>
+
+		<p>Продолжение серии заметок, посвящённых настройке тайлового сервера. Смотрите также предыдущие заметки <a href="../mapnik-part1/">Подготовка карт для генератора тайлов Mapnik</a>, <a href="../mapnik-part2/">Настройка базы данных для генератора тайлов Mapnik</a> и <a href="../mapnik-part3/">Установка генератора тайлов Mapnik</a>. На этот раз мы установим демон renderd и модуль mod_tile для веб-сервера Apache.</p>
+
+		<p>Скачиваем дистрибутив модуля mod_tile для apache2 и его бэкенд - демон renderd. mod_tile работает вместе с renderd. Когда браузер пользователя запрашивает тайл у веб-сервера apache2, запрос перенаправляется модулю mod_tile. Если mod_tile находит в кэше нужный тайл, и судя по метаинформации и настройкам кэширования, он не просрочен, mod_tile просто передаёт его apache2. Если же необходимый тайл отсутствует или просрочен, тогда mod_tile обращается по UNIX-сокету к renderd, чтобы тот отрисовал необходимый тайл, разместил его в файловой ситсеме и доложил о готовности тайла.</p>
+
+		<p>Скачиваем исходники модуля и демона:</p>
+
+		<pre class="console">$ svn co http://svn.openstreetmap.org/applications/utils/mod_tile/</pre>
+
+		<p>Устанавливаем всё необходимое для его сборки:</p>
+
+		<pre class="console"># apt-get install debhelper apache2-mpm-prefork apache2-threaded-dev libmapnik2-dev autoconf automake m4 libtool</pre>
+
+		<p>Собираем модуль и демон, и устанавливаем их:</p>
+
+		<pre class="console">$ cd mod_tile
+$ dpkg-buildpackage -B -rfakeroot -us -uc
+$ cd ..
+# dpkg -i renderd_0.4-10~oneiric1_amd64.deb
+# dpkg -i libapache2-mod-tile_0.4-10~oneiric1_amd64.deb</pre>
+
+		<p>Редактируем файл конфигурации mod_tile /etc/apache2/sites-enabled/tileserver_site: пишем почтовый ящик администратора веб-сервера в опцию ServerAdmin, комментируем опции ServerName, ServerAlias.</p>
+
+		<p>Я также поменял порт с 80 на 8080 в опции VirtualHost, поскольку у меня Apache2 будет выступать в роли бэкэнда для более лёгкого сервера Lighttpd. Для этого я поменял порт Apache2 в файле /etc/ports.conf, в опциях NameVirtualHost и Listen.</p>
+
+		<p>Теперь нужно настроить renderd. Для этого откроем файл /etc/renderd.conf и поменяем значение  опции plugins_dir в секции [mapnik] с /usr/lib/mapnik/0.7/input на /usr/lib/mapnik/2.0/input</p>
+
+		<p>Теперь можно перезапустить apache2 и renderd, чтобы их настройки вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/apache2 restart
+# /etc/init.d/renderd restart</pre>
+
+		<p>Я также подключил модуль mod_proxy в файле конфигурации Lighttpd /etc/lighttpd/lighttpd.conf:</p>
+
+		<pre class="code">server.modules += ( "mod_proxy" )
+proxy.server = (
+  "/osm/" =&gt;
+  (
+    (
+      "host" =&gt; "127.0.0.1",
+      "port" =&gt; 8080
+    )
+  )
+)</pre>
+
+		<p>И перезапустил веб-сервер:</p>
+
+		<pre class="console"># /etc/init.d/lighttpd restart</pre>
+
+		<p>Теперь, если всё сделано правильно, система должна заработать. Для того, чтобы убедиться в правильности настроек, поправим адрес сервера на тестовой странице /var/www/osm/slippymap.html - заменим с localhost на внешнее имя сервера servername.tld. Теперь в браузере переходим на страницу http://servername.tld/osm/slippymap.html и видим карту прямо из недр базы данных:</p>
+
+		<img src="osm.png" />
+
+		<p>На этом настройка тайлового сервера закончена.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Установка renderd и mod_tile - системы отрисовки тайлов по запросу">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

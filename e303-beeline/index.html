@@ -1,0 +1,68 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="beeline,3g,usb-modeswitch,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-09-08 -->
+		<title>Настройка 3G-модема Huawei HiLink E303 Билайн для Debian Wheezy</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка 3G-модема Huawei HiLink E303 Билайн для Debian Wheezy</h1>
+
+		<p>В отличие от <a href="../e352-megafon/">предыдущего</a>, попавшегося мне 3G-модема, этот модем выглядит для системы как сетевая карта.</p>
+
+		<p>Всё далее описанное относится к тарифу "<a href="http://internet.beeline.ru/usb/ufa/tarif/tarif.wbp?id=91d9d5ed-38cb-46ab-8d66-0b13c46c0bcf">Оптимальный безлимит</a>".</p>
+
+		<p>1. Активация SIM-карты.</p>
+
+		<p>Перед настройкой необходимо активировать SIM-карту. Для этого нужно вставить SIM-карту в телефон и позвонить по номеру *101*1111# После активации SIM-карту можно вставить в модем.</p>
+
+		<p>2. Устанавливаем пакет usb-switchmodem:</p>
+
+		<pre class="console"># apt-get install usb-modeswitch</pre>
+
+		<p>3. Подключаем модем и смотрим с помощью команды, какая сетевая карта появится после подключения:</p>
+
+		<pre class="console"># ifconfig -a</pre>
+
+		<p>Или можно посмотреть то же самое в журнале сообщений dmesg:</p>
+
+		<pre class="console"># dmesg</pre>
+
+		<p>У меня уже было две сетевые карты с именами eth0 и eth1, а вновь появившаяся получила имя eth2. В дальнейших инструкциях используется именно это имя.</p>
+
+		<p>4. Настраиваем сеть.</p>
+
+		<p>Открываем на редактирование файл /etc/network/interfaces и добавляем настройки:</p>
+
+		<pre class="code">allow-hotplug eth2
+iface eth2 inet dhcp</pre>
+
+		<p>Теперь можно вынуть и вставить модем снова, чтобы интерфейс получил настройки по DHCP.</p>
+
+		<p>5. Настраиваем подключение.</p>
+
+		<p>Заходим в браузере на адрес <a href="http://192.168.1.1">http://192.168.1.1</a>, а на открывшейся странице переходим по ссылке "Настройка". Далее создаём новый профиль.</p>
+
+		<img src="beeline_new.png" />
+
+		<p>В настройках профиля указываем его название, в поле APN вводим адрес home.beeline.org, поле имени и пароля оставляем пустыми:</p>
+
+		<img src="beeline_profile.png" />
+
+		<p>Теперь осталось перезагрузить модем через меню или вынуть его и снова вставить в разъём. После перезагрузки начальная страница примет примерно такой вид:</p>
+
+		<img src="beeline_connected.png" />
+
+		<p>На самом модеме при успешном подключении светодиод загорится голубым цветом:</p>
+
+		<img src="beeline_modem.jpg" />
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка 3G-модема Huawei HiLink E303 Билайн для Debian Wheezy">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

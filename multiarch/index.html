@@ -1,0 +1,59 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="stretch,mutiarch,debian,linux" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2018-09-16 -->
+		<title>Multiarch в Debian Stretch</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Multiarch в Debian Stretch</h1>
+
+		<p>На свежеустановленной системе Debian Stretch столкнулся с проблемой при запуске 32-битного двоичного исполняемого файла в 64-битной системе:</p>
+
+		<pre class="console"># ./cfgfmt.linux -tptag.dat -sip ata0025459496ab.txt ata0025459496ab
+-su: ./cfgfmt.linux: Нет такого файла или каталога
+# file cfgfmt.linux 
+cfgfmt.linux: ELF 32-bit LSB executable, Intel 80386, version 1 (SYSV), dynamically linked, interpreter /lib/ld-linux.so.2, for GNU/Linux 2.0.0, stripped</pre>
+
+		<p>И тут я вспомнил о том, что нужно включить multiarch - мультиархитектурность, которая позволяет запускать исполняемые файлы совместимых архитектур в операционной системе, которая обычно расчитана на поддержку только какой-либо одной конкретной архитектуры. Например, моя операционная система расчитана на архитектуру amd64, однако с поддержкой мультиархитектурности имеется возможность запуска приложений для совместимой с ней архитектуры i386.</p>
+
+		<p>Для добавления дополнительной совместимой архитектуры i386 в операционную систему архитектуры amd64 понадобится выполнить следующую команду:</p>
+
+		<pre class="console"># dpkg --add-architecture i386</pre>
+
+		<p>Текущую архитектуру можно посмотреть такой командой:</p>
+
+		<pre class="console"># dpgk --print-architecture</pre>
+
+		<p>Список совместимых архитектур, поддержка которых включена в системе, можно посмотреть при помощи такой команды:</p>
+
+		<pre class="console"># dpkg --print-foreign-architectures</pre>
+
+		<p>Для получения возможности устанавливать пакеты архитектуры i386 из репозиториев понадобится настроить менеджер пакетов APT. Для этого зададим основную архитектуру и список всех используемых архитектур, создав файл /etc/apt/apt.conf.d/arch со следующим содержимым:</p>
+
+		<pre class="code">APT::Architecture "amd64";
+APT::Architectures "amd64,i386";</pre>
+
+		<p>Обновим список доступных к установке пакетов из репозиториев:</p>
+
+		<pre class="console"># apt-get update</pre>
+
+		<p>Для запуска двоичных файлов, скомпилированных для архитектуры i386, нужно как минимум установить стандартную библиотеку поддержки языка Си:</p>
+
+		<pre class="console"># apt-get install libc6-i386</pre>
+
+		<p>Пробуем выполнить первоначальную команду ещё раз:</p>
+
+		<pre class="console"># ./cfgfmt.linux -tptag.dat -sip ata0025459496ab.txt ata0025459496ab</pre>
+
+		<p>На этот раз ошибок нет.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Multiarch в Debian Stretch">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,58 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="перевод,wget" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2010-08-04 -->
+		<title>Дашамир Хоксха. Скачать весь веб-сайт с помощью wget, 2008</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Дашамир Хоксха. Скачать весь веб-сайт с помощью wget, 2008</h1>
+
+		<p>Перевод статьи: <a href="http://www.linuxjournal.com/content/downloading-entire-web-site-wget">Downloading an Entire Web Site with wget</a></p>
+
+		<p>05 сентября 2008, Дашамир Хоксха (Dashamir Hoxha)</p>
+
+		<p>Если вам когда-нибудь потребуется скачать целый веб-сайт, например для просмотра без доступа в интернет, wget может это сделать -- например:</p>
+
+		<pre class="console">$ wget \
+  --recursive \
+  --no-clobber \
+  --page-requisites \
+  --html-extension \
+  --convert-links \
+  --restrict-file-names=windows \
+  --domains website.org \
+  --no-parent \
+  www.website.org/tutorials/html/</pre>
+
+		<p>Эта команда скачает веб-сайт www.website.org/tutorials/html/.</p>
+
+		<p>Используются следующие опции:</p>
+
+		<ul>
+			<li>--recursive: скачивать весь веб-сайт.</li>
+
+			<li>--domains website.org: не переходить по ссылкам вне сайта website.org.</li>
+
+			<li>--no-parent: не переходить по ссылкам вне каталога tutorials/html/.</li>
+
+			<li>--page-requisites: собрать все элементы, относящиеся к странице (изображения, CSS и так далее).</li>
+
+			<li>--html-extension: сохранять файлы с расширением .html.</li>
+
+			<li>--convert-links: преобразовывать ссылки так, чтобы они работали локально, без доступа в интернет.</li>
+
+			<li>--restrict-file-names=windows: изменять имена файлов таким образом, чтобы они работали в Windows.</li>
+
+			<li>--no-clobber: не заменять какие-либо существующие файлы (используется в случае, если скачивание было прервано и возобновлено).</li>
+		</ul>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Дашамир Хоксха. Скачать весь веб-сайт с помощью wget, 2008">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

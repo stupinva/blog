@@ -1,0 +1,151 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="mod_wsgi,python,apache,wsgi,перевод,flask" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-06-16 -->
+		<title>Армин Роначер. Настройка mod_wsgi (Apache) для Flask, 2012</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Армин Роначер. Настройка mod_wsgi (Apache) для Flask, 2012</h1>
+
+		<p>Перевод статьи: <a href="http://flask.pocoo.org/docs/deploying/mod_wsgi/">mod_wsgi (Apache)</a></p>
+
+		<p>Автор: Армин Роначер (Armin Ronacher)</p>
+
+		<p>Если вы используете веб-сервер Apache и задумались об использовании mod_wsgi.</p>
+
+		<h2>1. Предварительная проверка</h2>
+
+		<p>Удостоверьтесь, что вызовы app.run() в файле приложения находятся внутри блока if __name__ == '__main__': или вынесены в отдельный файл. Просто убедитесь в отсутствии подобных вызовов, потому что если вы решили воспользоваться mod_wsgi для запуска приложения, то запускать локальный сервер WSGI не нужно.</p>
+
+		<h2>2. Установка mod_wsgi</h2>
+
+		<p>Если mod_wsgi ещё не установлен, его можно установить с помощью менеджера пакетов или собрать самостоятельно. В <a href="http://code.google.com/p/modwsgi/wiki/QuickInstallationGuide">инструкции по установке</a> mod_wsgi описывается установка из исходных текстов в UNIX-системах.</p>
+
+		<p>Если вы используете Ubuntu/Debian, можно воспользоваться apt-get:</p>
+
+		<pre class="console"># apt-get install libapache2-mod-wsgi</pre>
+
+		<p>На FreeBSD mod_wsgi можно установить сборкой из порта www/mod_wsgi или при помощи pkg_add:</p>
+
+		<pre class="console"># pkg_add -r mod_wsgi</pre>
+
+		<p>Если используется pkgsrc, можно установить mod_wsgi, собрав из пакета www/ap2-wsgi.</p>
+
+		<p>Если случится ошибка сегментации дочернего процесса после первой перезагрузки apache, можно спокойно проигнорировать её. Просто перезапустите сервер.</p>
+
+		<h2>3. Создание файла .wsgi</h2>
+
+		<p>Для запуска приложения нужен файл yourapplication.wsgi. Этот файл содержит код, выполняемый mod_wsgi для получения объекта приложения. Объект с именем application в этом файле будет использоваться в качестве приложения.</p>
+
+		<p>Для большинства приложений будет достаточно такого файла:</p>
+
+		<pre class="code">from yourapplication import app as application</pre>
+
+		<p>Если у вас нет фабричной функции для создания приложений, но есть экземпляр-одиночка, можно просто импортировать его как приложение.</p>
+
+		<p>Сохраните этот файл где-нибудь, где сможете его найти (например, в /var/www/yourapplication) и удостоверьтесь, что yourapplication и все используемые им библиотеки находятся в списке путей загрузки python. Если вы не хотите делать его общедоступным для всей системы, воспользуйтесь <a href="http://pypi.python.org/pypi/virtualenv">виртуальным экземпляром python</a>. Помните, что при этом вам нужно будет установить ваше приложение внутрь virtualenv. Или можно отредактировать переменную path внутри .wsgi перед импортом:</p>
+
+		<pre class="code">import sys
+sys.path.insert(0, '/path/to/the/application')</pre>
+
+		<h2>4. Настройка Apache</h2>
+
+		<p>Наконец, нужно создать файл с настройками Apache для запуска приложения. В следующем примере мы говорим mod_wsgi выполнить приложение от имени отдельного пользователя в целях безопасности:</p>
+
+		<pre class="code">&lt;VirtualHost *&gt;
+    ServerName example.com
+    WSGIDaemonProcess yourapplication user=user1 group=group1 threads=5
+    WSGIScriptAlias / /var/www/yourapplication/yourapplication.wsgi
+    &lt;Directory /var/www/yourapplication&gt;
+        WSGIProcessGroup yourapplication
+        WSGIApplicationGroup %{GLOBAL}
+        Order deny,allow
+        Allow from all
+    &lt;/Directory&gt;
+&lt;/VirtualHost&gt;</pre>
+
+		<p>Замечание: WSGIDaemonProcess не реализован в Windows и Apache не запустится с указанной выше конфигурацией. В системе Windows эти строки нужно удалить:</p>
+
+		<pre class="code">&lt;VirtualHost *&gt;
+    ServerName example.com
+    WSGIScriptAlias / C:\yourdir\yourapp.wsgi
+    &lt;Directory C:\yourdir&gt;
+        Order deny,allow
+        Allow from all
+    &lt;/Directory&gt;
+&lt;/VirtualHost&gt;</pre>
+
+		<p>За более подробной информацией обратитесь к <a href="http://code.google.com/p/modwsgi/wiki/">wiki-странице mod_wsgi</a>.</p>
+
+		<h2>5. Решение проблем</h2>
+
+		<p>Если приложение не запускается, попробуйте следующие решения:</p>
+
+		<ul>
+			<li>
+				<p><b>Проблема:</b> приложение не запускается, в журнале ошибок появляется сообщение SystemExit ignored</p>
+
+				<p>Произошёл вызов app.run() в файле вашего приложения, в котором не было предохранительного условия if __name__ == '__main__'. Либо удалите из файла этот вызов run(), либо поместите его в отдельный файл run.py, либо поместите его в подобный блок if.</p>
+			</li>
+
+			<li>
+				<p><b>Проблема:</b> приложение сообщает об ошибках доступа</p>
+
+				<p>Возможно это вызвано тем, что ваше приложение работает от неправильного пользователя. Проверьте, что каталоги, к которым необходим доступ из приложения, имеют правильные разрешения, а приложение запущено от правильного пользователя (параметры user и group в директиве WSGIDaemonProcess).</p>
+			</li>
+
+			<li>
+				<p><b>Проблема:</b> приложение завершается с выводом сообщения об ошибке</p>
+
+				<p>Помните, что mod_wsgi запрещает делать что-либо с sys.stdout и sys.stderr. Можно выключить эту защиту, прописав в конфигурации следующую настройку:</p>
+
+				<pre class="code">WSGIRestrictStdout Off</pre>
+
+				<p>Или можно заменить стандартный вывод в файле .wsgi на другой поток:</p>
+
+				<pre class="code">import sys
+sys.stdout = sys.stderr</pre>
+			</li>
+
+			<li>
+				<p><b>Проблема:</b> доступ к ресурсам приводит к ошибкам ввода-вывода</p>
+
+				<p>Возможно ваше приложение является символической ссылкой на один из файлов .py, находящихся в каталоге пакетов сайта. Такой приём не работает, поэтому удостоверьтесь, что поместили каталог в пути поиска python или преобразуйте ваше приложение в пакет.</p>
+
+				<p>Причина заключается в том, что имя файла модуля используется для поиска ресурсов, а в случае символической ссылки будет использоваться неправильное имя файла.</p>
+			</li>
+		</ul>
+
+		<h2>6. Поддержка автоматической перезагрузки</h2>
+
+		<p>Чтобы облегчить работу инструментов установки, можно включить поддержку автоматической перезагрузки. Когда файл .wsgi изменится, mod_wsgi перезагрузит все процессы демона.</p>
+
+		<p>Для этого просто добавьте следующие директивы в раздел Directory:</p>
+
+		<pre class="code">WSGIScriptReloading On</pre>
+
+		<h2>7. Работа с виртуальными окружениями</h2>
+
+		<p>Польза от виртуальных окружений заключается в том, что они позволяют не устанавливать необходимые зависимости на уровне всей системы, что позволяет достичь большего контроля над используемыми пакетами. Если вы решили воспользоваться виртуальным окружением совместно с mod_wsgi, нужно слегка изменить файл .wsgi.</p>
+
+		<p>Добавьте следующие строки в начало файла .wsgi:</p>
+
+		<pre class="code">activate_this = '/path/to/env/bin/activate_this.py'
+execfile(activate_this, dict(__file__=activate_this))</pre>
+
+		<p>Эти строки настроят пути загрузки в соответствии с настройками виртуального окружения. Помните, что это должен быть абсолютный путь.</p>
+
+		<h2>8. Примечания переводчика</h2>
+
+		<p><a href="https://flask-russian-docs.readthedocs.org/ru/latest/deploying/mod_wsgi.html">Этот</a> и другие переводы можно найти на <a href="https://flask-russian-docs.readthedocs.org/">сайте проекта перевода документации по Flask</a>. Автор проекта - Виталий Кузьмин aka ferm32.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Армин Роначер. Настройка mod_wsgi (Apache) для Flask, 2012">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

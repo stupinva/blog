@@ -1,0 +1,126 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="stretch,cgit,git,nginx,debian,linux,uwsgi" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2019-07-14 -->
+		<title>Установка и настройка cgit</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Установка и настройка cgit</h1>
+
+		<p>cgit - это веб-интерфейс для доступа к git-репозиториям, который написан на Си и в целом аналогичен приложению Gitweb, написанному на Perl. Поскольку оба приложения очень похожи друг на друга, не стану притворяться и скажу прямо: эта статья является почти дословным повтором статьи про Gitweb, с необходимой поправкой на специфику cgit. Как и в случае с Gitweb, для эксперимента решил попробовать настроить cgit поверх связки nginx и uWSGI.</p>
+
+		<h2>1. Установка пакетов</h2>
+
+		<p>Установим необходимые пакеты:</p>
+
+		<pre class="console"># apt-get install nginx-light uwsgi cgit</pre>
+
+		<h2>2. Настройка uwsgi</h2>
+
+		<p>Первым делом настроим сервер приложений uWSGI для запуска CGI-сценария. Для этого создадим файл /etc/uwsgi/apps-available/cgit.ini со следующим содержимым:</p>
+
+		<pre class="code">[uwsgi]
+
+procname = uwsgi-cgit
+procname-master = uwsgi-cgit-master
+
+plugins = cgi
+processes = 1
+threads = 4
+cgi = /cgit/=/usr/lib/cgit/cgit.cgi
+cgi-timeout = 5</pre>
+
+		<p>Теперь нужно подключить использование этого файла:</p>
+
+		<pre class="console"># cd /etc/uwsgi/apps-enabled/
+# ln -s /etc/uwsgi/apps-available/cgit.ini .</pre>
+
+		<p>Перезапустим uWSGI, чтобы его новые настройки вступили в силу:</p>
+
+		<pre class="console"># systemctl restart uwsgi.service</pre>
+
+		<h2>3. Настройка cgit</h2>
+
+		<p>Теперь настроим файл конфигурации самого приложения cgit. Я буду настраивать приложение в подкаталоге веб-сервера /cgit/, поэтому у меня файл конфигурации /etc/cgitrc принял следующий вид:</p>
+
+		<pre class="code">favicon=/cgit/static/favicon.ico
+css=/cgit/static/cgit.css
+logo=/cgit/static/cgit.png
+
+snapshots=tar.gz tar.bz2 zip
+remove-suffix=1
+enable-index-links=1
+enable-index-owner=0
+
+scan-path=/var/lib/cgit/</pre>
+
+		<p>Будьте внимательны при редактировании файла конфигурации: порядок некоторых опций имеет значение. В частности, опция snapshots работает только при указании перед опцией scan-path.</p>
+
+		<p>Кроме указания пути к каталогу с проектами при помощи опции scan-path, имеется возможность описать каждый проект индивидуально и даже сгруппировать проекты. За подробностями обращайтесь к странице руководства cgitrc.</p>
+
+		<h2>4. Настройка nginx</h2>
+
+		<p>Наконец, теперь пришла очередь настраивать веб-сервер nginx. Для настройки откроем файл в каталоге /etc/nginx/sites-enabled/, найдём секцию сервера и впишем в неё следующие настройки:</p>
+
+		<pre class="code">location /cgit {
+  return 301 $scheme://$host$request_uri/;
+}
+
+location /cgit/static/ {
+  autoindex off;
+  alias /usr/share/cgit/;
+}
+
+location /cgit/ {
+  uwsgi_pass unix:/run/uwsgi/app/cgit/socket;
+  include uwsgi_params;
+  uwsgi_modifier1 9;
+}</pre>
+
+		<p>Перезагрузим nginx, чтобы добавленные нами настройки вступили в силу:</p>
+
+		<pre class="console"># systemctl reload nginx.service</pre>
+
+		<h2>5. Публикация репозиториев</h2>
+
+		<p>Как можно увидеть в файле конфигурации /etc/cgitrc, созданном нами ранее, репозитории git должны размещаться в каталоге /var/lib/cgit/. Создадим этот каталог и назначим права на него:</p>
+
+		<pre class="console"># mkdir /var/lib/cgit
+# chown www-data:www-data /var/lib/cgit
+# chmod o= /var/lib/cgit</pre>
+
+		<p>В этом каталоге нужно создать подкаталоги с расширением .git, содержащие так называемые «голые» (bare) репозитории. Обычный репозиторий, в котором ведётся разработка, содержит внутри себя текущие версии файлов, над которыми идёт работа, и каталог .git. Каталог .git, по-сути, и является «голым» репозиторием. Для создания «голого» репозитория из обычного можно воспользоваться такими командами:</p>
+
+		<pre class="console"># cd /var/lib/cgit
+# git clone --bare /home/stupin/git/view3d view3d.git</pre>
+
+		<p>И не забудьте поменять права доступа на «голый» репозиторий:</p>
+
+		<pre class="console"># cd /var/lib/cgit
+# chown -R www-data:www-data view3d
+# chmod -R o= view3d.git</pre>
+
+		<h2>6. Тестирование cgit</h2>
+
+		<p>Теперь можно запустить браузер и проверить доступность приложения. У меня стартовая страница приложения выглядела следующим образом:</p>
+
+		<img src="cgit.png" />
+
+		<h2>7. Использованные материалы</h2>
+
+		<ul>
+			<li><a href="https://gist.github.com/gsf/f6a0973f23d34c536d8f973fee302756">cgit at subdirectory on nginx and uwsgi</a></li>
+
+			<li><a href="https://wiki.archlinux.org/index.php/Cgit">cgit</a></li>
+		</ul>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Установка и настройка cgit">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

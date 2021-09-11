@@ -1,0 +1,609 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="buster,zabbix,clickhouse,debian,linux,3.4" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2020-11-15 -->
+		<title>Поддержка хранилища ClickHouse в сервере Zabbix 3.4</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Поддержка хранилища ClickHouse в сервере Zabbix 3.4</h1>
+
+		<p>Продолжаем доработку сервера Zabbix. В прошлый раз мы <a href="../zabbix-clickhouse-part3/">добавили в библиотеку zbxhistory поддержку возможности использования хранилищ разного типа</a>. На этот раз нужно добавить поддержку хранилища нового типа, которую будем реализовывать на базе поддержки хранилища Elasticsearch, частично заимствуя фрагменты из кода поддержки SQL-хранилищ.</p>
+
+		<p>Готовую заплатку для сервера Zabbix с реализацией поддержки хранения исторических данных в ClickHouse можно найти по ссылке <a href="zabbix3_4_12_server_clickhouse.patch">zabbix3_4_12_server_storage_per_table.patch</a>.</p>
+
+		<p>Ниже описаны внесённые заплаткой доработки и объяснение их логики.</p>
+
+		<p>У меня ушло некоторое время на изучение функций для работы со структурами данных в формате JSON. Чтобы не пришлось вспоминать их снова, опишу те из них, которыми я пользовался непосредственно в описываемой заплатке.</p>
+
+		<h2>1. Функции Zabbix для формирования JSON</h2>
+
+		<p>Заголовочный файл include/zbxjson.h, файл с реализацией функций - src/libs/zbxjson/json.c</p>
+
+		<h3>1.1. zbx_json_init(json)</h3>
+
+		<p>Создание JSON, в котором корневым элементом является словарь. Фактически, в пустой буфер будут добавлены фигурные скобки <span class="code">{}</span>, текущий указатель будет указывать на закрывающую скобку, уровень вложенности увеличится с 0 до 1, а в статусе будет ZBX_JSON_EMPTY.</p>
+
+		<h3>1.2. zbx_json_initarray(json)</h3>
+
+		<p>Работает аналогично zbx_json_init, но корневым элементом структуры JSON будет массив, а в буфер вместо фигурных скобок <span class="code">{}</span> будут вставлены квадратные скобки <span class="code">[]</span>.</p>
+
+		<h3>1.3. zbx_json_clean(json)</h3>
+
+		<p>Очищает буфер от хранящейся в нём структуры JSON. Сама память при этом не освобождается.</p>
+
+		<h3>1.4. zbx_json_free(json)</h3>
+
+		<p>Освобождает буфер, который был занят сформированной структурой JSON.</p>
+
+		<h3>1.5. zbx_json_addobject(json, name)</h3>
+
+		<p>Вставляет в то место буфера, куда указывает текущий указатель:</p>
+
+		<ol>
+			<li>запятую <span class="code">,</span>, если текущий статус равен ZBX_JSON_COMMA,</li>
+
+			<li>текст <span class="code">"name":</span>, если аргумент name не равен NULL,</li>
+
+			<li>пару фигурных скобок <span class="code">{}</span>.</li>
+		</ol>
+
+		<p>Текущий указатель передвигается на вставленную закрывающую фигурную скобку, уровень вложенности увеличивается на единицу, в статус записывается ZBX_JSON_EMPTY.</p>
+
+		<p>Весь текст, который ранее лежал в буфере после указателя, сдвигается так, что оказывается позади вставленного текста.</p>
+
+		<h3>1.6. zbx_json_addarray(json, name)</h3>
+
+		<p>Работает аналогично zbx_json_addobject, но вместо фигурных скобок вставляются квадратные <span class="code">[]</span>.</p>
+
+		<p>Вставляет в то место буфера, куда указывает текущий указатель:</p>
+
+		<ol>
+			<li>запятую <span class="code">,</span>, если текущий статус равен ZBX_JSON_COMMA,</li>
+
+			<li>текст <span class="code">"name":</span>, если аргумент name не равен NULL,</li>
+
+			<li>пару квадратных скобок <span class="code">[]</span>.</li>
+		</ol>
+
+		<p>Текущий указатель передвигается на вставленную закрывающую квадратную скобку, уровень вложенности увеличивается на единицу, в статус записывается ZBX_JSON_EMPTY.</p>
+
+		<p>Весь текст, который ранее лежал в буфере после указателя, сдвигается так, что оказывается позади вставленного текста.</p>
+
+		<h3>1.7. zbx_json_addstring(json, name, string, type)</h3>
+
+		<p>Вставляет в то место буфера, куда указывает текущий указатель:</p>
+
+		<ol>
+			<li>запятую <span class="code">,</span>, если текущий статус равен ZBX_JSON_COMMA,</li>
+
+			<li>текст <span class="code">"name":</span>, если аргумент name не равен NULL,</li>
+
+			<li>строку <span class="code">string</span>.</li>
+		</ol>
+
+		<p>Если тип строки type равен ZBX_JSON_TYPE_STRING, то строка string заключается в двойные кавычки. Если string равен NULL, то добавляется строка <span class="code">null</span> без кавычек.</p>
+
+		<p>Текущий указатель передвигается на символ, следующий за последним вставленным, уровень вложенности не меняется, в статус записывается ZBX_JSON_COMMA.</p>
+
+		<p>Весь текст, который ранее лежал в буфере после указателя, сдвигается так, что оказывается позади вставленного текста.</p>
+
+		<h3>1.8. zbx_json_adduint64(json, name, value)</h3>
+
+		<p>Вставляет в то место буфера, куда указывает текущий указатель:</p>
+
+		<ol>
+			<li>запятую <span class="code">,</span>, если текущий статус равен ZBX_JSON_COMMA,</li>
+
+			<li>текст <span class="code">"name":</span>, если аргумент name не равен NULL,</li>
+
+			<li>64-битное беззнаковое число value.</li>
+		</ol>
+
+		<p>Текущий указатель передвигается на символ, следующий за последним вставленным, уровень вложенности не меняется, в статус записывается ZBX_JSON_COMMA.</p>
+
+		<p>Весь текст, который ранее лежал в буфере после указателя, сдвигается так, что оказывается позади вставленного текста.</p>
+
+		<h3>1.9. zbx_json_addint64(json, name, value)</h3>
+
+		<p>Вставляет в то место буфера, куда указывает текущий указатель:</p>
+
+		<ol>
+			<li>запятую <span class="code">,</span>, если текущий статус равен ZBX_JSON_COMMA,</li>
+
+			<li>текст <span class="code">"name":</span>, если аргумент name не равен NULL,</li>
+
+			<li>64-битное число value со знаком.</li>
+		</ol>
+
+		<p>Текущий указатель передвигается на символ, следующий за последним вставленным, уровень вложенности не меняется, в статус записывается ZBX_JSON_COMMA.</p>
+
+		<p>Весь текст, который ранее лежал в буфере после указателя, сдвигается так, что оказывается позади вставленного текста.</p>
+
+		<h3>1.10. zbx_json_close(json)</h3>
+
+		<p>Передвигает текущий указатель так, что пропускается закрывающая фигурная <span class="code">}</span> или квадратная скобка <span class="code">]</span>.</p>
+
+		<p>Уровень вложенности уменьшается на единицу, статус меняется на ZBX_JSON_COMMA.</p>
+
+		<h2>2. Функции Zabbix для разбора JSON</h2>
+
+		<h3>2.1. zbx_json_open(buffer, json)</h3>
+
+		<p>buffer - строка с завершающим нулём, содержащая текст JSON.</p>
+
+		<p>json - структура с указателями на начало и конец фрагмента JSON в буфере buffer.</p>
+
+		<p>Проверяет, что текст в буфере buffer является правильным JSON, инициализирует структуру json. При ошибках возвращает FAIL, в случае успеха - SUCCEED.</p>
+
+		<h3>2.2. zbx_json_next(json, p)</h3>
+
+		<p>json - структура с указателями на начало и конец фрагмента JSON, являющегося массивом.</p>
+
+		<p>p - указатель внутри фрагмента json, указывающий на начальный символ элемента массива или словаря.</p>
+
+		<p>Ищет следующий элемент массива или словаря и возвращает указатель на его начальный символ. Если указанный в p элемент был последним, возвращает NULL.</p>
+
+		<h3>2.3. zbx_json_pair_by_name(json, name)</h3>
+
+		<p>json - структура с указателями на начало и конец фрагмента JSON, являющегося словарём.</p>
+
+		<p>name - имя ключа в словаре, значение которого нужно найти.</p>
+
+		<p>Возвращает указатель на первый символ значения или NULL, если указанного ключа нет в словаре.</p>
+
+		<h3>2.4. zbx_json_brackets_open(p, json)</h3>
+
+		<p>p - указатель на открывающую скобку, указывающую на начало фрагмента JSON, который нужно найти.</p>
+
+		<p>json - структура с указателями на начало и конец фрагмента JSON, являющегося массивом или словарём.</p>
+
+		<p>Ищет в указанном фрагменте JSON открывающую скобку, затем находит парную ей закрывающую скобку и записывает указатели на начало и конец найденного фрагмента в структуру json.</p>
+
+		<p>При ошибках возвращает FAIL, при успешном завершении - SUCCEED.</p>
+
+		<h3>2.5. zbx_json_brackets_by_name(json, name, json_out)</h3>
+
+		<p>json - структура с указателями на начало и конец фрагмента JSON, являющегося словарём.</p>
+
+		<p>name - имя ключа в словаре, значение которого нужно найти.</p>
+
+		<p>json_out - фрагмент JSON, являющийся значением ключа name.</p>
+
+		<p>Ищет в указанном фрагменте JSON указанный ключ, находит открывающую и закрывающую скобки, в структуру json_out записывает указатели на начало и конец найденного фрагмента.</p>
+
+		<p>При ошибках возвращает FAIL, при успешном завершении - SUCCEED.</p>
+
+		<h3>2.6. zbx_json_value_by_name_dyn(json, name, string, string_alloc)</h3>
+
+		<p>json - структура с указателями на начало и конец фрагмента JSON, являющегося словарём.</p>
+
+		<p>name - имя ключа в словаре, значение которого нужно найти.</p>
+
+		<p>string - указатель на указатель на буфер, в который будет помещено найденное значение.</p>
+
+		<p>string_alloc - указатель на переменную с размером буфера.</p>
+
+		<p>Ищет в указанном фрагменте JSON, являющемся словарём, значение элемента с указанным ключом name. Найденное значение записывается в буфер. Если в буфере не было достаточно места для сохранения найденного значения, функция выделяет под буфер другой фрагмент памяти, обновляет указатель на буфер и его размер.</p>
+
+		<h2>3. Новая функция zbx_json_adddbl</h2>
+
+		<p>Немного опережая события, заранее добавим в код Zabbix дополнительную функцию zbx_json_adddbl, которая позже понадобится нам для формирования JSON с данными, вставляемыми в таблицу history с числами с плавающей запятой. Объявление функции добавим в файл include/zbxjson.h, а реализацию функции добавим в файл src/libs/zbxjson/json.c следующим образом:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/include/zbxjson.h
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/include/zbxjson.h
++++ zabbix-3.4.12-1+buster/include/zbxjson.h
+@@ -160,6 +160,7 @@ void        zbx_json_addarray(struct zbx_json *
+ void   zbx_json_addstring(struct zbx_json *j, const char *name, const char *string, zbx_json_type_t type);
+ void   zbx_json_adduint64(struct zbx_json *j, const char *name, zbx_uint64_t value);
+ void   zbx_json_addint64(struct zbx_json *j, const char *name, zbx_int64_t value);
++void   zbx_json_adddbl(struct zbx_json *j, const char *name, double value);
+ int    zbx_json_close(struct zbx_json *j);
+ 
+ int            zbx_json_open(const char *buffer, struct zbx_json_parse *jp);
+Index: zabbix-3.4.12-1+buster/src/libs/zbxjson/json.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxjson/json.c
++++ zabbix-3.4.12-1+buster/src/libs/zbxjson/json.c
+@@ -385,6 +385,14 @@ void       zbx_json_addint64(struct zbx_json *
+        zbx_json_addstring(j, name, buffer, ZBX_JSON_TYPE_INT);
+ }
+ 
++void    zbx_json_adddbl(struct zbx_json *j, const char *name, double value)
++{
++        char    buffer[MAX_ID_LEN];
++
++        zbx_snprintf(buffer, sizeof(buffer), ZBX_FS_DBL, value);
++        zbx_json_addstring(j, name, buffer, ZBX_JSON_TYPE_INT);
++}
++
+ int    zbx_json_close(struct zbx_json *j)
+ {
+        if (1 == j-&gt;level)</pre>
+
+		<h2>4. Доработка основы библиотеки zbxhistory</h2>
+
+		<p>В файле src/libs/zbxhistory/history.c раскомментируем ранее добавленный нами комментарий с намёком на поддержку ClickHouse:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/src/libs/zbxhistory/history.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxhistory/history.c
++++ zabbix-3.4.12-1+buster/src/libs/zbxhistory/history.c
+@@ -62,8 +63,8 @@ int   zbx_history_init(char **error)
+        {
+                if (elastic_url = zbx_strstartswith(opts[i], "elastic,"))
+                        ret = zbx_history_elastic_init(&amp;history_ifaces[i], i, elastic_url, error);
+-               /*else if (clickhouse_url = zbx_strstartswith(opts[i], "clickhouse,"))
+-                       ret = zbx_history_clickhouse_init(&amp;history_ifaces[i], i, clickhouse_url, error);*/
++               else if (clickhouse_url = zbx_strstartswith(opts[i], "clickhouse,"))
++                       ret = zbx_history_clickhouse_init(&amp;history_ifaces[i], i, clickhouse_url, error);
+                else
+                        ret = zbx_history_sql_init(&amp;history_ifaces[i], i, error);</pre>
+
+		<p>В добавленном коде используется указатель на строку clickhouse_url, добавим его объявление:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/src/libs/zbxhistory/history.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxhistory/history.c
++++ zabbix-3.4.12-1+buster/src/libs/zbxhistory/history.c
+@@ -50,6 +50,7 @@ int   zbx_history_init(char **error)
+ {
+        int             i, ret;
+        char            *elastic_url;
++       char            *clickhouse_url;
+        const char      *opts[] = {
+                                CONFIG_HISTORY_STORAGE,
+                                CONFIG_HISTORY_STR_STORAGE,</pre>
+
+		<p>Объявление функции zbx_history_clickhouse_init нужно добавить в заголовочный файл src/libs/zbxhistory/history.h:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/src/libs/zbxhistory/history.h
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxhistory/history.h
++++ zabbix-3.4.12-1+buster/src/libs/zbxhistory/history.h
+@@ -49,4 +49,7 @@ int   zbx_history_sql_init(zbx_history_ifa
+ /* elastic hist */
+ int    zbx_history_elastic_init(zbx_history_iface_t *hist, unsigned char value_type, const char *url, char **error);
+ 
++/* ClickHouse hist */
++int    zbx_history_clickhouse_init(zbx_history_iface_t *hist, unsigned char value_type, const char *url, char **error);
++
+ #endif</pre>
+
+		<h2>5. Добавление файла history_clickhouse.c</h2>
+
+		<p>Перед дальнейшими действиями скопируем файл src/libs/zbxhistory/history_elastic.c в файл src/libs/zbxhistory/history_clickhouse.c и заменим все упоминания Elasticsearch на ClickHouse, в том числе в отладочных сообщениях, комментариях и именах функций.</p>
+
+		<p>Теперь нужно прописать новый файл history_clickhouse.c в Make-файлы src/libs/zbxhistory/Makefile.am и src/libs/zbxhistory/Makefile.in, чтобы они участвовали в процессе сборки:</p>
+
+		<pre class="code">Index: zabbix-3.4.12-1+buster/src/libs/zbxhistory/Makefile.am
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxhistory/Makefile.am
++++ zabbix-3.4.12-1+buster/src/libs/zbxhistory/Makefile.am
+@@ -5,4 +5,5 @@ noinst_LIBRARIES = libzbxhistory.a
+ libzbxhistory_a_SOURCES = \
+        history.c history.h \
+        history_sql.c \
+-       history_elastic.c 
++       history_elastic.c \
++       history_clickhouse.c
+Index: zabbix-3.4.12-1+buster/src/libs/zbxhistory/Makefile.in
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxhistory/Makefile.in
++++ zabbix-3.4.12-1+buster/src/libs/zbxhistory/Makefile.in
+@@ -120,7 +120,8 @@ am__v_AR_1 =
+ libzbxhistory_a_AR = $(AR) $(ARFLAGS)
+ libzbxhistory_a_LIBADD =
+ am_libzbxhistory_a_OBJECTS = history.$(OBJEXT) history_sql.$(OBJEXT) \
+-       history_elastic.$(OBJEXT)
++       history_elastic.$(OBJEXT) \
++       history_clickhouse.$(OBJEXT)
+ libzbxhistory_a_OBJECTS = $(am_libzbxhistory_a_OBJECTS)
+ AM_V_P = $(am__v_P_@AM_V@)
+ am__v_P_ = $(am__v_P_@AM_DEFAULT_V@)
+@@ -366,7 +367,8 @@ noinst_LIBRARIES = libzbxhistory.a
+ libzbxhistory_a_SOURCES = \
+        history.c history.h \
+        history_sql.c \
+-       history_elastic.c 
++       history_elastic.c \
++       history_clickhouse.c
+ 
+ all: all-am
+ 
+@@ -417,6 +419,7 @@ distclean-compile:
+        -rm -f *.tab.c
+ 
+ @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/history.Po@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/history_clickhouse.Po@am__quote@
+ @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/history_elastic.Po@am__quote@
+ @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/history_sql.Po@am__quote@</pre>
+
+		<p>Получилось два полностью аналогичных по сути модуля поддержки хранилищ с разными именами. Продолжим переделку нового модуля. Сначала пройдусь кратко по мелким изменениям.</p>
+
+		<p>В функции clickhouse_writer_flush была удалена обработка сообщений об ошибках Elasticsearch при успешном коде ответа HTTP, т.к. ClickHouse о любых ошибках выполнения запросов всегда сообщает соответствующим кодом статуса HTTP:</p>
+
+		<pre class="code">@@ -402,19 +401,6 @@
+                                zbx_vector_ptr_append(&amp;retries, msg-&gt;easy_handle);
+                                curl_multi_remove_handle(writer.handle, msg-&gt;easy_handle);
+                        }
+-                       else if (CURLE_OK == curl_easy_getinfo(msg-&gt;easy_handle, CURLINFO_PRIVATE, (char **)&amp;curl_page)
+-                                       &amp;&amp; SUCCEED == clickhouse_is_error_present(&amp;curl_page-&gt;page, &amp;error))
+-                       {
+-                               zabbix_log(LOG_LEVEL_WARNING, "%s() %s: %s", __function_name,
+-                                               "cannot send data to ClickHouse", error);
+-                               zbx_free(error);
+-
+-                               /* If the error is due to ClickHouse internal problems (for example an index */
+-                               /* became read-only), we put the handle in a retry list and */
+-                               /* remove it from the current execution loop */
+-                               zbx_vector_ptr_append(&amp;retries, msg-&gt;easy_handle);
+-                               curl_multi_remove_handle(writer.handle, msg-&gt;easy_handle);
+-                       }
+                }
+ 
+                previous = running;</pre>
+
+		<p>Было удалено макроопределение константы ZBX_IDX_JSON_ALLOCATE, т.к. в коде поддержки ClickHouse оно не использовалось.</p>
+
+		<p>В структуре zbx_clickhouse_data_t было удалено поле post_url, т.к. оказалось достаточно уже имеющегося в структуре поля base_url.</p>
+
+		<p>Были удалены функции history_value2str и clickhouse_is_error_present (бывшая elastic_is_error_present), т.к. они больше не используются.</p>
+
+		<p>Что касается доработок по существу, то они затрагивают функции clickhouse_get_values и clickhouse_add_values. Приведу обе функции полностью в окончательном виде:</p>
+
+		<pre class="code">/************************************************************************************
+ *                                                                                  *
+ * Function: clickhouse_get_values                                                  *
+ *                                                                                  *
+ * Purpose: gets item history data from history storage                             *
+ *                                                                                  *
+ * Parameters:  hist    - [IN] the history storage interface                        *
+ *              itemid  - [IN] the itemid                                           *
+ *              start   - [IN] the period start timestamp                           *
+ *              count   - [IN] the number of values to read                         *
+ *              end     - [IN] the period end timestamp                             *
+ *              values  - [OUT] the item history data values                        *
+ *                                                                                  *
+ * Return value: SUCCEED - the history data were read successfully                  *
+ *               FAIL - otherwise                                                   *
+ *                                                                                  *
+ * Comments: This function reads &lt;count&gt; values from [&lt;start&gt;,&lt;end&gt;] interval or    *
+ *           all values from the specified interval if count is zero.               *
+ *                                                                                  *
+ ************************************************************************************/
+static int      clickhouse_get_values(zbx_history_iface_t *hist, zbx_uint64_t itemid, int start, int count, int end,
+                zbx_vector_history_record_t *values)
+{
+        const char              *__function_name = "clickhouse_get_values";
+
+        zbx_clickhouse_data_t   *data = hist-&gt;data;
+        size_t                  sql_alloc = 0, sql_offset;
+        int                     ret = SUCCEED;
+        CURLcode                err;
+        struct curl_slist       *curl_headers = NULL;
+        char                    *sql = NULL, errbuf[CURL_ERROR_SIZE];
+        const char              *p = NULL;
+        struct zbx_json_parse   jp, jp_sub, jp_data, jp_item;
+        zbx_history_record_t    hr;
+
+        zabbix_log(LOG_LEVEL_DEBUG, "In %s()", __function_name);
+
+        if (NULL == (data-&gt;handle = curl_easy_init()))
+        {
+                zabbix_log(LOG_LEVEL_ERR, "cannot initialize cURL session");
+
+                return FAIL;
+        }
+
+        if (ITEM_VALUE_TYPE_LOG == hist-&gt;value_type)
+                zbx_snprintf_alloc(&amp;sql, &amp;sql_alloc, &amp;sql_offset,
+                                "SELECT clock, ns, value, timestamp, source, severity, logeventid"
+                                " FROM %s"
+                                " WHERE itemid=" ZBX_FS_UI64,
+                                value_type_table[hist-&gt;value_type], itemid);
+        else
+                zbx_snprintf_alloc(&amp;sql, &amp;sql_alloc, &amp;sql_offset,
+                                "SELECT clock, ns, value"
+                                " FROM %s"
+                                " WHERE itemid=" ZBX_FS_UI64,
+                                value_type_table[hist-&gt;value_type], itemid);
+
+        if (0 &lt; start)
+                zbx_snprintf_alloc(&amp;sql, &amp;sql_alloc, &amp;sql_offset, " AND clock&gt;%d", start);
+
+        if (0 &lt; end)
+                zbx_snprintf_alloc(&amp;sql, &amp;sql_alloc, &amp;sql_offset, " AND clock&lt;=%d", end);
+
+        zbx_snprintf_alloc(&amp;sql, &amp;sql_alloc, &amp;sql_offset, " ORDER BY clock DESC");
+
+        if (0 &lt; count)
+                zbx_snprintf_alloc(&amp;sql, &amp;sql_alloc, &amp;sql_offset, " LIMIT %d", count);
+
+        zbx_snprintf_alloc(&amp;sql, &amp;sql_alloc, &amp;sql_offset, " FORMAT JSON");
+
+        curl_headers = curl_slist_append(curl_headers, "Content-Type: application/json");
+
+        curl_easy_setopt(data-&gt;handle, CURLOPT_URL, data-&gt;base_url);
+        curl_easy_setopt(data-&gt;handle, CURLOPT_POSTFIELDS, sql);
+        curl_easy_setopt(data-&gt;handle, CURLOPT_WRITEFUNCTION, curl_write_cb);
+        curl_easy_setopt(data-&gt;handle, CURLOPT_WRITEDATA, &amp;page_r);
+        curl_easy_setopt(data-&gt;handle, CURLOPT_HTTPHEADER, curl_headers);
+        curl_easy_setopt(data-&gt;handle, CURLOPT_FAILONERROR, 1L);
+        curl_easy_setopt(data-&gt;handle, CURLOPT_ERRORBUFFER, errbuf);
+
+        zabbix_log(LOG_LEVEL_DEBUG, "sending query to %s; post data: %s", data-&gt;base_url, sql);
+
+        page_r.offset = 0;
+        *errbuf = '\0';
+        if (CURLE_OK != (err = curl_easy_perform(data-&gt;handle)))
+        {
+                clickhouse_log_error(data-&gt;handle, err, errbuf);
+                ret = FAIL;
+                goto out;
+        }
+
+        zabbix_log(LOG_LEVEL_DEBUG, "received from ClickHouse: %s", page_r.data);
+
+        zbx_json_open(page_r.data, &amp;jp);
+        zbx_json_brackets_open(jp.start, &amp;jp_sub);
+        zbx_json_brackets_by_name(&amp;jp_sub, "data", &amp;jp_data);
+
+        while (NULL != (p = zbx_json_next(&amp;jp_data, p)))
+        {
+                if (SUCCEED != zbx_json_brackets_open(p, &amp;jp_item))
+                        continue;
+
+                if (SUCCEED != history_parse_value(&amp;jp_item, hist-&gt;value_type, &amp;hr))
+                        continue;
+
+                zbx_vector_history_record_append_ptr(values, &amp;hr);
+        }
+
+out:
+        clickhouse_close(hist);
+
+        curl_slist_free_all(curl_headers);
+
+        zbx_free(sql);
+
+        zabbix_log(LOG_LEVEL_DEBUG, "End of %s()", __function_name);
+
+        return ret;
+}
+
+/************************************************************************************
+ *                                                                                  *
+ * Function: clickhouse_add_values                                                  *
+ *                                                                                  *
+ * Purpose: sends history data to the storage                                       *
+ *                                                                                  *
+ * Parameters:  hist    - [IN] the history storage interface                        *
+ *              history - [IN] the history data vector (may have mixed value types) *
+ *                                                                                  *
+ ************************************************************************************/
+static int      clickhouse_add_values(zbx_history_iface_t *hist, const zbx_vector_ptr_t *history)
+{
+        const char      *__function_name = "clickhouse_add_values";
+
+        zbx_clickhouse_data_t   *data = hist-&gt;data;
+        int                     i, num = 0;
+        ZBX_DC_HISTORY          *h;
+        struct zbx_json         json;
+        size_t                  buf_offset = 0;
+
+        zabbix_log(LOG_LEVEL_DEBUG, "In %s()", __function_name);
+
+        if (ITEM_VALUE_TYPE_LOG == hist-&gt;value_type)
+                zbx_snprintf_alloc(&amp;data-&gt;buf, &amp;data-&gt;buf_alloc, &amp;buf_offset,
+                                "INSERT INTO %s(itemid, value, timestamp, source, severity, logeventid, clock, ns)"
+                                " FORMAT JSONEachRow\n", value_type_table[hist-&gt;value_type]);
+        else
+                zbx_snprintf_alloc(&amp;data-&gt;buf, &amp;data-&gt;buf_alloc, &amp;buf_offset,
+                                "INSERT INTO %s(itemid, value, clock, ns) FORMAT JSONEachRow\n",
+                                value_type_table[hist-&gt;value_type]);
+
+        for (i = 0; i &lt; history-&gt;values_num; i++)
+        {
+                h = (ZBX_DC_HISTORY *)history-&gt;values[i];
+
+                if (hist-&gt;value_type != h-&gt;value_type)
+                        continue;
+
+                zbx_json_init(&amp;json, ZBX_JSON_ALLOCATE);
+
+                zbx_json_adduint64(&amp;json, "itemid", h-&gt;itemid);
+
+                switch (h-&gt;value_type)
+                {
+                        case ITEM_VALUE_TYPE_STR:
+                        case ITEM_VALUE_TYPE_TEXT:
+                                zbx_json_addstring(&amp;json, "value", h-&gt;value.str, ZBX_JSON_TYPE_STRING);
+                                break;
+                        case ITEM_VALUE_TYPE_LOG:
+                                zbx_json_addstring(&amp;json, "value", h-&gt;value.log-&gt;value, ZBX_JSON_TYPE_STRING);
+                                break;
+                        case ITEM_VALUE_TYPE_FLOAT:
+                                zbx_json_adddbl(&amp;json, "value", h-&gt;value.dbl);
+                                break;
+                        case ITEM_VALUE_TYPE_UINT64:
+                                zbx_json_adduint64(&amp;json, "value", h-&gt;value.ui64);
+                                break;
+                }
+
+                if (ITEM_VALUE_TYPE_LOG == h-&gt;value_type)
+                {
+                        const zbx_log_value_t   *log;
+
+                        log = h-&gt;value.log;
+
+                        zbx_json_adduint64(&amp;json, "timestamp", log-&gt;timestamp);
+                        zbx_json_addstring(&amp;json, "source", ZBX_NULL2EMPTY_STR(log-&gt;source), ZBX_JSON_TYPE_STRING);
+                        zbx_json_adduint64(&amp;json, "severity", log-&gt;severity);
+                        zbx_json_adduint64(&amp;json, "logeventid", log-&gt;logeventid);
+                }
+
+                zbx_json_adduint64(&amp;json, "clock", h-&gt;ts.sec);
+                zbx_json_adduint64(&amp;json, "ns", h-&gt;ts.ns);
+
+                zbx_json_close(&amp;json);
+
+                zbx_snprintf_alloc(&amp;data-&gt;buf, &amp;data-&gt;buf_alloc, &amp;buf_offset, "%s\n", json.buffer);
+
+                zbx_json_free(&amp;json);
+
+                num++;
+        }
+
+        if (num &gt; 0)
+                clickhouse_writer_add_iface(hist);
+
+        zabbix_log(LOG_LEVEL_DEBUG, "End of %s()", __function_name);
+
+        return num;
+}</pre>
+
+		<p>При доработке функции clickhouse_get_values массив строковых констант value_type_str был заменён на массив строковых констант value_type_table:</p>
+
+		<pre class="code">-const char      *value_type_str[] = {"dbl", "str", "log", "uint", "text"};
++const char      *value_type_table[] = {"history", "history_str", "history_log", "history_uint", "history_text"};</pre>
+
+		<p>Из всех сделанных изменений отдельно остановлюсь на исправлении одной из ошибок, которая перекочевала в файл history_clickhouse.c из файла history_elastic.c. Не могу скзать, является ли это ошибкой в исходном файле, но в коде поддержки ClickHouse эта проблема проявлялась следующим образом: в журнале сервера Zabbix при попытках вставки новых данных в таблицы истории в файле /var/log/zabbix/zabbix_server.log появлялись ошибки "400 Bad Request", хотя на первый взгляд данные в таблицы всё-таки записывались.</p>
+
+		<p>Оказалось, что часть запросов к ClickHouse были попросту пустыми POST-запросами. Более пристальное изучение причин проблемы позволило обнаружить ошибку: при формировании запроса к ClickHouse на вставку данных иногда, при попытке добавить в него очередное значение, данные в буфере попросту очищались. Получившийся пустой запрос и выполнялся, из-за чего ClickHouse периодически сообщал об ошибках, а графики в веб-интерфейсе прерывались.</p>
+
+		<p>В функции добавки значений использовался уже распределённый ранее буфер hist-&gt;data-&gt;buf, но при каждом вызове этой функции считалось, что его размер buf_alloc равен нулю. Вот как это выглядит в исходном модуле history_elastic.c:</p>
+
+		<pre class="code">static int      elastic_add_values(zbx_history_iface_t *hist, const zbx_vector_ptr_t *history)
+{
+        const char      *__function_name = "elastic_add_values";
+
+        zbx_elastic_data_t      *data = hist-&gt;data;
+        int                     i, num = 0;
+        ZBX_DC_HISTORY          *h;
+        struct zbx_json         json_idx, json;
+        size_t                  buf_alloc = 0, buf_offset = 0;</pre>
+
+		<p>Чтобы устранить ошибку, я решил вынести переменную с размером буфера из тела функции в структуру, содержащую указатель на буфер:</p>
+
+		<pre class="code"> typedef struct
+ {
+         char    *base_url;
+         char    *buf;
++        size_t  buf_alloc;
+         CURL    *handle;
+ }
+ zbx_clickhouse_data_t;</pre>
+
+		<p>После этой доработки сервер Zabbix, наконец, начал исправно писать данные в ClickHouse.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Поддержка хранилища ClickHouse в сервере Zabbix 3.4">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

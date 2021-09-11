@@ -1,0 +1,179 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="stretch,debian,linux,letsencrypt,certbot,ssl" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2019-03-17 -->
+		<title>Получение SSL-сертификата от удостоверяющего центра Let's Encrypt в Debian Stretch</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Получение SSL-сертификата от удостоверяющего центра Let's Encrypt в Debian Stretch</h1>
+
+		<p>В черновиках скопилось некоторое количество готовых статей, которые хотелось ещё чем-то дополнить, из-за чего они и не были опубликованы своевременно. Например, эта статья была написана аж в октябре 2017 года. О некоторых статьях я уже не помню, чем ещё я хотел их дополнить. Про другие помню, но сейчас их доведение до задуманного вида не является для меня приоритетной задачей. Думаю, что лучше опубликовать всё как есть, а дополнять можно уже впоследствии отдельными статьями.</p>
+
+		<p>В последние годы администраторы и пользователи интернет всё чаще обращают внимание на безопасность. Увлечение защищёнными версиями протоколов приняло настолько повальный характер, что некоторые начали перегибать палку и требовать наличия сертификатов даже там, где они вроде бы и не нужны. Например, когда я обновлял операционную систему Debian с Jessie на Stretch, то система управления источниками бесперебойного питания NUT стала требовать использования SSL-сертификатов, хотя этот сервис вовсе не публичный и доступен только на локальном петлевом интерфейсе. Многие системные администраторы совсем не против того, чтобы увеличить безопасность своих систем. Одна беда - сертификаты иногда стоят несоразмерно дорого для сервиса, которым пользуются несколько человек. До этого я пользовался бесплатными сертификатами, которые предоставлял удостоверяющий центр <a href="https://startssl.com">StartCom</a>. Однако этот удостоверяющий центр сменил владельцев, которые теперь находятся в Китае.</p>
+
+		<ul>
+			<li><a href="https://www.opennet.ru/opennews/art.shtml?num=45368">[25.10.2016] Mozilla перестаёт доверять новым сертификатам WoSign и StartCom</a></li>
+
+			<li><a href="https://www.opennet.ru/opennews/art.shtml?num=46823">[08.07.2017] Google предупредил о скором прекращении доверия ко всем сертификатам WoSign и StartCom</a></li>
+		</ul>
+
+		<p>Не исключаю предвзятости по отношению к этому удостоверяющему центру. Вполне возможно, что он и раньше был не безопасен, но это замалчивали, т.к. владельцы были израильскими, а у США и Израиля довольно доверительные отношения. Теперь же, когда сервис сменил владельца, его безопасностью начали интересоваться особо внимательно. Так или иначе, даже если с сервисом всё в порядке - ему не доверяют компании, разрабатывающие два самых влиятельных браузера, поэтому пользоваться такими сертификатами особого смысла нет, т.к. по качеству они мало чем отличаются от самозаверенных.</p>
+
+		<p>В последнее время на слуху новый удостоверяющий центр Let's Encrypt, который был создан как ответ на постоянные проблемы с безопасностью сервисов и высокую цену на сертификаты удостоверяющих центров. Первые новости о его публичной доступности появились ещё в конце 2015 года, до скандалов с StartCom:</p>
+
+		<p><a href="https://www.opennet.ru/opennews/art.shtml?num=43452">[03.12.2015] Некоммерческий удостоверяющий центр Let's Encrypt начал выдачу сертификатов всем желающим</a>.</p>
+
+		<p>Начал писать статью о настройке Jabber-сервера Prosody и в процессе написания раздела о настройке SSL решил попробовать новый удостоверяющий центр. Описал процесс получения сертификата, но потом решил, что описание этой процедуры имеет самостоятельную ценность и решил вынести в отдельную статью, которую вы сейчас и читаете.</p>
+
+		<h2>1. Получение сертификатов</h2>
+
+		<p>У сервиса <a href="https://letsencrypt.org/">Let's Encrypt</a> нет веб-интерфейса, как у других удостоверяющих центров. Для создания сертификата используется протокол ACME. Протокол этот реализован в боте CertBot, пакет с которым имеется в репозитории Debian Stretch. Установим бота:</p>
+
+		<pre class="console"># apt-get install certbot</pre>
+
+		<p>После установки бота, запустим его от имени пользователя root:</p>
+
+		<pre class="console"># certbot certonly --manual
+Saving debug log to /var/log/letsencrypt/letsencrypt.log
+Enter email address (used for urgent renewal and security notices) (Enter 'c' to
+cancel):vladimir@stupin.su
+
+-------------------------------------------------------------------------------
+Please read the Terms of Service at
+https://letsencrypt.org/documents/LE-SA-v1.1.1-August-1-2016.pdf. You must agree
+in order to register with the ACME server at
+https://acme-v01.api.letsencrypt.org/directory
+-------------------------------------------------------------------------------
+(A)gree/(C)ancel: A</pre>
+
+		<p>Здесь нас просят ознакомиться с лицензионным соглашением, которое размещается по ссылке <a href="https://letsencrypt.org/documents/LE-SA-v1.1.1-August-1-2016.pdf">https://letsencrypt.org/documents/LE-SA-v1.1.1-August-1-2016.pdf</a> С вас как минимум требуется, чтобы вы получали сертификаты только для тех доменов, которыми владеете, а также требуется отзывать сертификаты, если у вас имеются подозрения о взломе ваших серверов или сертификатов. Нажимаем кнопку A, чтобы принять соглашение.</p>
+
+		<pre class="console">Please enter in your domain name(s) (comma and/or space separated)  (Enter 'c'
+to cancel):stupin.su
+Obtaining a new certificate
+Performing the following challenges:
+http-01 challenge for stupin.su
+
+-------------------------------------------------------------------------------
+NOTE: The IP of this machine will be publicly logged as having requested this
+certificate. If you're running certbot in manual mode on a machine that is not
+your server, please ensure you're okay with that.
+
+Are you OK with your IP being logged?
+-------------------------------------------------------------------------------
+(Y)es/(N)o: Y</pre>
+
+		<p>Здесь вас предупреждают, что IP-адрес, с которого будет отправлен запрос на получение сертификата, будет сохранён в общедоступный журнал. Если вы запускаете бота не на своём сервере, то подтвердите, что получили на это разрешение владельца. Нажимаем кнопку Y, чтобы подтвердить отправку запроса на получение сертификата.</p>
+
+		<pre class="console">-------------------------------------------------------------------------------
+Make sure your web server displays the following content at
+http://stupin.su/.well-known/acme-challenge/VQaUp_Q225nyu_beedJzbDhRHmLt8y7W4dSBrZ4YIt4 before continuing:
+
+VQaUp_Q225nyu_beedJzbDhRHmLt8y7W4dSBrZ4YIt4.AxZB-wyvXtEUAxRRJN5bDGyEo5uDO7aVvEgrJ7PVgoo
+
+If you don't have HTTP server configured, you can run the following
+command on the target server (as root):
+
+mkdir -p /tmp/certbot/public_html/.well-known/acme-challenge
+cd /tmp/certbot/public_html
+printf "%s" VQaUp_Q225nyu_beedJzbDhRHmLt8y7W4dSBrZ4YIt4.AxZB-wyvXtEUAxRRJN5bDGyEo5uDO7aVvEgrJ7PVgoo &gt; .well-known/acme-challenge/VQaUp_Q225nyu_beedJzbDhRHmLt8y7W4dSBrZ4YIt4
+# run only once per server:
+$(command -v python2 || command -v python2.7 || command -v python2.6) -c \
+"import BaseHTTPServer, SimpleHTTPServer; \
+s = BaseHTTPServer.HTTPServer(('', 80), SimpleHTTPServer.SimpleHTTPRequestHandler); \
+s.serve_forever()" 
+-------------------------------------------------------------------------------
+Press Enter to Continue</pre>
+
+		<p>Чтобы подтвердить владение доменом, нас просят разместить по адресу http://stupin.su/.well-known/acme-challenge/VQaUp_Q225nyu_beedJzbDhRHmLt8y7W4dSBrZ4YIt4 следующее содержимое:</p>
+
+		<pre class="code">VQaUp_Q225nyu_beedJzbDhRHmLt8y7W4dSBrZ4YIt4.AxZB-wyvXtEUAxRRJN5bDGyEo5uDO7aVvEgrJ7PVgoo</pre>
+
+		<p>Перейдём в корневой каталог документов веб-сервера, создадим необходимые для подтверждения каталоги:</p>
+
+		<pre class="console"># cd /var/www/
+# mkdir -p .well-known/acme-challenge
+# cd .well-known/acme-challenge/</pre>
+
+		<p>Теперь воспользуемся текстовым редактором, создав файл с именем VQaUp_Q225nyu_beedJzbDhRHmLt8y7W4dSBrZ4YIt4 и добавим в него указанное выше содержимое. Теперь нажимаем Enter, чтобы удостоверяющий центр проверил наличие файла и тем самым убедился во владении доменом.</p>
+
+		<pre class="console">Waiting for verification...
+Cleaning up challenges
+Generating key (2048 bits): /etc/letsencrypt/keys/0000_key-certbot.pem
+Creating CSR: /etc/letsencrypt/csr/0000_csr-certbot.pem
+
+IMPORTANT NOTES:
+ - Congratulations! Your certificate and chain have been saved at
+   /etc/letsencrypt/live/stupin.su/fullchain.pem. Your cert will
+   expire on 2017-11-04. To obtain a new or tweaked version of this
+   certificate in the future, simply run certbot again. To
+   non-interactively renew *all* of your certificates, run "certbot
+   renew"
+ - If you lose your account credentials, you can recover through
+   e-mails sent to vladimir@stupin.su.
+ - Your account credentials have been saved in your Certbot
+   configuration directory at /etc/letsencrypt. You should make a
+   secure backup of this folder now. This configuration directory will
+   also contain certificates and private keys obtained by Certbot so
+   making regular backups of this folder is ideal.
+ - If you like Certbot, please consider supporting our work by:
+
+   Donating to ISRG / Let's Encrypt:   https://letsencrypt.org/donate
+   Donating to EFF:                    https://eff.org/donate-le</pre>
+
+		<p>Готовый сертификат лежит в файле /etc/letsencrypt/live/stupin.su/fullchain.pem и годен до 4 ноября. Если учётная запись будет утрачена, её можно будет восстановить через указанный вами ящик электронной почты. Если понадобится обновить все сертификаты, сделать это можно при помощи одной команды:</p>
+		
+		<pre class="console"># certbot renew</pre>
+
+		<p>Удалим более не нужные файлы, которые использовались для подтверждения владения доменом:</p>
+
+		<pre class="console"># cd /var/www/
+# rm -R .well-known</pre>
+
+		<p>Если нужно будет получить ещё один сертификат, это можно сделать точно таким же образом. Единственное отличие будет заключаться в том, что второй раз у вас не будут спрашивать адрес электронной почты.</p>
+
+		<p>Дополнительно я бы посоветовал сменить права доступа к приватному ключу сертификата. Лучше чтобы к нему имел доступ только пользователь root или тот пользователь, от имени которого будет работать использующая его программа. Отобрать права у прочих пользователей ко всем приватным ключам можно следующим образом:</p>
+
+		<pre class="console"># chmod o= /etc/letsencrypt/archive/*/privkey*.pem</pre>
+
+		<h2>2. Обновление сертификатов</h2>
+
+		<p>Для беспроблемного дальнейшего обновления сертификатов добавим в файл /etc/letsencrypt/cli.ini следующие настройки:</p>
+
+		<pre class="code">manual-auth-hook /etc/letsencrypt/authenticator.sh
+manual-cleanup-hook /etc/letsencrypt/cleanup.sh
+manual-public-ip-logging-ok yes</pre>
+
+		<p>Эти настройки указывают скрипты, при помощи которых в каталоге веб-сервера сначала размещаются файлы для проверки владения доменом, а затем, после проверки, удаляются из этого каталога. Третья настройка даёт согласие зарегистрировать IP-адрес вашего сервера в журнале удостоверяющего центра, где отмечается информация обо всех выданных сертификатах. В будущем имеется вероятность, что этот журнал станет общественно-доступным и в него можно будет заглянуть, чтобы узнать подробности о выданном кому-либо сертификате.</p>
+
+		<p>Первый скрипт /etc/letsencrypt/authenticator.sh содержит внутри себя следующие команды:</p>
+
+		<pre class="code">#!/bin/sh
+
+mkdir -p /var/www/.well-known/acme-challenge
+echo $CERTBOT_VALIDATION &gt; /var/www/.well-known/acme-challenge/$CERTBOT_TOKEN</pre>
+
+		<p>Второй скрипт /etc/letsencrypt/cleanup.sh содержит внутри себя следующие команды:</p>
+
+		<pre class="code">#!/bin/sh
+
+rm -f /var/www/.well-known/acme-challenge/$CERTBOT_TOKEN
+rmdir /var/www/.well-known/acme-challenge
+rmdir /var/www/.well-known</pre>
+
+		<p>Теперь для обновления сертификатов можно будет воспользоваться одной командой:</p>
+
+		<pre class="console"># certboot renew</pre>
+
+		<p>Стоит однако учитывать, что эти скрипты размещают файлы для проверки всегда в одном и том же месте, вне зависимости от домена. Веб-сервер должен выдавать содержимое каталога /var/www/.well-known/acme-challenge/ при обращении по адресу домена к любому документу по ссылке http://&lt;домен&gt;/.well-known/acme-challenge/&lt;имя_файла&gt;</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Получение SSL-сертификата от удостоверяющего центра Let's Encrypt в Debian Stretch">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

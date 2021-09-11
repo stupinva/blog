@@ -1,0 +1,276 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="lighttpd,spawn-fcgi,fastcgi,debian,php,perl" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2012-03-27 -->
+		<title>Шпаргалка по настройке веб-сервера Lighttpd</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Шпаргалка по настройке веб-сервера Lighttpd</h1>
+
+		<p>Я давно пользуюсь веб-сервером Lighttpd и часто замечаю, что этот веб-сервер часто незаслуженно обходят стороной, отдавая предпочтение его более популярным коллегам nginx и Apache. У меня он давно заменил собой Apache, а об использовании nginx я даже не особо задумывался, потому что по принципу работы он похож на Lighttpd, а по возможностям, кажется, ни в чём ему не уступает.</p>
+
+		<p>Хочу показать некоторые из его возможностей, которыми я пользуюсь уже более четырёх лет. Возможно этот пост поможет кому-то посмотреть на Lighttpd как на альтернативу вышеозначенным серверам и предоставит начальные сведения, необходимые для того, чтобы начать им пользоваться.</p>
+
+		<h2>1. Псевдонимы файлов и каталогов</h2>
+
+		<p>Настройка псевдонимов каталогов. Часто веб-приложения устанавливаются в каталог, отличный от корня документов веб-сервера. Чтобы такие веб-приложения заработали, нужно включить и настроить модуль mod_alias:</p>
+
+		<pre class="code">server.modules  += ( "mod_alias" )
+alias.url += (
+  "/munin/" =&gt; "/var/cache/munin/www/",
+  "/cacti/" =&gt; "/usr/share/cacti/site/",
+  "/dokuwiki/" =&gt; "/usr/share/dokuwiki/",
+  "/wordpress/" =&gt; "/usr/share/wordpress/",
+  "/awstats/cgi-bin/" =&gt; "/usr/lib/cgi-bin/",
+  "/awstats/docs/" =&gt; "/usr/share/doc/awstats/html/",
+  "/awstats/icon/" =&gt; "/usr/share/awstats/icon/",
+  "/awstats/css/" =&gt; "/usr/share/awstats/css/",
+  "/awstats/classes/" =&gt; "/usr/share/awstats/classes/",
+  "/postfixadmin/" =&gt; "/usr/share/postfixadmin/",
+  "/mail/" =&gt; "/usr/share/squirrelmail/"
+)</pre>
+
+		<p>Чтобы выдавать пользователям с разными IP-адресами разное содержимое, можно воспользоваться условными блоками:</p>
+
+		<pre class="code">$HTTP["remoteip"] =~ "10.0.0." { alias.url += ( "/wpad.dat" =&gt; "/var/www/wpad-office.dat" ) }
+
+$HTTP["remoteip"] =~ "10.0.1." { alias.url += ( "/wpad.dat" =&gt; "/var/www/wpad-agency.dat" ) }</pre>
+
+		<h2>2. Аутентификация при доступе к каталогу</h2>
+
+		<p>Чтобы защитить некоторые каталоги сайта паролем, можно воспользоваться модулем mod_auth (я обычно использую бэкенд htdigest):</p>
+
+		<pre class="code">server.modules += ( "mod_auth" )
+
+auth.backend = "htdigest"
+auth.backend.htdigest.userfile = "/etc/lighttpd/htdigest"
+
+auth.require = (
+  "/RPC2" =&gt;
+  (
+    "method" =&gt; "digest",
+    "realm" =&gt; "rTorrent RPC",
+    "require" =&gt; "user=rtorrent"
+  ),
+  "/stat/" =&gt;
+  (
+    "method"  =&gt; "digest",
+    "realm"   =&gt; "lightsquid statistics",
+    "require" =&gt; "valid-user"
+  ),
+  "/postadmin/" =&gt;
+  (
+    "method"  =&gt; "digest",
+    "realm"   =&gt; "postadmin",
+    "require" =&gt; "valid-user"
+  )
+)</pre>
+
+		<p>Для управления файлом паролей в Debian можно установить пакет apache2-utils, в нём есть программы htpasswd для управления файлом паролей для бэкенда plain и htdigest для управления файлом паролей бэкенда htdigest.</p>
+
+		<p>Почитайте документацию - модуль mod_auth позволяет брать пользователей из каталога LDAP (в том числе Active Directory).</p>
+
+		<p>К примеру, вот так создаётся файл паролей с одним новым пользователем:</p>
+
+		<pre class="console">$ htdigest -c /etc/lighttpd/htdigest "realm text" user</pre>
+
+		<p>Для добавления новых пользователей в уже существующий файл нужно воспользоваться той же командой, но без опции -c:</p>
+
+		<pre class="console">$ htdigest /etc/lighttpd/htdigest "realm text" user</pre>
+
+		<h2>3. Классический CGI</h2>
+
+		<p>Для запуска классических CGI-скриптов можно воспользоваться модулем mod_cgi:</p>
+
+		<pre class="code">server.modules  += ( "mod_cgi" )
+$HTTP["url"] =~ "^/cgi-bin/" { cgi.assign = ( "" =&gt; "" ) }
+
+cgi.assign   = ( ".py"  =&gt; "/usr/bin/python", )</pre>
+
+		<p>В этом примере опять используется условный блок, однако на сей раз условие зависит от URL запрошенного файла. В этом примере для всех файлов, находящихся в каталоге /cgi-bin/ веб-сервера, осуществляется их запуск. Выбор интерпретатора для скриптов осуществляется по первой строчке скрипта, она должна начинаться с символов #! (she-bang) с последующим полным путём к интерпретатору. Для остальных файлов с расширением .py осуществляется их запуск в интерпретаторе языка Python.</p>
+
+		<h2>4. Модуль FastCGI</h2>
+
+		<p>Протокол FastCGI является логическим продолжением идеи CGI. Процесс, работающий по этому протоколу, запускается однажды и обрабатывает несколько последовательных запросов без перезапуска. Этот подход позволяет сэкономить ресурсы на чтение сценария, его трансляцию во внутренне представление интерпретатора, на инициализацию структур данных, необходимых для обработки каждого запроса - все эти этапы выполняются только один раз - при запуске процесса.</p>
+
+		<pre class="code">server.modules   += ( "mod_fastcgi" )
+
+fastcgi.server = (
+  ".php" =&gt;
+  (
+    (
+      "host" =&gt; "10.0.0.1",
+      "port" =&gt; 8080,
+    ),
+    (
+      "bin-path" =&gt; "/usr/bin/php5-cgi",
+      "socket" =&gt; "/tmp/php.socket",
+      "max-procs" =&gt; 2,
+      "idle-timeout" =&gt; 20,
+      "bin-environment" =&gt;
+      (
+        "PHP_FCGI_CHILDREN" =&gt; "4",
+        "PHP_FCGI_MAX_REQUESTS" =&gt; "10000"
+      ),
+      "bin-copy-environment" =&gt;
+      (
+        "PATH",
+        "SHELL",
+        "USER"
+      ),
+      "broken-scriptfilename" =&gt; "enable"
+    )
+  ),
+  "/fcgi.pl" =&gt;
+  (
+    (
+      "bin-path" =&gt; "/var/www/fcgi.pl",
+      "socket" =&gt; "/tmp/fcgi-pl.socket",
+      "max-procs" =&gt; 2,
+      "idle-timeout" =&gt; 20,
+      "bin-copy-environment" =&gt;
+      (
+        "PATH",
+        "SHELL",
+        "USER"
+      ),
+      "broken-scriptfilename" =&gt; "enable"
+    )
+  )
+)</pre>
+
+		<p>В этом примере обработкой файлов с расширением .php занимаются два бэкенда. Один бэкенд автономный, расположен на удалённом компьютере с IP-адресом 10.0.0.1 на порту 8080. Второй бэкенд управляется самим сервером Lighttpd, который порождает новые процессы FastCGI, когда они нужны, перезапускает их, когда они отработают заданные 10000 запросов и уничтожает их избыточное количество по истечении установленного времени простоя. Доступ к порождаемым процессам осуществляется через UNIX-сокеты.</p>
+
+		<p>Ещё один бэкенд является полноценным FastCGI-приложением на Perl. Он тоже управляется Lighttpd, доступ тоже осуществляется через UNIX-сокеты.</p>
+
+		<p>Для управления автономными FastCGI-серверами можно воспользоваться менеджером процессов из пакета spawn-fcgi, который умеет порождать, перезапускать и убивать процессы FastCGI. Для запуска этого менеджера процессов можно воспользоваться следующим сценарием инициализации:</p>
+
+		<pre class="code">#!/bin/sh
+
+### BEGIN INIT INFO
+# Provides:          spawn-fcgi-php
+# Required-Start:    $all
+# Required-Stop:     $all
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: starts FastCGI for PHP
+# Description:       starts FastCGI for PHP using start-stop-daemon
+### END INIT INFO
+
+PATH=/sbin:/bin:/usr/sbin:/usr/bin
+NAME=spawn-fcgi-php-user1
+PID=/var/run/spawn-fcgi-php-user1.pid
+DAEMON=/usr/bin/spawn-fcgi
+DAEMON_OPTS="-f /usr/bin/php-cgi -a 10.0.0.1 -p 8080 -u user1 -g user1 -P $PID"
+
+test -x $DAEMON || exit 0
+
+set -e
+
+case "$1" in
+  start)
+    echo "Starting $NAME: "
+    start-stop-daemon --start --pidfile $PID --exec $DAEMON -- $DAEMON_OPTS
+    echo "done."
+    ;;
+  stop)
+    echo "Stopping $NAME: "
+    start-stop-daemon --stop  --pidfile $PID --retry 5
+    rm -f $PID
+    echo "done."
+    ;;
+  restart)
+    echo "Stopping $NAME: "
+    start-stop-daemon --stop  --pidfile $PID --retry 5
+    rm -f $PID
+    echo "done..."
+    sleep 1
+    echo "Starting $NAME: "
+    start-stop-daemon --start --pidfile $PID --exec $DAEMON -- $DAEMON_OPTS
+    echo "done."
+    ;;
+  *)
+    echo "Usage: /etc/init.d/$NAME {start|stop|restart}" &gt;&amp;2
+    exit 1
+    ;;
+esac
+
+exit 0</pre>
+
+		<p>Этот сценарий породит менеджер процессов для запуска файлов PHP от имени пользователя user1. FastCGI-бэкенд будет доступен на IP-адресе 10.0.0.1, на порту 8080.</p>
+
+		<p>Я предпочитаю использовать именно spawn-fcgi, а не php-fpm, т.к. первый является, на мой взгляд более надёжным, потому что в полной мере проповедует модульный подход к построению программного обеспечения. Похоже, я не одинок, и разработчики Debian придерживаются точно такого-же мнения, избегая включать php-fpm в стабильный дистрибутив Debian.</p>
+
+		<p>Хочу отметить, что выполнение сценариев PHP в режиме FastCGI не столь эффективно, каким могло бы быть. Это связано с тем, что файл PHP, хоть и не требует повторного запуска интерпретатора и трансляции кода выполняемого скрипта, но выполняется каждый раз от начала и до конца, включая код инициализации и деинициализации. При обработке каждого нового запроса заново открываются подключения к базам данных, осуществляется чтение файлов конфигурации, загрузка шаблонов HTML-страниц.</p>
+
+		<p>Чтобы проиллюстрировать сказанное, а заодно и закончить рассмотрение модуля mod_fastcgi, приведу пример простейшего FastCGI-приложения на Perl с использованием модуля CGI::Fast:</p>
+
+		<pre class="code">#!/usr/bin/perl -w
+
+use strict;
+use CGI::Fast;
+
+# Инициализация: загрузка ресурсов,
+# установка подключения к БД
+
+my $counter = 0;
+while(my $q = CGI::Fast-&gt;new)
+{
+  $counter++;
+  print "Content-Type: text/html\n\n";
+  print "Я обработал $counter запросов!\n";
+
+  my %params = $q-&gt;Vars;
+  while (my ($k, $v) = each %params)
+  {
+    print "$k = $v\n";
+  }
+}
+
+# Закрытие ресурсов / подключений</pre>
+
+		<p>Запросы обрабатываются строго поочерёдно. Для ускорения обработки запросов и нужен менеджер процессов, который породит оптимальное количество FastCGI-процессов и распределит между ними нагрузку. Он же должен убивать простаивающие процессы или перезапускать процессы, обработавшие определённое максимальное количество запросов - во избежание утечки памяти.</p>
+
+		<p>Пример на Perl взят отсюда: <a href="http://www.zahodi-ka.ru/dev/puskach/nginx_perl_puskach.shtml">Связка Nginx + Пускач + FastCGI на Perl</a>. На том же сайте можно почитать подробнее о том, что собой представляет FastCGI изнутри.</p>
+
+		<h2>5. Модуль SCGI</h2>
+
+		<p><a href="http://ru.wikipedia.org/wiki/SCGI">SCGI</a> похож на FastCGI и хотя менее популярен, всё же используется в некоторых приложениях. Например, программа rtorrent работает как сервер SCGI, позволяя управлять собой с использованием этого протокола. Этим пользуется, например, веб-интерфейс rutorrent. Пример их настройки можно посмотреть здесь: <a href="../rtorrent-rutorrent/">rtorrent + rutorrent</a>. Краткий пример настройки модуля mod_scgi именно для этого случая приведён ниже:</p>
+
+		<pre class="code">server.modules += ( "mod_scgi" )
+
+scgi.server = (
+  "/RPC2" =&gt;
+  (
+    "127.0.0.1" =&gt;
+    (
+      "host" =&gt; "127.0.0.1",
+      "port" =&gt; 5000,
+      "check-local" =&gt; "disable",
+      "disable-time" =&gt; 0  # don't disable scgi if connection fails
+    )
+  )
+)</pre>
+
+		<p>У веб-сервера Lighttpd имеется много других модулей, среди которых есть, например mod_rewrite, mod_proxy, о которых можно прочитать в документации, поставляемой в комплекте с самим веб-сервером или на вики-странице разработчиков: <a href="http://redmine.lighttpd.net/projects/lighttpd/wiki">http://redmine.lighttpd.net/projects/lighttpd/wiki</a>.</p>
+
+		<h2>6. Материалы на русском языке:</h2>
+
+		<ul>
+			<li><a href="https://wiki.archlinux.org/index.php/Lighttpd_%28%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9%29">Lighttpd</a>,</li>
+
+			<li><a href="http://netsago.org/ru/docs/2/6/">Веб-сервер lighttpd</a>,</li>
+
+			<li><a href="http://silinio.webhost.ru/lighttpd/index.html">Документация по web-серверу Lighttpd (version 1.3.16)</a> - старая, но всё равно полезная.</li>
+		</ul>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Шпаргалка по настройке веб-сервера Lighttpd">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

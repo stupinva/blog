@@ -1,0 +1,759 @@
+Index: zabbix-3.4.12-1+buster/include/zbxhistory.h
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/include/zbxhistory.h
++++ zabbix-3.4.12-1+buster/include/zbxhistory.h
+@@ -34,6 +34,22 @@ void	zbx_history_record_vector_clean(zbx
+ void	zbx_history_record_vector_destroy(zbx_vector_history_record_t *vector, int value_type);
+ void	zbx_history_record_clear(zbx_history_record_t *value, int value_type);
+ 
++/* the item history value for valuecache */
++typedef struct
++{
++	uint64_t	itemid;
++	unsigned char	value_type;
++	zbx_timespec_t	timestamp;
++	history_value_t	value;
++}
++zbx_valuecache_record_t;
++
++ZBX_VECTOR_DECL(valuecache_record, zbx_valuecache_record_t);
++
++void	zbx_valuecache_record_vector_clean(zbx_vector_valuecache_record_t *vector);
++void	zbx_valuecache_record_vector_destroy(zbx_vector_valuecache_record_t *vector);
++void	zbx_valuecache_record_clear(zbx_valuecache_record_t *value);
++
+ void	zbx_history_value2str(char *buffer, size_t size, history_value_t *value, int value_type);
+ 
+ /* In most cases zbx_history_record_vector_destroy() function should be used to free the  */
+@@ -47,6 +63,8 @@ int	zbx_history_init(char **error);
+ void	zbx_history_add_values(const zbx_vector_ptr_t *values);
+ int	zbx_history_get_values(zbx_uint64_t itemid, int value_type, int start, int count, int end,
+ 		zbx_vector_history_record_t *values);
++int     zbx_history_preload_values(const zbx_vector_uint64_t *itemids, int value_type, int age,
++		int count, zbx_vector_valuecache_record_t *values);
+ 
+ int	zbx_history_requires_trends(int value_type);
+ 
+Index: zabbix-3.4.12-1+buster/src/libs/zbxhistory/history.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxhistory/history.c
++++ zabbix-3.4.12-1+buster/src/libs/zbxhistory/history.c
+@@ -26,6 +26,7 @@
+ #include "../zbxalgo/vectorimpl.h"
+ 
+ ZBX_VECTOR_IMPL(history_record, zbx_history_record_t);
++ZBX_VECTOR_IMPL(valuecache_record, zbx_valuecache_record_t);
+ 
+ extern char	*CONFIG_HISTORY_STORAGE;
+ extern char	*CONFIG_HISTORY_UINT_STORAGE;
+@@ -189,6 +190,70 @@ int	zbx_history_get_values(zbx_uint64_t
+ 
+ /************************************************************************************
+  *                                                                                  *
++ * Function: zbx_history_preload_values                                             *
++ *                                                                                  *
++ * Purpose: gets item values from history storage                                   *
++ *                                                                                  *
++ * Parameters:  itemids    - [IN] the required item identifiers                     *
++ *              value_type - [IN] the item value type                               *
++ *              age        - [IN] the maximum age of values in seconds              *
++ *              count      - [IN] the maximum number of item values to read         *
++ *              values     - [OUT] the item history data values                     *
++ *                                                                                  *
++ * Return value: SUCCEED - the history data were read successfully                  *
++ *               FAIL - otherwise                                                   *
++ *                                                                                  *
++ * Comments: This function reads <count> values of every specified item,            *
++ *           but not older than <age> in seconds.                                   *
++ *           If <count> is zero, will be readed all values not older than <age>.    *
++ *           If <age> is zero, will be readed <count> values of every specified     *
++ *           item.                                                                  *
++ *           If <count> and <age> is zeros both, loading will return no data.       *
++ *                                                                                  *
++ ************************************************************************************/
++int	zbx_history_preload_values(const zbx_vector_uint64_t *itemids, int value_type, int age,
++		int count, zbx_vector_valuecache_record_t *values)
++{
++	const char		*__function_name = "zbx_history_preload_values";
++	int			ret, pos;
++	zbx_history_iface_t	*writer = &history_ifaces[value_type];
++
++	zabbix_log(LOG_LEVEL_DEBUG, "In %s() value_type:%d age:%d count:%d",
++			__function_name, value_type, age, count);
++
++	if (NULL == writer->preload_values)
++	{
++		zabbix_log(LOG_LEVEL_DEBUG, "End of %s(): value_type:%d, "
++			"no function for preloading values", __function_name, value_type);
++		return SUCCEED;
++	}
++
++	pos = values->values_num;
++	ret = writer->preload_values(writer, itemids, age, count, values);
++
++	if (SUCCEED == ret && SUCCEED == zabbix_check_log_level(LOG_LEVEL_TRACE))
++	{
++		int	i;
++		char	buffer[MAX_STRING_LEN];
++
++		for (i = pos; i < values->values_num; i++)
++		{
++			zbx_valuecache_record_t	*h = &values->values[i];
++
++			zbx_history_value2str(buffer, sizeof(buffer), &h->value, value_type);
++			zabbix_log(LOG_LEVEL_TRACE, ZBX_FS_UI64 "  %d.%09d %s",
++					h->itemid, h->timestamp.sec, h->timestamp.ns, buffer);
++		}
++	}
++
++	zabbix_log(LOG_LEVEL_DEBUG, "End of %s():%s values:%d", __function_name, zbx_result_string(ret),
++			values->values_num - pos);
++
++	return ret;
++}
++
++/************************************************************************************
++ *                                                                                  *
+  * Function: zbx_history_requires_trends                                            *
+  *                                                                                  *
+  * Purpose: checks if the value type requires trends data calculations              *
+@@ -248,6 +313,27 @@ void	zbx_history_record_vector_destroy(z
+ 
+ /******************************************************************************
+  *                                                                            *
++ * Function: zbx_valuecache_record_vector_destroy                             *
++ *                                                                            *
++ * Purpose: destroys value vector and frees resources allocated for it        *
++ *                                                                            *
++ * Parameters: vector    - [IN] the value vector                              *
++ *                                                                            *
++ * Comments: Use this function to destroy value vectors created by            *
++ *           zbx_vc_get_values_by_* functions.                                *
++ *                                                                            *
++ ******************************************************************************/
++void	zbx_valuecache_record_vector_destroy(zbx_vector_valuecache_record_t *vector)
++{
++	if (NULL != vector->values)
++	{
++		zbx_valuecache_record_vector_clean(vector);
++		zbx_vector_valuecache_record_destroy(vector);
++	}
++}
++
++/******************************************************************************
++ *                                                                            *
+  * Function: zbx_history_record_clear                                         *
+  *                                                                            *
+  * Purpose: frees resources allocated by a cached value                       *
+@@ -271,6 +357,28 @@ void	zbx_history_record_clear(zbx_histor
+ 
+ /******************************************************************************
+  *                                                                            *
++ * Function: zbx_valuecache_record_clear                                      *
++ *                                                                            *
++ * Purpose: frees resources allocated by a cached value                       *
++ *                                                                            *
++ * Parameters: value      - [IN] the cached value to clear                    *
++ *                                                                            *
++ ******************************************************************************/
++void	zbx_valuecache_record_clear(zbx_valuecache_record_t *value)
++{
++	switch (value->value_type)
++	{
++		case ITEM_VALUE_TYPE_STR:
++		case ITEM_VALUE_TYPE_TEXT:
++			zbx_free(value->value.str);
++			break;
++		case ITEM_VALUE_TYPE_LOG:
++			history_logfree(value->value.log);
++	}
++}
++
++/******************************************************************************
++ *                                                                            *
+  * Function: zbx_history_value2str                                            *
+  *                                                                            *
+  * Purpose: converts history value to string format                           *
+@@ -329,3 +437,30 @@ void	zbx_history_record_vector_clean(zbx
+ 
+ 	zbx_vector_history_record_clear(vector);
+ }
++
++/******************************************************************************
++ *                                                                            *
++ * Function: zbx_valuecache_record_vector_clean                               *
++ *                                                                            *
++ * Purpose: releases resources allocated to store history records             *
++ *                                                                            *
++ * Parameters: vector      - [IN] the history record vector                   *
++ *                                                                            *
++ ******************************************************************************/
++void	zbx_valuecache_record_vector_clean(zbx_vector_valuecache_record_t *vector)
++{
++	int	i;
++
++	for (i = 0; i < vector->values_num; i++)
++		switch (vector->values[i].value_type)
++		{
++			case ITEM_VALUE_TYPE_STR:
++			case ITEM_VALUE_TYPE_TEXT:
++				zbx_free(vector->values[i].value.str);
++				break;
++			case ITEM_VALUE_TYPE_LOG:
++				history_logfree(vector->values[i].value.log);
++		}
++
++	zbx_vector_valuecache_record_clear(vector);
++}
+Index: zabbix-3.4.12-1+buster/src/libs/zbxhistory/history_clickhouse.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxhistory/history_clickhouse.c
++++ zabbix-3.4.12-1+buster/src/libs/zbxhistory/history_clickhouse.c
+@@ -166,6 +166,67 @@ out:
+ 	return ret;
+ }
+ 
++static int	history_parse_valuecache(struct zbx_json_parse *jp, unsigned char value_type,
++			zbx_valuecache_record_t *vcr)
++{
++	char	*value = NULL;
++	size_t	value_alloc = 0;
++	int	ret = FAIL;
++
++	if (SUCCEED != zbx_json_value_by_name_dyn(jp, "itemid", &value, &value_alloc))
++		goto out;
++
++	vcr->itemid = atoi(value);
++
++	if (SUCCEED != zbx_json_value_by_name_dyn(jp, "clock", &value, &value_alloc))
++		goto out;
++
++	vcr->timestamp.sec = atoi(value);
++
++	if (SUCCEED != zbx_json_value_by_name_dyn(jp, "ns", &value, &value_alloc))
++		goto out;
++
++	vcr->timestamp.ns = atoi(value);
++
++	if (SUCCEED != zbx_json_value_by_name_dyn(jp, "value", &value, &value_alloc))
++		goto out;
++
++	vcr->value = history_str2value(value, value_type);
++
++	if (ITEM_VALUE_TYPE_LOG == value_type)
++	{
++
++		if (SUCCEED != zbx_json_value_by_name_dyn(jp, "timestamp", &value, &value_alloc))
++			goto out;
++
++		vcr->value.log->timestamp = atoi(value);
++
++		if (SUCCEED != zbx_json_value_by_name_dyn(jp, "logeventid", &value, &value_alloc))
++			goto out;
++
++		vcr->value.log->logeventid = atoi(value);
++
++		if (SUCCEED != zbx_json_value_by_name_dyn(jp, "severity", &value, &value_alloc))
++			goto out;
++
++		vcr->value.log->severity = atoi(value);
++
++		if (SUCCEED != zbx_json_value_by_name_dyn(jp, "source", &value, &value_alloc))
++			goto out;
++
++		vcr->value.log->source = zbx_strdup(NULL, value);
++	}
++
++	vcr->value_type = value_type;
++
++	ret = SUCCEED;
++
++out:
++	zbx_free(value);
++
++	return ret;
++}
++
+ static void	clickhouse_log_error(CURL *handle, CURLcode error, const char *errbuf)
+ {
+ 	long	http_code;
+@@ -457,6 +518,158 @@ static void	clickhouse_destroy(zbx_histo
+ 
+ /************************************************************************************
+  *                                                                                  *
++ * Function: clickhouse_preload_values                                              *
++ *                                                                                  *
++ * Purpose: gets history data from history storage for warming up the values cache  *
++ *                                                                                  *
++ * Parameters:  hist    - [IN] the history storage interface                        *
++ *              age     - [IN] the maximum age of values in seconds                 *
++ *              count   - [IN] the maximum number of item values to read            *
++ *              values  - [OUT] the item history data values                        *
++ *                                                                                  *
++ * Return value: SUCCEED - the history data were read successfully                  *
++ *               FAIL - otherwise                                                   *
++ *                                                                                  *
++ * Comments: This function reads <count> values of every specified item,            *
++ *           but not older than <age> in seconds.                                   *
++ *           If <count> is zero, will be readed all values not older than <age>.    *
++ *           If <age> is zero, will be readed <count> values of every specified     *
++ *           item.                                                                  *
++ *           If <count> and <age> is zeros both, loading will return no data.       *
++ *                                                                                  *
++ ************************************************************************************/
++static int	clickhouse_preload_values(zbx_history_iface_t *hist, const zbx_vector_uint64_t *itemids,
++		int age, int count, zbx_vector_valuecache_record_t *values)
++{
++	const char			*__function_name = "clickhouse_preload_values";
++
++	zbx_clickhouse_data_t		*data = hist->data;
++	size_t				sql_alloc = 0, sql_offset;
++	int				ret = SUCCEED, num = 0, i;
++	CURLcode			err;
++	struct curl_slist		*curl_headers = NULL;
++	char				*sql = NULL, errbuf[CURL_ERROR_SIZE];
++	const char			*p = NULL;
++	struct zbx_json_parse		jp, jp_sub, jp_data, jp_item;
++	zbx_valuecache_record_t		vcr;
++
++	zabbix_log(LOG_LEVEL_DEBUG, "In %s()", __function_name);
++
++	if ((0 == age) && (0 == count))
++	{
++		zabbix_log(LOG_LEVEL_INFORMATION, "skipped preload from ClickHouse table %s",
++			value_type_table[hist->value_type]);
++		return SUCCEED;
++	}
++
++	if (0 == itemids->values_num)
++	{
++		zabbix_log(LOG_LEVEL_INFORMATION, "nothing to preload from ClickHouse table %s",
++			value_type_table[hist->value_type]);
++		return SUCCEED;
++	}
++
++	if (NULL == (data->handle = curl_easy_init()))
++	{
++		zabbix_log(LOG_LEVEL_ERR, "cannot initialize cURL session");
++
++		return FAIL;
++	}
++
++	if (ITEM_VALUE_TYPE_LOG == hist->value_type)
++		zbx_snprintf_alloc(&sql, &sql_alloc, &sql_offset,
++				"SELECT itemid, clock, ns, value, timestamp, source, severity, logeventid"
++				" FROM %s"
++				" WHERE itemid IN (" ZBX_FS_UI64,
++				value_type_table[hist->value_type],
++				itemids->values[0]);
++	else
++		zbx_snprintf_alloc(&sql, &sql_alloc, &sql_offset,
++				"SELECT itemid, clock, ns, value"
++				" FROM %s"
++				" WHERE itemid IN (" ZBX_FS_UI64,
++				value_type_table[hist->value_type],
++				itemids->values[0]);
++
++	for (i = 1; i < itemids->values_num; i++)
++		zbx_snprintf_alloc(&sql, &sql_alloc, &sql_offset, "," ZBX_FS_UI64, itemids->values[i]);
++
++	zbx_snprintf_alloc(&sql, &sql_alloc, &sql_offset, ")");
++
++	if (age > 0)
++		zbx_snprintf_alloc(&sql, &sql_alloc, &sql_offset,
++				" AND clock > toUInt32(now()) - %d",
++				age);
++
++	zbx_snprintf_alloc(&sql, &sql_alloc, &sql_offset, " ORDER BY itemid ASC, clock DESC");
++
++	if (count > 0)
++		zbx_snprintf_alloc(&sql, &sql_alloc, &sql_offset,
++				" LIMIT %d BY itemid",
++                                count);
++
++	zbx_snprintf_alloc(&sql, &sql_alloc, &sql_offset, " FORMAT JSON");
++
++	curl_headers = curl_slist_append(curl_headers, "Content-Type: application/json");
++
++	curl_easy_setopt(data->handle, CURLOPT_URL, data->base_url);
++	curl_easy_setopt(data->handle, CURLOPT_POSTFIELDS, sql);
++	curl_easy_setopt(data->handle, CURLOPT_WRITEFUNCTION, curl_write_cb);
++	curl_easy_setopt(data->handle, CURLOPT_WRITEDATA, &page_r);
++	curl_easy_setopt(data->handle, CURLOPT_HTTPHEADER, curl_headers);
++	curl_easy_setopt(data->handle, CURLOPT_FAILONERROR, 1L);
++	curl_easy_setopt(data->handle, CURLOPT_ERRORBUFFER, errbuf);
++
++	zabbix_log(LOG_LEVEL_DEBUG, "sending query to %s; post data: %s", data->base_url, sql);
++
++	page_r.offset = 0;
++	*errbuf = '\0';
++	if (CURLE_OK != (err = curl_easy_perform(data->handle)))
++	{
++		clickhouse_log_error(data->handle, err, errbuf);
++		ret = FAIL;
++		goto out;
++	}
++
++	zabbix_log(LOG_LEVEL_DEBUG, "received from ClickHouse: %s", page_r.data);
++
++	zbx_json_open(page_r.data, &jp);
++	zbx_json_brackets_open(jp.start, &jp_sub);
++	zbx_json_brackets_by_name(&jp_sub, "data", &jp_data);
++
++	while (NULL != (p = zbx_json_next(&jp_data, p)))
++	{
++		if (SUCCEED != zbx_json_brackets_open(p, &jp_item))
++			continue;
++
++		if (SUCCEED != history_parse_valuecache(&jp_item, hist->value_type, &vcr))
++			continue;
++
++		zbx_vector_valuecache_record_append_ptr(values, &vcr);
++		num++;
++	}
++
++	if (0 < num)
++		zabbix_log(LOG_LEVEL_INFORMATION, "%d values were preloaded from ClickHouse table %s",
++				num, value_type_table[hist->value_type]);
++	else
++		zabbix_log(LOG_LEVEL_INFORMATION, "no values were preloaded from ClickHouse table %s",
++				value_type_table[hist->value_type]);
++
++out:
++	clickhouse_close(hist);
++
++	curl_slist_free_all(curl_headers);
++
++	zbx_free(sql);
++
++	zabbix_log(LOG_LEVEL_DEBUG, "End of %s()", __function_name);
++
++	return ret;
++}
++
++/************************************************************************************
++ *                                                                                  *
+  * Function: clickhouse_get_values                                                  *
+  *                                                                                  *
+  * Purpose: gets item history data from history storage                             *
+@@ -723,6 +936,7 @@ int	zbx_history_clickhouse_init(zbx_hist
+ 	hist->add_values = clickhouse_add_values;
+ 	hist->flush = clickhouse_flush;
+ 	hist->get_values = clickhouse_get_values;
++	hist->preload_values = clickhouse_preload_values;
+ 	hist->requires_trends = 0;
+ 
+ 	return SUCCEED;
+Index: zabbix-3.4.12-1+buster/src/libs/zbxhistory/history_elastic.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxhistory/history_elastic.c
++++ zabbix-3.4.12-1+buster/src/libs/zbxhistory/history_elastic.c
+@@ -934,6 +934,7 @@ int	zbx_history_elastic_init(zbx_history
+ 	hist->add_values = elastic_add_values;
+ 	hist->flush = elastic_flush;
+ 	hist->get_values = elastic_get_values;
++	hist->preload_values = NULL;
+ 	hist->requires_trends = 0;
+ 
+ 	return SUCCEED;
+Index: zabbix-3.4.12-1+buster/src/libs/zbxhistory/history_sql.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxhistory/history_sql.c
++++ zabbix-3.4.12-1+buster/src/libs/zbxhistory/history_sql.c
+@@ -718,6 +718,7 @@ int	zbx_history_sql_init(zbx_history_ifa
+ 	hist->add_values = sql_add_values;
+ 	hist->flush = sql_flush;
+ 	hist->get_values = sql_get_values;
++	hist->preload_values = NULL;
+ 
+ 	switch (value_type)
+ 	{
+Index: zabbix-3.4.12-1+buster/src/libs/zbxhistory/history.h
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxhistory/history.h
++++ zabbix-3.4.12-1+buster/src/libs/zbxhistory/history.h
+@@ -29,6 +29,8 @@ typedef void (*zbx_history_destroy_func_
+ typedef int (*zbx_history_add_values_func_t)(struct zbx_history_iface *hist, const zbx_vector_ptr_t *history);
+ typedef int (*zbx_history_get_values_func_t)(struct zbx_history_iface *hist, zbx_uint64_t itemid, int start,
+ 		int count, int end, zbx_vector_history_record_t *values);
++typedef int (*zbx_history_preload_values_func_t)(struct zbx_history_iface *hist, const zbx_vector_uint64_t *itemids,
++		int age, int count, zbx_vector_valuecache_record_t *values);
+ typedef void (*zbx_history_flush_func_t)(struct zbx_history_iface *hist);
+ 
+ struct zbx_history_iface
+@@ -40,6 +42,7 @@ struct zbx_history_iface
+ 	zbx_history_destroy_func_t	destroy;
+ 	zbx_history_add_values_func_t	add_values;
+ 	zbx_history_get_values_func_t	get_values;
++	zbx_history_preload_values_func_t	preload_values;
+ 	zbx_history_flush_func_t	flush;
+ };
+ 
+Index: zabbix-3.4.12-1+buster/src/libs/zbxdbcache/dbconfig.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxdbcache/dbconfig.c
++++ zabbix-3.4.12-1+buster/src/libs/zbxdbcache/dbconfig.c
+@@ -6101,6 +6101,37 @@ void	DCconfig_get_items_by_itemids(DC_IT
+ 
+ /******************************************************************************
+  *                                                                            *
++ * Function: DCconfig_get_itemids_by_valuetype                                *
++ *                                                                            *
++ * Purpose: Get item IDs for specified value type                             *
++ *                                                                            *
++ * Parameters: value_type - [IN] value type                                   *
++ *             itemids  - [OUT] vector with item IDs                          *
++ *                                                                            *
++ ******************************************************************************/
++void	DCconfig_get_itemids_by_valuetype(int value_type, zbx_vector_uint64_t *itemids)
++{
++	const ZBX_DC_ITEM	*item;
++
++	zbx_hashset_iter_t iter;
++
++	LOCK_CACHE;
++
++	zbx_hashset_iter_reset(&config->items, &iter);
++
++	while (NULL != (item = zbx_hashset_iter_next(&iter)))
++	{
++		if ((item->value_type == value_type) && (NULL != item->triggers))
++		{
++			zbx_vector_uint64_append(itemids, item->itemid);
++		}
++	}
++
++	UNLOCK_CACHE;
++}
++
++/******************************************************************************
++ *                                                                            *
+  * Function: dc_preproc_item_init                                             *
+  *                                                                            *
+  * Purpose: initialize new preprocessor item from configuration cache         *
+Index: zabbix-3.4.12-1+buster/src/libs/zbxdbcache/valuecache.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxdbcache/valuecache.c
++++ zabbix-3.4.12-1+buster/src/libs/zbxdbcache/valuecache.c
+@@ -75,6 +75,12 @@ static int	vc_locked = 0;
+ /* the value cache size */
+ extern zbx_uint64_t	CONFIG_VALUE_CACHE_SIZE;
+ 
++/* the maximum age of data to preloading to value cache */
++extern int	CONFIG_VALUE_CACHE_PRELOAD_AGE;
++
++/* the maximum number of values per one item to preloading to value cache */
++extern int	CONFIG_VALUE_CACHE_PRELOAD_COUNT;
++
+ ZBX_MEM_FUNC_IMPL(__vc, vc_mem)
+ 
+ #define VC_STRPOOL_INIT_SIZE	(1000)
+@@ -2609,6 +2615,94 @@ out:
+ }
+ 
+ /******************************************************************************
++ *                                                                            *
++ * Function: zbx_vc_preload_values                                            *
++ *                                                                            *
++ * Purpose: adds items values to the value cache                              *
++ *                                                                            *
++ * Parameters: values - [IN] values, that needed to load to value cache       *
++ *                                                                            *
++ ******************************************************************************/
++void	zbx_vc_preload_values(zbx_vector_valuecache_record_t *values)
++{
++	zbx_vc_item_t		*item;
++	int 			i, failed = 0;
++	zbx_valuecache_record_t	*value;
++
++	if (NULL == vc_cache)
++		return;
++
++	vc_try_lock();
++
++	/* Adding values from the tail to the head, because the list of values
++	 * is ordered in descending order of clock field */
++	for (i = values->values_num - 1; i >= 0; i--)
++	{
++		value = &values->values[i];
++
++		if (NULL != (item = zbx_hashset_search(&vc_cache->items, &value->itemid)))
++		{
++			zbx_history_record_t	record = {value->timestamp, value->value};
++
++			if (0 == (item->state & ZBX_ITEM_STATE_REMOVE_PENDING))
++			{
++				vc_item_addref(item);
++
++				/* If the new value type does not match the item's type in cache we can't  */
++				/* change the cache because other processes might still be accessing it    */
++				/* at the same time. The only thing that can be done - mark it for removal */
++				/* so it could be added later with new type.                               */
++				/* Also mark it for removal if the value adding failed. In this case we    */
++				/* won't have the latest data in cache - so the requests must go directly  */
++				/* to the database.                                                        */
++				if (item->value_type != value->value_type ||
++						FAIL == vch_item_add_value_at_head(item, &record))
++				{
++					item->state |= ZBX_ITEM_STATE_REMOVE_PENDING;
++					failed++;
++				}
++
++				vc_item_release(item);
++			}
++		}
++	}
++
++	zabbix_log(LOG_LEVEL_INFORMATION, "%d values successfully loaded to value cache",
++			values->values_num - failed);
++
++	vc_try_unlock();
++}
++
++/******************************************************************************
++ *                                                                            *
++ * Function: zbx_vc_preload                                                   *
++ *                                                                            *
++ * Purpose: preload value cache                                               *
++ *                                                                            *
++ ******************************************************************************/
++void	zbx_vc_preload()
++{
++	zbx_vector_valuecache_record_t	values;
++	zbx_vector_uint64_t		itemids;
++	int				value_type;
++
++	zbx_vector_valuecache_record_create(&values);
++
++	zbx_vector_uint64_create(&itemids);
++	for (value_type = 0; value_type < ITEM_VALUE_TYPE_MAX; value_type++)
++	{
++		DCconfig_get_itemids_by_valuetype(value_type, &itemids);
++		zbx_history_preload_values(&itemids, value_type, CONFIG_VALUE_CACHE_PRELOAD_AGE,
++					CONFIG_VALUE_CACHE_PRELOAD_COUNT, &values);
++		zbx_vector_uint64_clear(&itemids);
++	}
++	zbx_vector_uint64_destroy(&itemids);
++
++	zbx_vc_preload_values(&values);
++	zbx_vector_valuecache_record_destroy(&values);
++}
++
++/******************************************************************************
+  *                                                                            *
+  * Function: zbx_vc_destroy                                                   *
+  *                                                                            *
+Index: zabbix-3.4.12-1+buster/include/dbcache.h
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/include/dbcache.h
++++ zabbix-3.4.12-1+buster/include/dbcache.h
+@@ -558,6 +558,7 @@ void	DCconfig_clean_items(DC_ITEM *items
+ int	DCget_host_by_hostid(DC_HOST *host, zbx_uint64_t hostid);
+ void	DCconfig_get_hosts_by_itemids(DC_HOST *hosts, const zbx_uint64_t *itemids, int *errcodes, size_t num);
+ void	DCconfig_get_items_by_keys(DC_ITEM *items, zbx_host_key_t *keys, int *errcodes, size_t num);
++void	DCconfig_get_itemids_by_valuetype(int value_type, zbx_vector_uint64_t *itemids);
+ void	DCconfig_get_items_by_itemids(DC_ITEM *items, const zbx_uint64_t *itemids, int *errcodes, size_t num);
+ void	DCconfig_get_preprocessable_items(zbx_hashset_t *items, int *timestamp);
+ void	DCconfig_get_functions_by_functionids(DC_FUNCTION *functions,
+Index: zabbix-3.4.12-1+buster/src/zabbix_server/server.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/zabbix_server/server.c
++++ zabbix-3.4.12-1+buster/src/zabbix_server/server.c
+@@ -191,6 +191,9 @@ zbx_uint64_t	CONFIG_TRENDS_CACHE_SIZE	=
+ zbx_uint64_t	CONFIG_VALUE_CACHE_SIZE		= 8 * ZBX_MEBIBYTE;
+ zbx_uint64_t	CONFIG_VMWARE_CACHE_SIZE	= 8 * ZBX_MEBIBYTE;
+ 
++int     CONFIG_VALUE_CACHE_PRELOAD_AGE		= 0;
++int     CONFIG_VALUE_CACHE_PRELOAD_COUNT	= 0;
++
+ int	CONFIG_UNREACHABLE_PERIOD	= 45;
+ int	CONFIG_UNREACHABLE_DELAY	= 15;
+ int	CONFIG_UNAVAILABLE_DELAY	= 60;
+@@ -591,6 +594,10 @@ static void	zbx_load_config(ZBX_TASK_EX
+ 			PARM_OPT,	128 * ZBX_KIBIBYTE,	__UINT64_C(2) * ZBX_GIBIBYTE},
+ 		{"ValueCacheSize",		&CONFIG_VALUE_CACHE_SIZE,		TYPE_UINT64,
+ 			PARM_OPT,	0,			__UINT64_C(64) * ZBX_GIBIBYTE},
++		{"ValueCachePreloadAge",	&CONFIG_VALUE_CACHE_PRELOAD_AGE,	TYPE_INT,
++			PARM_OPT,	0,			SEC_PER_MONTH},
++		{"ValueCachePreloadCount",	&CONFIG_VALUE_CACHE_PRELOAD_COUNT,	TYPE_INT,
++			PARM_OPT,	0,			86400},
+ 		{"CacheUpdateFrequency",	&CONFIG_CONFSYNCER_FREQUENCY,		TYPE_INT,
+ 			PARM_OPT,	1,			SEC_PER_HOUR},
+ 		{"HousekeepingFrequency",	&CONFIG_HOUSEKEEPING_FREQUENCY,		TYPE_INT,
+@@ -1021,6 +1028,9 @@ int	MAIN_ZABBIX_ENTRY(int flags)
+ 
+ 	DBclose();
+ 
++	/* preload values to values cache */
++	zbx_vc_preload();
++
+ 	if (0 != CONFIG_IPMIPOLLER_FORKS)
+ 		CONFIG_IPMIMANAGER_FORKS = 1;
+ 
+Index: zabbix-3.4.12-1+buster/src/zabbix_proxy/proxy.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/zabbix_proxy/proxy.c
++++ zabbix-3.4.12-1+buster/src/zabbix_proxy/proxy.c
+@@ -187,6 +187,9 @@ zbx_uint64_t	CONFIG_TRENDS_CACHE_SIZE	=
+ zbx_uint64_t	CONFIG_VALUE_CACHE_SIZE		= 0;
+ zbx_uint64_t	CONFIG_VMWARE_CACHE_SIZE	= 8 * ZBX_MEBIBYTE;
+ 
++int	CONFIG_VALUE_CACHE_PRELOAD_AGE		= 0;
++int	CONFIG_VALUE_CACHE_PRELOAD_COUNT	= 0;
++
+ int	CONFIG_UNREACHABLE_PERIOD	= 45;
+ int	CONFIG_UNREACHABLE_DELAY	= 15;
+ int	CONFIG_UNAVAILABLE_DELAY	= 60;
+Index: zabbix-3.4.12-1+buster/src/libs/zbxdbcache/valuecache.h
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxdbcache/valuecache.h
++++ zabbix-3.4.12-1+buster/src/libs/zbxdbcache/valuecache.h
+@@ -76,6 +76,8 @@ zbx_vc_stats_t;
+ 
+ int	zbx_vc_init(char **error);
+ 
++void	zbx_vc_preload();
++
+ void	zbx_vc_destroy(void);
+ 
+ void	zbx_vc_lock(void);
+Index: zabbix-3.4.12-1+buster/conf/zabbix_server.conf
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/conf/zabbix_server.conf
++++ zabbix-3.4.12-1+buster/conf/zabbix_server.conf
+@@ -69,7 +69,7 @@ LogFile=/tmp/zabbix_server.log
+ 
+ ### Option: SocketDir
+ #	IPC socket directory.
+-#       Directory to store IPC sockets used by internal Zabbix services.
++#	Directory to store IPC sockets used by internal Zabbix services.
+ #
+ # Mandatory: no
+ # Default:
+@@ -450,6 +450,26 @@ DBUser=zabbix
+ # Default:
+ # ValueCacheSize=8M
+ 
++### Option: ValueCachePreloadAge
++#	Maximum age of values to prefill value cache on start server.
++#	Will be loaded history values for all items with triggers.
++#	Setting to 0 ValueCachePreloadAge and ValueCachePreloadCount disables preloading value cache.
++#
++# Mandatory: no
++# Range: 0-2592000
++# Default:
++# ValueCachePreloadAge=0
++
++### Option: ValueCachePreloadCount
++#	Maximum number of values for every item to prefill value cache on start server.
++#	Will be loaded history values for all items with triggers.
++#	Setting to 0 ValueCachePreloadAge and ValueCachePreloadCount disables preloading value cache.
++#
++# Mandatory: no
++# Range: 0-86400
++# Default:
++# ValueCachePreloadCount=0
++
+ ### Option: Timeout
+ #	Specifies how long we wait for agent, SNMP device or external check (in seconds).
+ #

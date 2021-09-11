@@ -1,0 +1,72 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="lighttpd" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2010-08-13 -->
+		<title>Lighttpd и gamin</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Lighttpd и gamin</h1>
+
+		<p>Ранее я пробовал пользоваться Mathopd, потому что привычный Lighttpd отказывался устанавливаться в отсутствии famd, а famd конфликтовал с gamin, который я установил, чтобы избежать внезапных зависаний программ: <a href="../famd-gamin/">famd vs gamin</a>. Нужно было пересобрать Lighttpd с gamin вместо famd, но мне тогда было лень этим заниматься, т.к. это было прекрасным поводом попробовать Mathopd :)</p>
+
+		<p>На днях Mathopd мне наконец надоел и я решил всё-таки собрать Lighttpd с gamin. Рецептом сборки этой связки я и хочу поделиться.</p>
+
+		<p>Для начала, скачаем исходники:</p>
+
+		<pre class="console">$ apt-get source lighttpd</pre>
+
+		<p>И перейдём в каталог с распакованными исходниками и информацией для сборки:</p>
+
+		<pre class="console">$ cd lighttpd-1.4.19</pre>
+
+		<p>Затем, заглянем в файл debian/control и просмотрим список зависимостей для сборки пакета (Build-Depends): debhelper (&gt;= 5.0.0), cdbs, mime-support, libssl-dev, zlib1g-dev, libbz2-dev, libattr1-dev, libpcre3-dev, libmysqlclient15-dev, libfam-dev, libldap2-dev, libfcgi-dev, libgdbm-dev, libmemcache-dev, liblua5.1-0-dev, quilt, patchutils, pkg-config, uuid-dev, libsqlite3-dev, libxml2-dev, libkrb5-dev, perl</p>
+
+		<p>Установим всё это хозяйство, за исключением libfam-dev, который мы заменим на libgamin-dev:</p>
+
+		<pre class="console"># apt-get install debhelper cdbs mime-support libssl-dev zlib1g-dev libbz2-dev \
+  libattr1-dev libpcre3-dev libmysqlclient15-dev libgamin-dev libldap2-dev libfcgi-dev \
+  libgdbm-dev libmemcache-dev liblua5.1-0-dev quilt patchutils pkg-config uuid-dev \
+  libsqlite3-dev libxml2-dev libkrb5-dev perl</pre>
+
+		<p>Теперь отредактируем файл debian/control, заменив в нём libfam-dev на libgamin-dev.</p>
+
+		<p>Далее, опишем изменения, сделанные в пакете с помощью dch:</p>
+
+		<pre class="console">$ dch -i</pre>
+
+		<p>Я внёс следующее описание сделанных изменений:</p>
+
+		<pre class="code">lighttpd (1.4.19-5+lenny1gamin) stable-security; urgency=low
+
+* Changed dependency from libfam-dev to libgamin-dev.
+
+-- Vladimir Stupin &lt;vladimir@stupin.su&gt;  Fri, 13 Aug 2010 10:17:22 +0600</pre>
+
+		<p>Осталось лишь собрать изменённый пакет:</p>
+
+		<pre class="console">$ dpkg-buildpackage -b -us -uc -rfakeroot</pre>
+
+		<p>Всё. Переходим в каталог выше, где и находятся собранные пакеты:</p>
+
+		<pre class="console">lighttpd_1.4.19-5+lenny1gamin_i386.deb
+lighttpd-doc_1.4.19-5+lenny1gamin_all.deb
+lighttpd-mod-cml_1.4.19-5+lenny1gamin_i386.deb
+lighttpd-mod-magnet_1.4.19-5+lenny1gamin_i386.deb
+lighttpd-mod-mysql-vhost_1.4.19-5+lenny1gamin_i386.deb
+lighttpd-mod-trigger-b4-dl_1.4.19-5+lenny1gamin_i386.deb
+lighttpd-mod-webdav_1.4.19-5+lenny1gamin_i386.deb</pre>
+
+		<p>Устанавливаем нужные пакеты с помощью dpkg и пользуемся:</p>
+
+		<pre class="console"># dpkg -i lighttpd_1.4.19-5+lenny1gamin_i386.deb</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Lighttpd и gamin">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

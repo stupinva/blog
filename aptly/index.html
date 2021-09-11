@@ -1,0 +1,334 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="stretch,apt,linux,debian,aptly" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2019-08-11 -->
+		<title>Создание своего репозитория Debian при помощи aptly</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Создание своего репозитория Debian при помощи aptly</h1>
+
+		<p>Несмотря на то, что в официальных репозиториях Debian можно найти почти всё, что может понадобиться, иногда всё-таки приходится самостоятельно собирать пакеты. Я стараюсь не замусоривать систему программами, установленными из исходных текстов и модулями различных языков программирования, установленными через их стандартные инструменты, вроде cpan, pip или gem.</p>
+
+		<p>Собирать пакеты приходится по нескольким причинам:</p>
+
+		<ul>
+			<li>В репозитории нет нужного пакета. Иногда бывает можно найти неофициальные репозитории для нужного релиза операционной системы.</li>
+
+			<li>Через репозитории дистрибутива доступна только старая версия пакета, в которой не хватает нужных функций. В этом случае иногда помогают официальные репозитории backport с более свежими версиями пакетов, собранными для предыдущих релизов операционной системы.</li>
+
+			<li>В пакете из репозитория есть ошибка. Даже в стабильном дистрибутиве встречаются ошибки, которые не исправляются ментейнерами. Тут придётся либо обновлять пакет, либо исправлять в нём ошибку.</li>
+
+			<li>В репозитории есть нужная версия пакета, но собранная без поддержки определённой функции. Тут без вариантов - нужно дорабатывать и пересобирать пакет.</li>
+		</ul>
+
+		<p>Например, в 2013 году я начал настраивать на работе серверы под Debian Wheezy. С тех пор у меня накопилось некоторое количество самосборных пакетов:</p>
+
+		<ul>
+			<li>python-grab - не было в репозитории</li>
+
+			<li>python-flask-httpauth - не было в репозитории</li>
+
+			<li>python-pycurl - не было в репозитории</li>
+
+			<li>libdancer-plugin-database-core-perl - не было в репозитории</li>
+
+			<li>libnet-ssh-expect-perl - не было в репозитории</li>
+
+			<li>wordpress-plugin-simple-ldap-login - не было в репозитории</li>
+
+			<li>python-mysqldb - модуль версии 1.2.3 заменён на более свежую версию 1.2.5 из-за некорректной работы с collation utf8_bin: <a href="https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=541198">python-mysqldb: utf8_bin collation will not convert to Unicode strings</a></li>
+
+			<li>libsnmp и компания - пакеты были пересобраны из-за того, что не все производители оборудования с поддержкой SNMPv3 обеспечивают монотонный рост счётчика количества перезагрузок и времени с момента перезагрузки: <a href="../net-snmp-snmpv3-trouble/">Стандарт SNMPv3 и суровая действительность USM_TIME_WINDOW</a></li>
+
+			<li>python-netsnmp - модуль пересобран из-за ошибки в формировании SET-запросов со значениями типа IPv4: <a href="../python-netsnmp/">Исправление Python-прослойки библиотеки Net-SNMP</a></li>
+
+			<li>php5 и компания - среди этих пакетов был пакет php5-snmp, зависящий от пакета libsnmp</li>
+
+			<li>openntpd - в пакете была иcправлена ошибка в обработке таймаута ответов от серверов DNS: <a href="../openntpd-dns-timeout/">Таймаут DNS в OpenNTPd</a></li>
+
+			<li>uwsgi - включена поддержка Linux capabilities: <a href="../uwsgi-capabilities/">Пересборка uwsgi с поддержкой Linux Capabilities</a></li>
+
+			<li>zabbix - собрана более свежая версия пакета, наложена серия нестандартных патчей. Например, добавлены отдельные настройки таймаута и количества повторов для опроса по протоколу SNMP: <a href="../zabbix220/">Установка и настройка Zabbix 2.2.0 в Debian Wheezy</a></li>
+
+			<li>python-paramiko и python-ecdsa - модуль paramiko 1.7.7.1-3.1 обновлён до версии 1.16.0-1, т.к. версия paramiko из репозитория имела ошибки в поддержке протокола SFTP: <a href="https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=790742">python-paramiko: sftp connections hangs</a>. Модуль python-ecdsa был тоже обновлён, т.к. более новая версия модуля paramiko требовала и более свежую версию модуля ecdsa.</li>
+		</ul>
+
+		<p>Если у вас есть только один компьютер и вам нужна лишь пара нестандартных программ, то заморачиваться сборкой пакетов, возможно, не стоит. Когда же нестандартных программ набирается с десяток, их приходится периодически обновлять, а потом ещё и устанавливать на десяток компьютеров, то может оказаться проще потратить время на изучение различных способов сборки пакетов и организацию собственного репозитория.</p>
+
+		<p>Есть масса способов собрать пакет для Debian:</p>
+
+		<ul>
+			<li>Можно доработать пакет с исходными текстами и собрать как новый пакет с исходными текстами, так и собрать из него новые двоичные пакеты.</li>
+
+			<li>Для сборки пакетов с модулями python существует утилита python-stdeb: <a href="../deb-python/">Создание deb-пакетов для модулей Python</a></li>
+
+			<li>Для сборки пакетов с модулями perl существует утилита dh-make-perl.</li>
+
+			<li>Можно попробовать сконвертировать готовый пакет из другого формата при помощи утилиты alien.</li>
+
+			<li>Можно попробовать собрать пакет при помощи утилиты checkinstall.</li>
+
+			<li>Наконец, можно просто создать пакет вручную при помощи утилиты dpkg-deb: <a href="http://linux.yaroslavl.ru/docs/faq/deb_r/node6.html#SECTION000613000000000000000">5.13 Как мне сделать собственный .deb пакет?</a></li>
+		</ul>
+
+		<p>Собственный репозиторий позволяет экономить время, т.к. становится возможным не думать о том, установлены ли в системе пакеты нужных версий со всеми доработками: нужно всего-лишь прописывать в список подключенных репозиториев на каждой системе строчку со своим репозиторием.</p>
+
+		<p>Когда утилита aptly ещё не попалась мне на глаза, я делал репозитории при помощи утилиты apt-ftparchive. Не помню подробностей, но точно помню, что была она не очень удобной в использовании.</p>
+
+		<p>Потом мне попалась утилита aptly, которая обладала более богатыми возможностями и была более удобна в использовании. Стоит, правда, сказать, что утилита настолько богата возможностями, что удобство использования остаётся довольно относительным. Обновлять репозитории мне приходилось нечасто, поэтому каждый раз я с трудом вспоминал, какими командами я пользовался в прошлый раз. Я стал записывать команды в wiki-страницу и пользоваться своими заметками. Правда, структурированы они были довольно плохо, поэтому в блог я ничего не публиковал. Теперь же решил упорядочить эти заметки и выложить их в блог.</p>
+
+		<h2>1. Установка пакета</h2>
+
+		<p>Установим утилиту:</p>
+
+		<pre class="console"># apt-get install aptly</pre>
+
+		<p>Утилита написана на языке go, в скомпилированном виде тянет за собой минимум зависимостей: это утилиты для работы с архивами и утилиты для манипуляции GPG-подписями.</p>
+
+		<h2>2. Создание локальных репозиториев</h2>
+	
+		<p>Список репозиториев пока пуст:</p>
+
+		<pre class="console">$ aptly repo list
+No local repositories found, create one with `aptly repo create ...`.</pre>
+
+		<p>Создадим новый репозиторий с именем stretch:</p>
+
+		<pre class="console">$ aptly repo create stretch
+
+Local repo [stretch] successfully added.
+You can run 'aptly repo add stretch ...' to add packages to repository.</pre>
+
+		<h2>3. Добавление пакетов в локальный репозиторий</h2>
+
+		<p>Добавляем в репозиторий stretch все двоичные пакеты из текущего каталога:</p>
+
+		<pre class="console">$ aptly repo add stretch *.deb
+Loading packages...
+[+] libauthen-radius-perl_0.26-1ufanet_all added
+[+] libnet-ssh-expect-perl_1.09-1_all added
+[+] zabbix-agent-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 added
+[+] zabbix-agent_1:3.4.12-1+stretch-ufanet2_amd64 added
+[+] zabbix-frontend-php_1:3.4.12-1+stretch-ufanet2_all added
+[+] zabbix-get-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 added
+[+] zabbix-get_1:3.4.12-1+stretch-ufanet2_amd64 added
+[+] zabbix-java-gateway_1:3.4.12-1+stretch-ufanet2_all added
+[+] zabbix-proxy-mysql-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 added
+[+] zabbix-proxy-mysql_1:3.4.12-1+stretch-ufanet2_amd64 added
+[+] zabbix-proxy-pgsql-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 added
+[+] zabbix-proxy-pgsql_1:3.4.12-1+stretch-ufanet2_amd64 added
+[+] zabbix-proxy-sqlite3-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 added
+[+] zabbix-proxy-sqlite3_1:3.4.12-1+stretch-ufanet2_amd64 added
+[+] zabbix-sender-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 added
+[+] zabbix-sender_1:3.4.12-1+stretch-ufanet2_amd64 added
+[+] zabbix-server-mysql-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 added
+[+] zabbix-server-mysql_1:3.4.12-1+stretch-ufanet2_amd64 added
+[+] zabbix-server-pgsql-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 added
+[+] zabbix-server-pgsql_1:3.4.12-1+stretch-ufanet2_amd64 added</pre>
+
+		<p>Следом добавляем в репозиторий stretch все пакеты с исходными текстами из текущего каталога:</p>
+
+		<pre class="console">$ aptly repo add stretch *.dsc
+Loading packages...
+[+] libauthen-radius-perl_0.26-1ufanet_source added
+[+] libnet-ssh-expect-perl_1.09-1_source added
+[+] zabbix_1:3.4.12-1+stretch-ufanet2_source added</pre>
+
+		<p>По умолчанию программа размещает пакеты и базу данных в каталоге ~/.aptly</p>
+
+		<h2>4. Публикация локальных репозиториев</h2>
+
+		<p>Список опубликованных репозиториев пока пуст:</p>
+
+		<pre class="console">$ aptly publish list
+No snapshots/local repos have been published. Publish a snapshot by running `aptly publish snapshot ...`.</pre>
+
+		<p>Если сейчас попытаться опубликовать репозиторий, то программа сообщит о том, что не указан дистрибутив:</p>
+
+		<pre class="console">$ aptly publish repo stretch ncc
+ERROR: unable to publish: unable to guess distribution name, please specify explicitly</pre>
+
+		<p>Посмотрим текущие настройки репозитория:</p>
+
+		<pre class="console">$ aptly repo show stretch
+Name: stretch
+Comment: 
+Default Distribution: 
+Default Component: main
+Number of packages: 23</pre>
+
+		<p>Укажем дистрибутив репозитория:</p>
+
+		<pre class="console">$ aptly repo edit -distribution="stretch" stretch
+Local repo [stretch] successfully updated.</pre>
+
+		<p>Опубликуем дистрибутив без PGP-подписи:</p>
+
+		<pre class="console">$ aptly publish repo -skip-signing=true stretch ncc
+Loading packages...
+Generating metadata files and linking package files...
+Finalizing metadata files...
+
+Local repo stretch has been successfully published.
+Please setup your webserver to serve directory '/home/stupin/.aptly/public' with autoindexing.
+Now you can add following line to apt sources:
+  deb http://your-server/ncc/ stretch main
+  deb-src http://your-server/ncc/ stretch main
+Don't forget to add your GPG key to apt with apt-key.
+
+You can also use `aptly serve` to publish your repositories over HTTP quickly.</pre>
+
+		<p>Посмотрим список опубликованных репозиториев:</p>
+
+		<pre class="console">$ aptly publish list Published repositories:
+
+ncc/stretch [amd64, source] publishes {main: [stretch]}</pre>
+
+		<p>Опубликованные репозитории находятся в каталоге ~/.aptly/public, откуда их можно скопировать и разместить на веб-сервере. В примере выше локальный репозиторий stretch был опубликован в каталоге ncc, поэтому найти его можно будет в каталоге ~/.aptly/public/ncc</p>
+
+		<h2>5. Поиск и удаление пакетов из локального репозитория</h2>
+
+		<p>Для поиска пакетов, в имени которых присутствует слово zabbix и версия которых выше 1:3.4, а также пакетов, в имени которых присутствует подстрока -perl, можно воспользоваться следующей командой:</p>
+
+		<pre class="console">$ aptly package search '(Name (~zabbix), Version (&gt;1:3.4)) | Name (~-perl)'</pre>
+
+		<p>Как видно, скобки используются для группировки выражений, запятая соответствует логическому И, вертикальная черта соответствует логическому ИЛИ. Тильда обозначает совпадение с регулярным выражением, знак больше используется в своём обычном смысле. Более подробно правила фильтрации описаны в документации на странице: <a href="https://www.aptly.info/doc/feature/query/">Package queries</a>.</p>
+
+		<p>Для удаления пакетов из репозиториев используются те же самые выражения, которые используются при поиске пакетов. Например, удалим все пакеты, в имени которых присутствует подстрока zabbix:</p>
+
+		<pre class="console">$ aptly repo remove stretch 'Name (~zabbix)'
+Loading packages...
+[-] zabbix-proxy-mysql_1:3.4.12-1+stretch-ufanet2_amd64 removed
+[-] zabbix-proxy-mysql-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 removed
+[-] zabbix-sender-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 removed
+[-] zabbix-proxy-sqlite3-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 removed
+[-] zabbix-server-mysql-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 removed
+[-] zabbix_1:3.4.12-1+stretch-ufanet2_source removed
+[-] zabbix-java-gateway_1:3.4.12-1+stretch-ufanet2_all removed
+[-] zabbix-server-pgsql_1:3.4.12-1+stretch-ufanet2_amd64 removed
+[-] zabbix-agent-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 removed
+[-] zabbix-proxy-pgsql-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 removed
+[-] zabbix-server-mysql_1:3.4.12-1+stretch-ufanet2_amd64 removed
+[-] zabbix-get_1:3.4.12-1+stretch-ufanet2_amd64 removed
+[-] zabbix-frontend-php_1:3.4.12-1+stretch-ufanet2_all removed
+[-] zabbix-sender_1:3.4.12-1+stretch-ufanet2_amd64 removed
+[-] zabbix-get-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 removed
+[-] zabbix-server-pgsql-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 removed
+[-] zabbix-agent_1:3.4.12-1+stretch-ufanet2_amd64 removed
+[-] zabbix-proxy-sqlite3_1:3.4.12-1+stretch-ufanet2_amd64 removed
+[-] zabbix-proxy-pgsql_1:3.4.12-1+stretch-ufanet2_amd64 removed</pre>
+
+		<p>Для удаления пакетов, в имени которых есть подстрока -perl, можно воспользоваться следующей командой:</p>
+
+		<pre class="console">$ aptly repo remove stretch 'Name (~-perl)'
+Loading packages...
+[-] libnet-ssh-expect-perl_1.09-1_all removed
+[-] libauthen-radius-perl_0.26-1ufanet_source removed
+[-] libauthen-radius-perl_0.26-1ufanet_all removed
+[-] libnet-ssh-expect-perl_1.09-1_source removed</pre>
+
+		<h2>6. Перемещение пакетов между локальными репозиториями</h2>
+
+		<p>Если пакеты были по ошибке добавлены не в тот репозиторий, то может пригодиться функция перемещения пакетов между репозиториями.</p>
+
+		<p>Например, вот так можно выполнить перемещение всех пакетов, у которых в версии фигурирует подстрока stretch, из репозитория wheezy в репозиторий stretch:</p>
+
+		<pre class="console">$ aptly repo move wheezy stretch 'Version (~stretch)'
+Loading packages...
+[o] zabbix-server-pgsql-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 moved
+[o] zabbix-sender_1:3.4.12-1+stretch-ufanet2_amd64 moved
+[o] zabbix-proxy-pgsql-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 moved
+[o] zabbix-get-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 moved
+[o] zabbix-server-pgsql_1:3.4.12-1+stretch-ufanet2_amd64 moved
+[o] zabbix-proxy-pgsql_1:3.4.12-1+stretch-ufanet2_amd64 moved
+[o] zabbix-frontend-php_1:3.4.12-1+stretch-ufanet2_all moved
+[o] zabbix-get_1:3.4.12-1+stretch-ufanet2_amd64 moved
+[o] zabbix-proxy-sqlite3-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 moved
+[o] zabbix-proxy-mysql_1:3.4.12-1+stretch-ufanet2_amd64 moved
+[o] zabbix-server-mysql-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 moved
+[o] zabbix-java-gateway_1:3.4.12-1+stretch-ufanet2_all moved
+[o] zabbix-server-mysql_1:3.4.12-1+stretch-ufanet2_amd64 moved
+[o] zabbix-sender-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 moved
+[o] zabbix-proxy-sqlite3_1:3.4.12-1+stretch-ufanet2_amd64 moved
+[o] zabbix-agent-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 moved
+[o] zabbix-agent_1:3.4.12-1+stretch-ufanet2_amd64 moved
+[o] zabbix-proxy-mysql-dbgsym_1:3.4.12-1+stretch-ufanet2_amd64 moved</pre>
+
+		<h2>7. Обновление опубликованного репозитория</h2>
+
+		<p>После первичной публикации репозитория, его нельзя опубликовать повторно. Чтобы изменения в репозитории применились к опубликованному репозиторию, нужно вызвать команду обновления:</p>
+
+		<pre class="console">$ aptly publish update -skip-signing=true stretch ncc
+Loading packages...
+Generating metadata files and linking package files...
+Finalizing metadata files...
+Cleaning up prefix "ncc" components main...
+Publish for local repo ncc/stretch [amd64, source] publishes {main: [stretch]} has been successfully updated.</pre>
+
+		<h2>8. Удаление устаревших пакетов</h2>
+
+		<p>После удаления пакетов из репозитория, они не удаляются из хранилища автоматически. Во-первых, пакет остаётся в хранилище до тех пор, пока на него ссылается хотя бы один из репозиториев - локальных или опубликованных. Во-вторых, даже если на пакет больше нет ссылок, он не будет удалён до тех пор, пока не будет явно вызвана команда очистки:</p>
+
+		<pre class="console">$ aptly db cleanup
+Loading mirrors, local repos, snapshots and published repos...
+Loading list of all packages...
+Deleting unreferenced packages (23)...
+Building list of files referenced by packages...
+Building list of files in package pool...
+Deleting unreferenced files (29)...
+Disk space freed: 33.61 MiB...
+Compacting database...</pre>
+
+		<h2>9. Удаление опубликованных репозиториев</h2>
+
+		<p>Для удаления опубликованного репозитория можно воспользоваться соответствующей командой:</p>
+
+		<pre class="console">$ aptly publish drop stretch ncc
+Removing /home/stupin/.aptly/public/ncc/dists...
+Removing /home/stupin/.aptly/public/ncc/pool...
+
+Published repository has been removed successfully.</pre>
+
+		<p>Можно посмотреть в список опубликованных репозиториев и убедиться, что репозитория больше нет среди опубликованных:</p>
+
+		<pre class="console">$ aptly publish list
+No snapshots/local repos have been published. Publish a snapshot by running `aptly publish snapshot ...`.</pre>
+
+		<h2>10. Удаление локального репозитория</h2>
+
+		<p>Посмотрим на список локальных репозиториев:</p>
+
+		<pre class="console">$ aptly repo list
+List of local repos:
+ * [stretch] (packages: 0)
+
+To get more information about local repository, run `aptly repo show &lt;name&gt;`.</pre>
+
+		<p>Как видно, в репозитории нет пакетов, поэтому его можно удалить.</p>
+
+		<p>Для удаления локального репозитория stretch можно воспользоваться такой командой:</p>
+
+		<pre class="console">$ aptly repo drop stretch
+Local repo `stretch` has been removed.</pre>
+
+		<p>Посмотрим на список локальных репозиториев снова:</p>
+
+		<pre class="console">$ aptly repo list
+No local repositories found, create one with `aptly repo create ...`.</pre>
+
+		<h2>11. P. S.</h2>
+
+		<p>Есть у собственного репозитория и отрицательные стороны. Если у вас нет времени на то, чтобы обновить операционную систему до нового релиза, то собственный репозиторий с нестандартными пакетами будет ещё одним доводом в пользу того, чтобы как можно дольше оттягивать момент обновления операционной системы до нового релиза. С одной стороны, в новом релизе часть проблемых пакетов обновится и их больше не нужно будет пересобирать, а с другой стороны - всё равно нужно будет пересобрать доработанные пакеты и собрать пакеты, которых нет в стандартном репозитории обновлённой системы. И ещё при обновлении существует вероятность, что в новых пакетах будут не только исправлены старые ошибки, но и внесены новые.</p>
+
+		<p>Так, на работе всё тот же Debian Wheezy, который вышел в 2013 году, использовался мной аж до 2019 года. За это время успело выйти три новых релиза: Squeezy, Jessie, Stretch. Некоторые коллеги удивлялись, почему я продолжаю использовать этот устаревший релиз. Друге даже не догадывались об этом, т.к. им достаточно, чтобы обновлялся фасад здания, а с ржавыми трубами им дела иметь не приходилось. В 2018 году завершился срок продлённой поддержки Debian Wheezy. В 2019 году репозиторий пропал с зеркал и стало очевидно, что оттягивать обновление больше нельзя. Пришлось отложить всю текущую работу и заняться обновлениями, несмотря молчаливое и явное недовольство окружающих. Нельзя бесконечно копить технический долг - иногда нужно его возвращать.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Создание своего репозитория Debian при помощи aptly">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,112 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="mysql" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2012-05-16 -->
+		<title>Краткая справка по MySQL</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Краткая справка по MySQL</h1>
+
+		<p>Когда я был молод ;) и не искушён в MySQL, я сделал для себя на вики-странице вот такую шпаргалку, добавляя в неё новые записи при необходимости. Сейчас всё это кажется мне тривиальным, за исключением, пожалуй, сброса пароля пользователя root, просто потому что с этим не часто приходится сталкиваться.</p>
+
+		<h2>1. Создать новую базу данных</h2>
+
+		<pre class="console">&gt; create database [db];</pre>
+
+		<h2>2. Добавить пользователя</h2>
+
+		<pre class="console">&gt; use mysql;
+&gt; insert into user(user,password,host) values('[user]',password('[password]'),'[host]');</pre>
+
+		<h2>3. Дать пользователю полные права на базу данных</h2>
+
+		<pre class="console">&gt; grant all on [db].* to [user];</pre>
+
+		<h2>4. Применить изменения прав доступа</h2>
+
+		<pre class="console">&gt; flush privileges;</pre>
+
+		<h2>5. Сброс пароля пользователя root в mysql</h2>
+
+		<ol>
+			<li>
+				<p>Останавливаем mysql.</p>
+
+				<pre class="console"># /etc/init.d/mysql stop</pre>
+			</li>
+
+			<li>
+				<p>Запускаем mysql следующей командой:</p>
+
+				<pre class="console"># /usr/bin/mysqld_safe -skip-grant-tables -user=root &amp;</pre>
+			</li>
+
+			<li>
+				<p>Запускаем клиента mysql</p>
+
+				<pre class="console"># mysql -u root</pre>
+			</li>
+
+			<li>
+				<p>Выполняем sql запрос</p>
+
+				<pre class="console">&gt; update mysql.user set password=password('[password]') where user='root';</pre>
+			</li>
+
+			<li>
+				<p>Применяем изменения</p>
+
+				<pre class="console">&gt; flush privileges;</pre>
+			</li>
+
+			<li>Выходим из mysql клиента выполнив в нем команду exit</li>
+
+			<li>
+				<p>Перегружаем mysql сервер.</p>
+
+				<pre class="console"># /etc/init.d/mysql restart</pre>
+			</li>
+		</ol>
+
+		<h2>6. Снятие резервной копии</h2>
+
+		<p>Чтобы снять резервную копию с определённой базы данных, воспользуемся следующей командой:</p>
+
+		<pre class="console">$ mysqldump -u [user] -p [password] [db] &gt; db.sql</pre>
+
+		<p>Чтобы снять резервную копию со всей базы данных, воспользуемся следующей командой:</p>
+
+		<pre class="console">$ mysqldump -u [user] -p [password] --all-databases &gt; all.sql</pre>
+
+		<p>Выполнять резервное копирование нужно под тем пользователем, который имеет доступ к базе данных. Если делаем резервную копию всех баз - пользователь должен иметь доступ ко всем базам данных.</p>
+
+		<h2>7. Восстановление резервной копии</h2>
+
+		<p>Чтобы восстановить резервную копию определённой базы данных, воспользуемся следующей командой:</p>
+
+		<pre class="console">$ mysql -u [user] -p [password] &lt; db.sql</pre>
+
+		<p>Выполнять восстановление резервной копии нужно под тем пользователем, который имеет полный доступ к соответствующей базе данных. Если восстанавливаем все базы данных, то восстанавливать нужно под пользователем, имеющим соответствующие права во всех базах данных.</p>
+
+		<p>Обозначения:</p>
+
+		<ul>
+			<li>[db] - имя базы данных,</li>
+
+			<li>[host] - IP-адрес или доменное имя клиента MySQL,</li>
+
+			<li>[user] - имя пользователя,</li>
+
+			<li>[password] - пароль пользователя.</li>
+		</ul>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Краткая справка по MySQL">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

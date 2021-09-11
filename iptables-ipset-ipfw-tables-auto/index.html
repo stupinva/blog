@@ -1,0 +1,225 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="iptables,stretch,freebsd,debian,linux,ipset,ipfw,netfilter" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2019-12-01 -->
+		<title>Скрипты управления списком IP-адресов в iptables/ipset и ipfw/table</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Скрипты управления списком IP-адресов в iptables/ipset и ipfw/table</h1>
+
+		<p>Года 4 назад на работе перевёл всех Zabbix-агентов в активный режим, т.к. этот режим должен быть эффективнее чем опрос обычных пассивных Zabbix-агентов. Для снятия данных с обычных Zabbix-агентов сервер Zabbix сам устанавливает подключение к Zabbix-агенту, запрашивает у него необходимые метрики, после чего отключается. Для этого сервер Zabbix используют процессы poller, каждый из которых бывает занят не только во время активных действий, но и во время ожидания данных от Zabbix-агента. Если же Zabbix-агент работает в активном режиме, то сервер Zabbix не предпринимает никаких активных действий, а ждёт действий со стороны агента. Активный Zabbix-агент подключается к серверу Zabbix, запрашивает у него список метрик, за которыми нужно наблюдать, и периодичность их контроля. После этого Zabbix-агент самостоятельно собирает данные с необходимой периодичностью и отправляет их на сервер Zabbix. В этом случае сервер Zabbix использует процессы trapper, которые работают только во время приёма уже готовых данных. На самом деле на фоне общей нагрузки снижение использования ресурсов оказалось совсем незаметным, но речь сейчас не об этом.</p>
+
+		<p>После перевода Zabbix-агентов в активный режим появилась другая маета (-: или муда в терминологии кайдзен) - бывает нужно вносить в сетевой фильтр IP-адреса сети, в которых есть активные Zabbix-агенты. До поры до времени это требовалось делать очень редко. Потом сеть стала расти очень быстро и вносить новые IP-адреса и сети в сетевой фильтр стало нужно с завидной регулярностью. С одной стороны, чтобы сэкономить время, можно добавлять сразу целые сети. С другой стороны - в Zabbix нет никаких средств защиты от подделки данных: протокол позволяет запросить конфигурацию любого Zabbix-агента, указав его имя, и отправить в Zabbix данные от имени любого другого Zabbix-агента. Сервер Zabbix не имеет даже средств для определения конфликтующих Zabbix-агентов, которые работают на разных компьютерах, но имеют одно и то же сетевое имя, отправляя поочерёдно разные данные.</p>
+
+		<p>Чтобы автоматизировать процесс добавления IP-адресов в сетевой фильтр на сервере Zabbix, а также максимально снизить возможность отправки поддельных данных с любого свободного IP-адреса, решил написать скрипт, который будет извлекать из базы данных Zabbix список IP-адресов интерфейсов из тех сетевых узлов, на которых есть элементы данных, имеющие тип "Zabbix-агент (активный)".</p>
+
+		<p>Для Linux с его iptables и ipset получился такой скрипт под названием ipset_auto.sh, который можно поместить в планировщик задач cron:</p>
+
+		<pre class="code">#!/bin/sh
+
+AWK="/usr/bin/awk"
+SORT="/usr/bin/sort"
+UNIQ="/usr/bin/uniq"
+IPSET="/sbin/ipset"
+XARGS="/usr/bin/xargs"
+
+update()
+{
+  SET="$1"
+  NEED_IPS="$2"
+
+  CURRENT_IPS=`$IPSET list $SET | $AWK '/^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$/ { print $0; }'`
+
+  DIFF_IPS=`(echo "$NEED_IPS" ; echo -n "$CURRENT_IPS") | $SORT | $UNIQ -u`
+  ADD_IPS=`(echo "$NEED_IPS" ; echo -n "$DIFF_IPS") | $SORT | $UNIQ -d`
+  DEL_IPS=`(echo "$CURRENT_IPS" ; echo -n "$DIFF_IPS") | $SORT | $UNIQ -d`
+
+  if [ -n "$ADD_IPS" ]
+  then
+    echo "--- $SET add ---"
+    echo "$ADD_IPS"
+    echo "$ADD_IPS" | $XARGS -n1 $IPSET add $SET
+  fi
+
+  if [ -n "$DEL_IPS" ]
+  then
+    echo "--- $SET del ---"
+    echo "$DEL_IPS"
+    echo "$DEL_IPS" | $XARGS -n1 $IPSET del $SET
+  fi
+}
+
+# ZABBIX
+
+MYSQL=`$AWK '/^DBUser=/ { split($0, a, "=");
+                          user = a[2]; }
+
+             /^DBPassword=/ { split($0, a, "=");
+                              password = a[2]; }
+
+             /^DBName=/ { split($0, a, "=");
+                          db = a[2]; }
+
+             /^DBHost=/ { split($0, a, "=");
+                          host = a[2]; }
+
+             END { if (user &amp;&amp; password &amp;&amp; host &amp;&amp; db) 
+                     print "/usr/bin/mysql --connect-timeout=5 -u" user " -p" password " -h" host " " db;
+                   else if (user &amp;&amp; password &amp;&amp; db)
+                     print "/usr/bin/mysql --connect-timeout=5 -u" user " -p" password " " db; }' /etc/zabbix/zabbix_server.conf`
+
+if [ -z "$MYSQL" ]
+then
+  echo "MYSQL not defined"
+  exit
+fi
+
+NEED_IPS=`$MYSQL -N &lt;&lt;END 2&gt;/dev/null
+SELECT DISTINCT interface.ip
+FROM items
+JOIN hosts ON hosts.hostid = items.hostid
+  AND hosts.status = 0
+  AND hosts.proxy_hostid IS NULL
+JOIN interface ON interface.hostid = items.hostid
+  AND interface.type = 1
+  AND interface.ip &lt;&gt; '127.0.0.1'
+WHERE items.type = 7
+  AND items.status = 0;
+END
+`
+ERROR=$?
+if [ $ERROR -ne 0 ]
+then
+  echo "Failed to execute SQL-query"
+  exit
+fi
+
+update "zabbix_auto" "$NEED_IPS"</pre>
+
+		<p>Для подключения к базе данных (в данном случае это MySQL, но переделка под другие СУБД тривиальна) скрипт использует настройки из файла конфигурации /etc/zabbix/zabbix_server.conf. Список требуемых IP-адресов в переменной NEED_IPS формируется SQL-запросом, который можно переработать под свои нужды. Например, у меня в скрипте есть ещё пара SQL-запросов, управляющих списками IP-адресов в множествах tftp_auto и ciu_auto. В последней строке скрипта функция update обновляет множество zabbix_auto так, чтобы в нём были только IP-адреса из переменной NEED_IPS.</p>
+
+		<p>Для создания множества IP-адресов zabbix_auto в ipset можно воспользоваться командой:</p>
+
+		<pre class="console"># ipset create zabbix_auto hash:ip</pre>
+
+		<p>Для создания правила в iptables, которое разрешит всем IP-адресам из множества zabbix_auto взаимодействовать с сервером Zabbix, можно воспользоваться командой:</p>
+
+		<pre class="console"># iptables -A INPUT -p tcp -m set --match-set zabbix_auto src -m tcp --dport 10051 -j ACCEPT</pre>
+
+		<p>Аналогичный скрипт для ipfw/table называется ipfw_auto.sh и выглядит следующим образом:</p>
+
+		<pre class="code">#!/bin/sh
+
+AWK="/usr/bin/awk"
+SED="/usr/bin/sed"
+SORT="/usr/bin/sort"
+UNIQ="/usr/bin/uniq"
+XARGS="/usr/bin/xargs"
+
+update()
+{
+  TABLE="$1"
+  NEED_IPS="$2"
+
+  IPFW=`$AWK -v TABLE="$TABLE" '{ split($0, a, "=");
+                                  if (a[1] == TABLE)
+                                  {
+                                    table = a[2];
+                                    print "/sbin/ipfw table " a[2];
+                                  }
+                                }' /etc/firewall.conf`
+
+  if [ -z "$IPFW" ]
+  then
+    echo "IPFW not defined"
+    exit
+  fi
+
+  CURRENT_IPS=`$IPFW list | $SED -e 's/\/32 0$//'`
+
+  DIFF_IPS=`(echo "$NEED_IPS" ; echo -n "$CURRENT_IPS") | $SORT | $UNIQ -u`
+  ADD_IPS=`(echo "$NEED_IPS" ; echo -n "$DIFF_IPS") | $SORT | $UNIQ -d`
+  DEL_IPS=`(echo "$CURRENT_IPS" ; echo -n "$DIFF_IPS") | $SORT | $UNIQ -d`
+
+  if [ -n "$ADD_IPS" ]
+  then
+    echo "--- $TABLE add ---"
+    echo "$ADD_IPS"
+    echo "$ADD_IPS" | $XARGS -n1 $IPFW add
+  fi
+
+  if [ -n "$DEL_IPS" ]
+  then
+    echo "--- $TABLE del ---"
+    echo "$DEL_IPS"
+    echo "$DEL_IPS" | $XARGS -n1 $IPFW delete
+  fi
+}
+
+MYSQL=`$AWK '/^DBUser=/ { split($0, a, "=");
+                          user = a[2]; }
+
+             /^DBPassword=/ { split($0, a, "=");
+                              password = a[2]; }
+
+             /^DBName=/ { split($0, a, "=");
+                          db = a[2]; }
+
+             /^DBHost=/ { split($0, a, "=");
+                          host = a[2]; }
+
+             END { if (user &amp;&amp; password &amp;&amp; host &amp;&amp; db) 
+                     print "/usr/local/bin/mysql --connect-timeout=5 -u" user " -p" password " -h" host " " db;
+                   else if (user &amp;&amp; password &amp;&amp; db)
+                     print "/usr/local/bin/mysql --connect-timeout=5 -u" user " -p" password " " db; }' /usr/local/etc/zabbix34/zabbix_server.conf`
+
+if [ -z "$MYSQL" ]
+then
+  echo "MYSQL not defined"
+  exit
+fi
+
+# ZABBIX
+
+NEED_IPS=`$MYSQL -N &lt;&lt;END 2&gt;/dev/null
+SELECT DISTINCT interface.ip
+FROM items
+JOIN hosts ON hosts.hostid = items.hostid
+  AND hosts.status = 0
+  AND hosts.proxy_hostid IS NULL
+JOIN interface ON interface.hostid = items.hostid
+  AND interface.type = 1
+  AND interface.ip &lt;&gt; '127.0.0.1'
+WHERE items.type = 7
+  AND items.status = 0;
+END
+`
+ERROR=$?
+if [ $ERROR -ne 0 ]
+then
+  echo "Failed to execute SQL-query"
+  exit
+fi
+
+update "table_zabbix_auto" "$NEED_IPS"</pre>
+
+		<p>Особенность этого скрипта заключается в том, что в ipfw таблицы не имеют имён, а нумеруются. Номер таблицы выясняется через файл /etc/firewall.conf, в котором переменной с именем таблицы присваивается соответствующий номер. Например, для таблицы table_ssh номер задаётся следующим образом:</p>
+
+		<pre class="code">table_ssh=100</pre>
+
+		<p>Подробнее о настройке ipfw/table можно прочитать в одной из моих прошлых заметок: <a href="../ipfw/">Настройка ipfw во FreeBSD</a>.</p>
+
+		<p>Активные Zabbix-агенты и база данных Zabbix приведены для примера, а вообще эти скрипты можно приспособить для любых других целей. Можно скачивать список IP-адресов с веб-страницы (главное, чтобы её не подменили и чтобы она не оказалась внезапно пустой), можно воспользоваться в каком-нибудь самодельном биллинге для открытия доступа пользователям, прошедшим авторизацию и закрытия доступа пользователям, превысившим лимит. Можно сочетать одно с другим.</p>
+
+		<p>FreeBSD на работе постепенно заменяем на Debian, поэтому скрипт ipfw_auto.sh скоро станет мне не нужным. Что касается Debian, то netfilter/iptables в Debian Buster уже заменён на nftables/nft. Пока что утилита iptables никуда не делась и умеет работать с nftables, но в будущем скрипт ipset_auto.sh тоже утратит актуальность и потребует переработки. Оба скрипта, однако, пока что могут пригодиться кому-нибудь ещё, поэтому решил поделиться ими.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Скрипты управления списком IP-адресов в iptables/ipset и ipfw/table">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

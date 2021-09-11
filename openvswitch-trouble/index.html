@@ -1,0 +1,98 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="stretch,systemd,debian,linux,troubleshooting,ovs" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-09-24 -->
+		<title>Решение проблемы с Open vSwitch после обновления Debian до Stretch</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Решение проблемы с Open vSwitch после обновления Debian до Stretch</h1>
+
+		<p>В одной из своих прошлых заметок <a href="../openvswitch/">Установка и настройка Open vSwitch в Debian</a> я писал о настройке Open vSwitch. Тогда я воспользовался информацией из статьи <a href="http://www.opencloudblog.com/?p=240">Boot integration of the Openvswitch in Ubuntu</a>.</p>
+
+		<p>Через некоторое время после выхода Deban Stretch, я решил обновить систему до него. После обновления столкнулся с проблемой: при загрузке системы происходит задержка при настройке сети и запуске демона Open vSwitch, после чего загрузка продолжается, но в загрузившейся системе оказываются настроенными только интерфейсы, не связанные с Open vSwitch.</p>
+
+		<p>Исправить проблему помогла всё та же статья <a href="http://www.opencloudblog.com/?p=240">Boot integration of the Openvswitch in Ubuntu</a>, где была приведён юнит-файл systemd со следующим содержимым:</p>
+
+		<pre class="code">[Unit]
+Description=Open vSwitch Internal Unit
+PartOf=openvswitch-switch.service
+
+DefaultDependencies=no
+
+After=apparmor.service local-fs.target systemd-tmpfiles-setup.service
+
+Wants=network-pre.target openvswitch-switch.service
+Before=network-pre.target openvswitch-switch.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/etc/default/openvswitch-switch
+ExecStart=/usr/share/openvswitch/scripts/ovs-ctl start \
+          --system-id=random $OVS_CTL_OPTS
+ExecStop=/usr/share/openvswitch/scripts/ovs-ctl stop
+
+[Install]
+WantedBy=openvswitch-switch.service</pre>
+
+		<p>Этот текст нужно поместить в файл /lib/systemd/system/openvswitch-nonetwork.service</p>
+
+		<p>Затем нужно добавить в файл /etc/default/openvswitch-switch вот такую опцию:</p>
+
+		<pre class="code">OVS_CTL_OPTS='--delete-bridges'</pre>
+
+		<p>Однако этого оказалось не достаточно.</p>
+
+		<p>Затем нужно создать ещё один юнит-файл вот с таким содержимым:</p>
+
+		<pre class="code">[Unit]
+Description=Open vSwitch
+After=network.target openvswitch-nonetwork.service
+Requires=openvswitch-nonetwork.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+ExecStop=/bin/true
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target</pre>
+
+		<p>Этот текст нужно поместить в файл /lib/systemd/system/openvswitch-switch.service</p>
+
+		<p>Теперь нужно чтобы systemd перечитал обновления в своей конфигурации. Сделаем это при помощи следующей команды:</p>
+
+		<pre class="console"># systemctl daemon-reload</pre>
+
+		<p>Теперь можно включить созданные нами сервис-файлы:</p>
+
+		<pre class="console"># systemctl enable openvswitch-nonetwork.service
+# systemctl enable openvswitch-switch.service</pre>
+
+		<p>Теперь можно перезагрузить систему и проверить, правильно ли настроилась сеть после перезагрузки.</p>
+
+		<p>Меня всё меньше радуют тенденции в новых релизах Debian и в Linux в целом. Я бы не возмущался, если бы лоббисты systemd, протащившие его в систему, заменили бы всё так, чтобы ничего не сломалось. А то получается, что старое сломали, а новое не работает как положено. В самих юнит-файлах по-прежнему используются shell-скрипты для запуска и остановки сервиса - достаточно посмотреть на значения опций ExecStart и ExecStop. Раньше было достаточно уметь писать shell-скрипты для того, чтобы запустить сервис, правильно подготовив для него окружение, и остановить сервис, убрав за ним мусор. Сейчас же получается, что shell-скрипты по-прежнему нужно знать, но ещё нужно знать и опции юнит-файлов systemd. Подумываю о FreeBSD, где знания об ipfw, rc.conf и системе портов в той или иной мере актуальны до сих пор, хотя система и развивается. Настораживает только то, что в последнее время даже самые ярые сторонники FreeBSD стали всё чаще использовать Ubuntu.</p>
+
+		<p>Использованные материалы:</p>
+
+		<ul>
+			<li><a href="http://www.opencloudblog.com/?p=240">Boot integration of the Openvswitch in Ubuntu</a></li>
+
+			<li><a href="https://www.apt-browse.org/browse/ubuntu/xenial/main/amd64/openvswitch-switch/2.5.0-0ubuntu1/file/lib/systemd/system/openvswitch-nonetwork.service">openvswitch-nonetwork.service</a></li>
+
+			<li><a href="https://www.apt-browse.org/browse/ubuntu/xenial/main/amd64/openvswitch-switch/2.5.0-0ubuntu1/file/lib/systemd/system/openvswitch-switch.service">openvswitch-switch.service</a></li>
+		</ul>
+
+		<p>P.S. Дополнение от 11 апреля 2018 года: в файл openvswitch-nonetwork.service добавлена секция Install, без которой systemctl отказывался принимать файл.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Решение проблемы с Open vSwitch после обновления Debian до Stretch">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

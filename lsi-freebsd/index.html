@@ -1,0 +1,74 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="rs2wc040,freebsd,mfiutil,troubleshooting,rs2bl040,raid" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2014-05-04 -->
+		<title>Сборка RAID-массива на контроллере LSI MegaSAS во FreeBSD</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Сборка RAID-массива на контроллере LSI MegaSAS во FreeBSD</h1>
+
+		<p>Пока не о чем писать, начну доставать из загашников небольшие полезные заметки. Эта заметка - первая, затыкающая дыру в периодичности публикаций :)</p>
+
+		<p>Однажды на работе нужно было починить развалившийся RAID-массив. Попутно и записал себе эту памятку, чтобы в следующий раз не пришлось снова лезть в man'ы.</p>
+
+		<p>Посмотрим состояние RAID-массива:</p>
+
+		<pre class="console"># mfiutil show config</pre>
+
+		<p>Из строя вышел диск 6.</p>
+
+		<p>Загрузим драйвер для доступа к статистике SMART дисков, подключенных через RAID-контроллер:</p>
+
+		<pre class="console"># kldload mfip</pre>
+
+		<p>В файловой системе устройств /dev появятся устройства pass, соответствующие дискам, подключенным к RAID-контроллеру. Смотрим статистику SMART по каждому из дисков:</p>
+
+		<pre class="console"># smartctl -a /dev/pass0
+# smartctl -a /dev/pass1
+# smartctl -a /dev/pass2
+# smartctl -a /dev/pass3</pre>
+
+		<p>Грубо говоря, если в выводе команд есть указанные ниже строки, значит с диском всё в порядке. В противном случае его стоит поменять.</p>
+
+		<pre class="code">SMART Health Status: OK
+
+Elements in grown defect list: 0</pre>
+
+		<p>На неисправном диске эти строчки могут быть, например, такими:</p>
+
+		<pre class="code">SMART Health Status: FAILURE PREDICTION THRESHOLD EXCEEDED [asc=5d, ascq=0]
+
+Elements in grown defect list: 22</pre>
+
+		<p>Если обнаружен неисправный диск, то его можно отключить:</p>
+
+		<pre class="console"># mfiutil fail 6</pre>
+
+		<p>Если это SATA- или SAS-диск в серверном шасси с собственным индикатором активности, то можно заменить жёсткий диск без выключения сервера.</p>
+
+		<p>Чтобы подсветить неисправный диск, можно воспользоваться такой командой:</p>
+
+		<pre class="console"># mfiutil locate 6 on</pre>
+
+		<p>Если судя по SMART диск оказался исправным, или диск уже заменён, то можно пометить его как исправный и добавить его в массив:</p>
+
+		<pre class="console"># mfiutil rebuild 6</pre>
+
+		<p>После замены диска можно отключить индикацию:</p>
+
+		<pre class="console"># mfiutil locate 6 off</pre>
+
+		<p>За процессом синхронизации данных можно наблюдать при помощи следующей команды:</p>
+
+		<pre class="console"># mfiutil drive progress 6</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Сборка RAID-массива на контроллере LSI MegaSAS во FreeBSD">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

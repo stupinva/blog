@@ -1,0 +1,74 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="stretch,ppp,debian,linux,pppoe" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2018-08-26 -->
+		<title>Настройка PPPoE-подключения к ЭР-Телеком/Дом.ru (Уфанет, Башинформсвязь)</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка PPPoE-подключения к ЭР-Телеком/Дом.ru (Уфанет, Башинформсвязь)</h1>
+
+		<p>Заметка простая, но решил выложить, т.к. думаю, что многим может пригодиться. В прошлом я уже использовал подобную конфигурацию для настройки подключений к провайдерам Уфанет и Башинформсвязь (см. примечания в конце заметки), однако описать настройку тогда не удосужился.</p>
+
+		<p>Установим пакет RP-PPPoE, при помощи которого можно устанавливать подключения:</p>
+
+		<pre class="console"># apt-get install pppoe</pre>
+
+		<p>Создадим файл /etc/ppp/peers/ertelecom и впишем в него настройки подключения:</p>
+
+		<pre class="code">user &quot;login&quot;
+plugin rp-pppoe.so
+eth0
+noipdefault
+usepeerdns
+defaultroute
+persist
+noauth
+maxfail 0
+unit 0</pre>
+
+		<p>Где:</p>
+
+		<ul>
+			<li>login - ваш логин по договору,</li>
+
+			<li>eth0 - имя Ethernet-интерфейса, к которому подключен кабель провайдера.</li>
+		</ul>
+
+		<p>Теперь откроем файл /etc/ppp/chap-secrets и впишем в него логин и пароль для подключения.</p>
+
+		<pre class="code"># Secrets for authentication using CHAP
+# client server secret   IP addresses
+login         *       password                *</pre>
+
+		<p>Первые две строчки - это комментарии, которые уже есть в файле. В третьей строчке указаны учётные данные для подключения: login - логин, password - пароль.</p>
+
+		<p>Осталось вписать настройки в файл /etc/network/interfaces, чтобы связь с провайдером устанавливалась при загрузке компьютера:</p>
+
+		<pre class="code"># ertelecom ethernet
+auto eth0
+iface eth0 inet manual
+
+# ertelecom pppoe
+auto ertelecom
+iface ertelecom inet ppp
+  provider ertelecom</pre>
+
+		<p>Установить подключение или разорвать его из командной строки можно такими командами:</p>
+
+		<pre class="console"># ifup ertelecom
+# ifdown ertelecom</pre>
+
+		<p>Настройка подключения к Уфанет по технологии PPPoE была полностью аналогична рассмотренной выше, однако в последнее время Уфанет переводит всех клиентов на технологию IPoE. При этом абонент просто получает настройки Ethernet-интерфейса по протоколу DHCP, а попытка открыть любую веб-страницу в браузере приведёт к попаданию на страницу авторизации. После того, как абонент введёт на странице авторизации свои учётные данные, доступ в интернет открывается. Повторно авторизация запрашивается при смене MAC-адреса компьютера.</p>
+
+		<p>Настройка подключения к Башинформсвязи аналогична рассмотренной выше за исключением того, что в Башинформсвязи используется аутентификация по протоколу PAP, а не CHAP, из-за чего логин и пароль нужно вписывать в файл /etc/ppp/pap-secrets, а не в файл /etc/ppp/chap-secrets, как это описано выше.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка PPPoE-подключения к ЭР-Телеком/Дом.ru (Уфанет, Башинформсвязь)">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

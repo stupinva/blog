@@ -1,0 +1,317 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="buster,zabbix,clickhouse,debian,linux" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2020-10-25 -->
+		<title>Подготовка ClickHouse для хранения истории и тенденций Zabbix</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Подготовка ClickHouse для хранения истории и тенденций Zabbix</h1>
+
+		<h2>1. Создание таблиц истории</h2>
+
+		<p>Подключиться к серверу Clickhouse можно при помощи команды следующего вида:</p>
+
+		<pre class="console">$ clickhouse-client -u zabbix --ask-password zabbix</pre>
+
+		<p>В <a href="https://glaber.io/">Glaber</a>'е используется одна таблица вместо таблиц history, history_uint, history_str и history_text. Таблица history_log не поддерживается. В отличие от Glaber, я решил скрупулёзно воспроизвести схему данных, принятую в Zabbix.</p>
+
+		<p>Однако, если писать данные в таблицы небольшими порциями, менее 8192 строк за раз, Clickhouse не выполняет слияние таких маленьких фрагментов в фоновом режиме. В процессе всего нескольких часов работы Zabbix в Clickhouse могут накопиться сотни тысяч фрагментов. При необходимости перезапуска Clickhouse в таком случае можно столкнуться с интересной проблемой: Clickhouse запущен, но не открывает порты на прослушивание и не принимает подключения. В это время Clickhouse перебирает все фрагменты таблиц, чтобы составить их каталог. Запуск может затянуться на несколько часов.</p>
+
+		<p>Чтобы Clickhouse своевременно сливал фрагменты таблиц в фоновом режиме, нужно чтобы в каждом фрагменте было не мнее 8192 строк. Но даже если ваш сервер Zabbix генерирует более 8192 новых значений в секунду, они будут во-первых распределяться между процессами DBSyncers (количество которых настраивается через опцию конфигурации StartDBSyncers), а во-вторых - они будут распределяться между разными таблицами истории. В моей практике наибольшая доля данных приходилась на таблицу history_uint, а history_log во многих случаях не использовалась вовсе.</p>
+
+		<p>По умолчанию процессы DBSyncers запускаются раз в секунду. Уменьшать их количество не всегда возможно, т.к. эти же процессы используются и для чтения данных из таблиц истории, когда необходимых данных нет в кэше значений. Особенно высока потребность в большом количестве процессов DBSyncers при старте Zabbix, когда кэш значений ещё пуст. Я пробовал делать заплатку для Zabbix, которая добавляет поддержку опции конфигурации DBSyncersPeriod и позволяет настраивать периодичность записи процессами DBSyncers. Такое решение не прошло проверку практикой, при малом количестве новых значений в секунду и большом количестве DBSyncers для накопления достаточного объёма данных приходится выполнять запись раз в 2-5 минут. И это без учёта неравномерности распределения данных по разным таблицам!</p>
+
+		<p>Таким образом, решение использовать буферную таблицу в <a href="https://glaber.io/">Glaber</a> было вполне оправданным. Поэтому настоящие таблицы истории в моём варианте можно создать при помощи следующих запросов:</p>
+
+		<pre class="code">CREATE TABLE real_history_uint
+(
+    itemid UInt64,
+    clock UInt32,
+    ns UInt32,
+    value UInt64
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMMDD(toDateTime(clock))
+ORDER BY (itemid, clock);
+
+CREATE TABLE real_history
+(
+    itemid UInt64,
+    clock UInt32,
+    ns UInt32,
+    value Float64
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMMDD(toDateTime(clock))
+ORDER BY (itemid, clock);
+
+CREATE TABLE real_history_str
+(
+    itemid UInt64,
+    clock UInt32,
+    ns UInt32,
+    value String
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMMDD(toDateTime(clock))
+ORDER BY (itemid, clock);
+
+CREATE TABLE real_history_text
+(
+    itemid UInt64,
+    clock UInt32,
+    ns UInt32,
+    value String
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMMDD(toDateTime(clock))
+ORDER BY (itemid, clock);
+
+CREATE TABLE real_history_log
+(
+    itemid UInt64,
+    clock UInt32,
+    timestamp DateTime,
+    source FixedString(64),
+    severity UInt32,
+    value String,
+    logeventid UInt32,
+    ns UInt32
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMMDD(toDateTime(clock))
+ORDER BY (itemid, clock);</pre>
+
+		<p>Как можно заметить, в отличие от <a href="https://glaber.io/">Glaber</a>, здесь таблицы разделены не на помесячные, а на посуточные секции. Для удаления ненужных секций в дальнейшем можно будет воспользоваться запросами следующего вида:</p>
+
+		<pre class="code">ALTER TABLE real_history_uint DROP PARTITION 20190125;</pre>
+
+		<h2>2. Создание буферных таблиц истории</h2>
+
+		<p>Теперь нужно создать буферные таблицы, с которыми непосредственно будет работать сам Zabbix. При вставке данных в буферную таблицу данные сохраняются в оперативной памяти и не записываются в нижележащую таблицу, пока не будет достигнуто одно из условий. При чтении данных из буферной таблицы данные ищутся как в самой буферной таблице, так и в нижележащей таблице на диске. Я создал буферные таблицы следующим образом:</p>
+
+		<pre class="code">CREATE TABLE history_uint
+(
+    itemid UInt64,
+    clock UInt32,
+    ns UInt32,
+    value UInt64
+) ENGINE = Buffer(zabbix, real_history_uint, 8, 30, 60, 8192, 65536, 262144, 67108864);
+
+CREATE TABLE history
+(
+    itemid UInt64,
+    clock UInt32,
+    ns UInt32,
+    value Float64
+) ENGINE = Buffer(zabbix, real_history, 8, 30, 60, 8192, 65536, 262144, 67108864);
+
+CREATE TABLE history_str
+(
+    itemid UInt64,
+    clock UInt32,
+    ns UInt32,
+    value String
+) ENGINE = Buffer(zabbix, real_history_str, 8, 30, 60, 8192, 65536, 262144, 67108864);
+
+CREATE TABLE history_text
+(
+    itemid UInt64,
+    clock UInt32,
+    ns UInt32,
+    value String
+) ENGINE = Buffer(zabbix, real_history_text, 8, 30, 60, 8192, 65536, 262144, 67108864);
+
+CREATE TABLE history_log
+(
+    itemid UInt64,
+    clock UInt32,
+    timestamp DateTime,
+    source FixedString(64),
+    severity UInt32,
+    value String,
+    logeventid UInt32,
+    ns UInt32
+) ENGINE = Buffer(zabbix, real_history_log, 8, 30, 60, 8192, 65536, 262144, 67108864);</pre>
+
+		<p>Для всех созданных буферных таблиц действуют следующие условия записи данных в реальную таблицу:</p>
+
+		<ul>
+			<li>30 секунд - минимальное время, которое должно пройти со момента предыдущей записи в реальную таблицу, прежде чем буферная таблица запишет данные в реальную таблицу,</li>
+
+			<li>60 секунд - максимальное время с момента предыдущей записи в реальную таблицу, по прошествии которого операция записи будет выполнена вне зависимости от всех остальных условий,</li>
+
+			<li>8192 строк - минимальное количество записей, которое должно быть в буферной таблице, прежде чем буферная таблица запишет данные в реальную таблицу,</li>
+
+			<li>65536 строк - максимальное количество записей, которое должно быть в буферной таблице, по достижении которого операция записи будет выполнена вне зависимости от всех остальных условий,</li>
+
+			<li>256 килобайт - минимальный объём данных, который должен накопиться в буферной таблице, прежде чем буферная таблица запишет данные в реальную таблицу,</li>
+
+			<li>64 мегабайта - максимальный объём данных, который должен накопиться в буферной таблице, по достижении которого операция записи будет выполнена вне зависимости от всех остальных условий.</li>
+		</ul>
+
+		<p>Итак, буферная таблица ждёт либо выполнения одного из условий максимума, либо выполнения всех условий минимума, после чего данные будут записаны в реальную таблицу.</p>
+
+		<h2>3. Виртуальные таблицы тенденций в ClickHouse</h2>
+
+		<p>Т.к. в моём случае внедрение Zabbix состоялось давно и вокруг него уже было написано значительное количество различных скриптов, использующих данные из таблиц тенденций, то мне нужно было сделать переход на ClickHouse максимально мягким. Для этого я воспользовался готовым решением Михаила Макурова, которое он продемонстрировал на одном из слайдов своей презентации. Воспользуемся агрегирующими материализованными представлениями ClickHouse, создав их при помощи следующих запросов:</p>
+
+		<pre class="code">CREATE MATERIALIZED VIEW trends
+ENGINE = AggregatingMergeTree() PARTITION BY toYYYYMMDD(toDateTime(clock))
+ORDER BY (itemid, clock)
+AS SELECT
+  itemid,
+  toUInt32(toStartOfHour(toDateTime(clock))) AS clock,
+  count(value) AS num,
+  min(value) AS value_min,
+  avg(value) AS value_avg,
+  max(value) AS value_max
+FROM real_history
+GROUP BY itemid, clock;
+
+CREATE MATERIALIZED VIEW trends_uint
+ENGINE = AggregatingMergeTree() PARTITION BY toYYYYMMDD(toDateTime(clock))
+ORDER BY (itemid, clock)
+AS SELECT
+  itemid,
+  toUInt32(toStartOfHour(toDateTime(clock))) AS clock,
+  count(value) AS num,
+  min(value) AS value_min,
+  toUInt64(avg(value)) AS value_avg,
+  max(value) AS value_max
+FROM real_history_uint
+GROUP BY itemid, clock;</pre>
+
+		<p>Эти представления материализованные, а это значит, что они будут вычисляться не при поступлении запроса, а будут храниться на диске. Представления будут автоматически обновляться сервером Clickhouse по мере вставки новых данных в таблицы истории. Серверу Zabbix не нужно будет вычислять эти данные самостоятельно, т.к. всю необходимую работу за него будет делать Clickhouse.</p>
+
+		<h2>4. Скрипты</h2>
+
+		<p>Итак, структура таблиц готова, теперь нужно разобраться с обслуживанием таблиц, в том числе удалением устаревших секций таблиц истории и материализованных видов таблиц тенденций, а также с переносом данных. Для обеих задач я решил написать скрипты на Python, воспользовавшись модулем Python для работы с Clickhouse, который называется clickhouse-driver. Из всех рассмотренных мной модулей для языка Python этот модуль приглянулся по следующим причинам:</p>
+
+		<ul>
+			<li>единственный, который использует двоичный протокол ClickHouse, а не использует доступ по HTTP,</li>
+
+			<li>снабжён файлом README и каталогом с документацией. Документация также доступна онлайн: <a href="https://clickhouse-driver.readthedocs.io/en/latest/quickstart.html">Welcome to clickhouse-driver</a>.</li>
+		</ul>
+
+		<p>Я собрал deb-пакеты с модулем clickhouse-driver, воспользовавшись своей статьёй <a href="../deb-python/">Создание deb-пакетов для модулей Python</a>. Вместе с этим модулем понадобилось также собрать deb-пакеты с требуемыми ей модулями clickhouse-cityhash и zstd.</p>
+
+		<h2>5. Обслуживание таблиц</h2>
+
+		<p>Для удаления устаревших секций таблиц и для принудительного слияния фрагментов секций я написал скрипт на Python, который назвал maintein_tables.py:</p>
+
+		<pre class="code">#!/usr/bin/python
+# -*- coding: UTF-8 -*-
+
+from clickhouse_driver import Client
+from datetime import datetime, timedelta
+
+try:
+    c = Client(host='localhost',
+               port=9000,
+               connect_timeout=3,
+               database='zabbix',
+               user='zabbix',
+               password='zabbix')
+except clickhouse_driver.errors.ServerException:
+    print &gt;&gt;sys.stderr, 'Cannot connect to database'
+    sys.exit(1)
+
+def maintein_table(c, database, table, keep_interval):
+    """
+    Удаление устаревших разделов указанной таблицы и оптимизация оставшихся разделов
+    
+    c - подключение к базе данных 
+    database - имя базы данных, в которой нужно произвести усечение таблицы
+    table - имя таблицы, которую нужно усечь
+    keep_interval - период, данные за который нужно сохранить, тип - timedelta
+    """
+    now = datetime.now()
+
+    rows = c.execute('''SELECT partition,
+                               COUNT(*)
+                        FROM system.parts
+                        WHERE database = '%s'
+                          AND table = '%s'
+                        GROUP BY partition
+                        ORDER BY partition
+                     ''' % (database, table))
+    for partition, num in rows:
+        if now - datetime.strptime(partition, '%Y%m%d') &gt; keep_interval:
+            print 'drop partition %s %s %s' % (database, table, partition)
+            c.execute('ALTER TABLE %s.%s DROP PARTITION %s' % (database, table, partition))
+        elif num &gt; 1:
+            print 'optimize partition %s %s %s' % (database, table, partition)
+            c.execute('OPTIMIZE TABLE %s.%s PARTITION %s FINAL DEDUPLICATE' % (database, table, partition))
+
+maintein_table(c, 'zabbix', 'trends', timedelta(days=3650))
+maintein_table(c, 'zabbix', 'trends_uint', timedelta(days=3650))
+maintein_table(c, 'zabbix', 'real_history', timedelta(days=365))
+maintein_table(c, 'zabbix', 'real_history_uint', timedelta(days=365))
+maintein_table(c, 'zabbix', 'real_history_str', timedelta(days=7))
+maintein_table(c, 'zabbix', 'real_history_text', timedelta(days=7))
+maintein_table(c, 'zabbix', 'real_history_log', timedelta(days=7))
+c.disconnect()</pre>
+
+		<p>Запрос для удаления устаревших секций таблиц уже был приведён, а для слияния фрагментов секций таблиц в скрипте используется запрос следующего вида:</p>
+
+		<pre class="code">OPTIMIZE TABLE history PARTITION 20200521 FINAL DEDUPLICATE;</pre>
+
+		<p>В примере скрипт настроен на хранение числовых исторических данных в течение года, текстовых и журнальных данных - в течение семи дней и тенденций в течение 10 лет. При необходимости можно поменять настройки подключения к серверу Clickhouse и настройки длительности хранения данных в таблицах.</p>
+
+		<p>Скрипт можно также скачать по ссылке <a href="maintein_tables.py">maintein_tables.py</a></p>
+
+		<h2>6. Копирование данных</h2>
+
+		<p>Михаил Макуров реализовал поддержку хранения исторических данных Zabbix в ClickHouse на основе поддержки хранения исторических данных в ElasticSearch. В документации Zabbix упоминается, что при хранении исторических данных в ElasticSearch таблицы тенденций не используются. Стало быть, таблицы тенденций не используются и при хранении исторических данных в ClickHouse. Для решения этой проблемы были созданы материализованные представления trends и trends_uint, которые описаны выше.</p>
+
+		<p>При переключении существующей инсталляции Zabbix на использование ClickHouse или ElasticSearch не составляет особого труда перенести содержимое таблиц истории из старого хранилища в новое. А вот таблицы тенденций копировать просто некуда. Скопировать их можно было бы в таблицы истории, но в таблицах тенденций нет точных значений, а есть лишь минимальные, средние и максимальные значения за час, а также количество значений в исходной выборке. Чтобы сохранить возможность видеть данные из таблиц тенденций на графиках, можно попытаться сгенерировать выборку, удовлетворяющую этим условиям, и поместить получившиеся значения в таблицы истории.</p>
+
+		<p>Поскольку и в дальнейшем хотелось бы иметь возможность просматривать графики за тот период, который изначально был выбран для таблиц тенденций, такой подход позволил бы сразу оценить:</p>
+
+		<ul>
+			<li>сколько места на диске займёт точная история за период, аналогичный периоду хранения таблиц тенденций,</li>
+
+			<li>насколько хорошо ClickHouse будет справляться с такой нагрузкой.</li>
+		</ul>
+
+		<p>Итак, кроме функций копирования содержимого таблиц истории, понадобятся также функции для генерирования правдоподобных исторических данных на основе таблиц тенденций.</p>
+
+		<p>Скрипт copy_data.py выполняет полное копирование таблиц истории, а также дополняет таблицы истории правдоподобными данными, сгенерированными на основе таблиц тенденций.</p>
+
+		<p>В начале скрипта можно найти настройки, которые будут использоваться для подключения к базе данных с исходными данными и к целевой базе данных. В конце скрипта можно найти вызовы функций копирования данных:</p>
+
+		<pre class="code">copy_history('history_str', ('itemid', 'clock', 'ns', 'value'))
+copy_history('history_text', ('itemid', 'clock', 'ns', 'value'))
+copy_history('history_log', ('itemid', 'clock', 'timestamp', 'source', 'severity', 'value', 'logeventid', 'ns'))
+
+clock_min, clock_max = copy_history('history', ('itemid', 'clock', 'ns', 'value'), interval=10800)
+copy_trends('trends', 'history', clock_max=clock_min)
+
+clock_min, clock_max = copy_history('history_uint', ('itemid', 'clock', 'ns', 'value'), interval=1800)
+copy_trends('trends_uint', 'history_uint', clock_max=clock_min, int_mode=True)</pre>
+
+		<p>Сначала копируется содержимое таблиц history_str, history_text и history_log, потом копируется таблица history порциями по 3 часа, потом в таблицу history вносятся данные, сгенерированные из данных таблицы trends, и, наконец, таблица history_uint копируется порциями по полчаса и в неё вносятся данные, сгенерированные из данных таблицы trends_uint.</p>
+
+		<p>Функция copy_history перед началом работы выполняет запрос, который находит минимальное и максимальное значение отметок времени в таблице. Этот запрос может выполняться очень долго, поэтому в функциях предусмотрена возможность указания минимального и максимального значения отметок времени в аргументах clock_min и clock_max. Кроме того, указывая эти значения вручную, можно точно настраивать период времени, данные за который нужно обработать. Это может быть полезно, например, для того, чтобы скопировать данные до конца суток, предшествующих переключению Zabbix на Clickhouse. После переключения можно указать период времени, за который накопились новые данные с момента прошлого копирования.</p>
+
+		<p>Если вы не собираетесь копировать данные из таблиц тенденций, то вызовы функций copy_trends можно закомментировать. Можно скопировать тенденции после переключения Zabbix на Clickhouse - скрипт не имеет жёстко предписанной последовательности действий и может быть адаптирован под необходимую вам последовательность действий.</p>
+
+		<p>Скрипт осуществляет вставку данных в ClickHouse порциями по 1048576 строк. Размер порции можно настраивать при помощи аргумента portion функций copy_history и copy_trends. При настройке portion стоит учитывать, что объём вставляемых за один раз данных не должно превышать значения настройки max_memory_usage из файла конфигурации /etc/clickhouse-server/users.xml сервера Clickhouse.</p>
+
+		<p>В процессе тестирования скрипта при переносе данных из базы данных PostgreSQL выяснилась интересная особенность: PostgreSQL не поддерживает колонки с числами с плавающей запятой, а вместо этого используется тип Decimal, имеющий более ограниченную точность в представлении данных. Из-за меньшей точности данные в таблице тенденций чисел с плавающей запятой оказывается невозможно сгенерировать такую правдоподобную выборку данных, которая точно соответствовала бы указанным свойствам. Если сгенерированная выборка не удовлетворяет указанным свойствам, то сгенерированные данные всё-таки вставляются в таблицу истории, но скрипт выдаёт предупреждение о подозрительных данных тенденций.</p>
+
+		<p>Скрипт не приведён в статье из-за его относительно большого объёма. Скрипт можно взять по ссылке <a href="copy_data.py">copy_data.py</a></p>
+
+		<h2>7. Пасхальное яйцо</h2>
+
+		<p>При выходе из клиента ClickHouse 1 января 2020 года заметил поздравление с новым годом:</p>
+
+		<pre class="console">db.server.tld :) exit
+Happy new year.</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Подготовка ClickHouse для хранения истории и тенденций Zabbix">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

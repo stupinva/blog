@@ -1,0 +1,135 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="перевод,ssl,openssl,Джэми Нгуен" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2016-12-25 -->
+		<title>Джэми Нгуен. Подписание сертификатов сервера и клиента, 2015</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Джэми Нгуен. Подписание сертификатов сервера и клиента, 2015</h1>
+
+		<p>Перевод статьи: <a href="https://jamielinux.com/docs/openssl-certificate-authority/sign-server-and-client-certificates.html">Sign server and client certificates</a></p>
+
+		<p>Автор: Джэми Нгуен (Jamie Nguyen)</p>
+
+		<p>Подпишем сертификаты при помощи нашего промежуточного удостоверяющего центра. Подписанные сертификаты можно использовать в различных целях, например, для установки безопасных подключений к веб-серверу или аутентификации клиентов, подключающихся к сервису.</p>
+
+		<p><b>Замечание.</b> Шаги, описанные ниже, описаны с точки зрения удостоверяющего центра. Сторонние пользователи, однако, вместо этого могут создавать свои собственные приватные ключи и запросы на подпись сертификата, не предоставляя вам свои собственные приватные ключи. Они предоставят вам их запрос на сертификат, а вы отдадите им обратно подписанный сертификат. В этом случае пропустите команды genrsa и req.</p>
+
+		<h2><a name="create-key">1. Создание ключа</a></h2>
+
+		<p>Наши пары ключей для корневого и промежуточного удостоверяющих центров имеют длину 4096 бит. Сертификаты сервера и клиента обычно истекают через один год, поэтому можно безопасно использовать 2048-битные ключи.</p>
+
+		<p><b>Замечание.</b> Хотя 4096-битные ключи немного более безопасны, чем 2048-битные, они замедляют рукопожатие TLS и значительно увеличивают нагрузку на процессор во время рукопожатия. По этой причине большинство веб-сайтов используют 2048-битные ключи.</p>
+
+		<p>Если вы создаёте криптографическую пару ключей для использования веб-сервером (например, Apache), нужно будет вводить этот пароль при каждой перезагрузке веб-сервера. Возможно вы захотите пропустить опцию -aes256, чтобы создать ключ без пароля.</p>
+
+		<pre class="console"># cd /root/ca
+# openssl genrsa -aes256 \
+  -out intermediate/private/www.example.com.key.pem 2048
+# chmod 400 intermediate/private/www.example.com.key.pem</pre>
+
+		<h2><a name="create-certificate">2. Создание сертификата</a></h2>
+
+		<p>Используйте приватный ключ для создания запроса на подпись сертификата (CSR). Информация из запроса не обязательно должна совпадать с промежуточным удостоверяющим центром. Для сертификатов серверов поле общего имени Common Name должно быть полным доменным именем (например, www.example.com), а для сертификатов пользователей им может быть уникальный идентификатор (например, адрес электронной почты). Отметим, что поле общего имени Common Name не может быть таким же, как у сертификата корневого или промежуточного удостоверяющего центра.</p>
+
+		<pre class="console"># cd /root/ca
+# openssl req -config intermediate/openssl.cnf \
+  -key intermediate/private/www.example.com.key.pem \
+  -new -sha256 -out intermediate/csr/www.example.com.csr.pem
+Enter pass phrase for www.example.com.key.pem: secretpassword            # Введите ключевую фразу для www.example.com.key.pem: секретныйпароль
+You are about to be asked to enter information that will be incorporated # У вас будет запрошена информация, которая будет вставлена
+into your certificate request.                                           # в ваш запрос сертификата.
+-----
+Country Name (2 letter code) [XX]:US                                     # Название страны (двухбуквенный код) [XX]:US
+State or Province Name []:California                                     # Название штата или провинции []:Калифорния
+Locality Name []:Mountain View                                           # Название местности []:Маунтин Вью
+Organization Name []:Alice Ltd                                           # Название организации []:ООО Алиса
+Organizational Unit Name []:Alice Ltd Web Services                       # Название подразделения []:Веб-сервисы ООО Алиса
+Common Name []:www.example.com                                           # Общее имя []:www.example.com
+Email Address []:                                                        # Адрес электронной почты []:</pre>
+
+		<p>Чтобы создать сертификат, воспользуемся промежуточным удостоверяющим центром для подписи запроса на сертификат. Если сертификат будет использоваться на сервере, воспользуемся расширением server_cert. Если сертификат будет использоваться для аутентификации пользователя, воспользуемся расширением usr_cert. Сертификаты обычно выдаются сроком на один год, но удостоверяющие центры обычно для удобства дают несколько дополнительных дней.</p>
+
+		<pre class="console"># cd /root/ca
+# openssl ca -config intermediate/openssl.cnf \
+  -extensions server_cert -days 375 -notext -md sha256 \
+  -in intermediate/csr/www.example.com.csr.pem \
+  -out intermediate/certs/www.example.com.cert.pem
+# chmod 444 intermediate/certs/www.example.com.cert.pem</pre>
+
+		<p>Файл intermediate/index.txt должен содержать строку, ссылающуюся на этот новый сертификат.</p>
+
+		<pre class="code">V 160420124233Z 1000 unknown ... /CN=www.example.com</pre>
+
+		<h2><a name="check-certificate">3. Проверка сертификата</a></h2>
+
+		<pre class="console"># openssl x509 -noout -text \
+  -in intermediate/certs/www.example.com.cert.pem</pre>
+
+		<p>Эмитент - промежуточный удостоверяющий центр. Поле субъекта ссылается на сам сертификат.</p>
+
+		<pre class="console">Signature Algorithm: sha256WithRSAEncryption                 # Алгоритм подписания: sha256WithRSAEncryption
+    Issuer: C=GB, ST=England,                                #     Эмитент: C=GB, ST=Англия,
+            O=Alice Ltd, OU=Alice Ltd Certificate Authority, #              O=ООО Алиса, OU=Удостоверяющий центр ООО Алиса,
+            CN=Alice Ltd Intermediate CA                     #              CN=Промежуточный удостоверяющий центр ООО Алиса
+    Validity                                                 #     Действительность
+        Not Before: Apr 11 12:42:33 2015 GMT                 #         Не ранее: 11 апреля 2015 года в 12:42:33 по Гринвичу
+        Not After : Apr 20 12:42:33 2016 GMT                 #         Не позднее: 20 апреля 2016 года 12:42:33 по Гринвичу
+    Subject: C=US, ST=California,                            #     Субъект: C=US, ST=Калифорния, L=Маунтин Вью,
+             O=Alice Ltd, OU=Alice Ltd Web Services,         #              O=ООО Алиса, OU=Веб-сервисы ООО Алиса,
+             CN=www.example.com
+    Subject Public Key Info:                                 #     Информация публичного ключа субъекта:
+        Public Key Algorithm: rsaEncryption                  #         Алгоритм публичного ключа: rsaEncryption
+            Public-Key: (4096 bit)                           #             Публичный ключ: (4096 бит)</pre>
+
+		<p>В выводе также показаны расширения X509v3. При создании сертификата было использовано одно из двух расширений: server_cert или usr_cert. Опции из соответствующего раздела конфигурации будут отражены в выводе.</p>
+
+		<pre class="console">X509v3 extensions:                                                                                   # Расширения X509v3:
+    X509v3 Basic Constraints:                                                                        #     Базовые ограничения X509v3:
+        CA:FALSE
+    Netscape Cert Type:                                                                              #     Тип сертификата Netscape:
+        SSL Server                                                                                   #         SSL-сервер
+    Netscape Comment:                                                                                #     Комментарий Netscape
+        OpenSSL Generated Server Certificate                                                         #         Сертификат сервера, созданный OpenSSL
+    X509v3 Subject Key Identifier:                                                                   #     Идентификатор ключа субъекта X509v3:
+        B1:B8:88:48:64:B7:45:52:21:CC:35:37:9E:24:50:EE:AD:58:02:B5
+    X509v3 Authority Key Identifier:                                                                 #     Идентификатор ключа подлинности X509v3:
+        keyid:69:E8:EC:54:7F:25:23:60:E5:B6:E7:72:61:F1:D4:B9:21:D4:45:E9
+        DirName:/C=GB/ST=England/O=Alice Ltd/OU=Alice Ltd Certificate Authority/CN=Alice Ltd Root CA #         ИмяКаталога:/C=GB/ST=Англия/O=ООО Алиса/OU=Удостоверяющий центр ООО Алиса/CN=Корневой удостоверяющий центр ООО Алиса
+        serial:10:00
+
+    509v3 Key Usage: critical                                                                        #     Использование ключа X509v3: критичное
+        Digital Signature, Key Encipherment                                                          #         Цифровая подпись, ключ шифрования
+    X509v3 Extended Key Usage:                                                                       #     Расширенное использование ключа X509v3:
+        TLS Web Server Authentication                                                                #         Аутентификация веб-сервера TLS</pre>
+
+		<p>Воспользуемся ранее созданным файлом цепочки сертификата удостоверяющего центра (ca-chain.cert.pem), чтобы проверить, что этот новый сертификат обладает действительной цепочкой доверия.</p>
+
+		<pre class="console"># openssl verify -CAfile intermediate/certs/ca-chain.cert.pem \
+  intermediate/certs/www.example.com.cert.pem
+www.example.com.cert.pem: OK</pre>
+
+		<h2><a name="deploy-certificate">4. Установка сертификата</a></h2>
+
+		<p>Теперь можно либо установить новый сертификат на сервер, либо передать сертификат клиенту. При установке на серверное приложение (например, Apache), нужно сделать доступными следующие файлы:</p>
+
+		<ul>
+			<li>ca-chain.cert.pem</li>
+
+			<li>www.example.com.key.pem</li>
+
+			<li>www.example.com.cert.pem</li>
+		</ul>
+
+		<p>Если вы подписали запрос на сертификат, полученный со стороны, у вас не будет доступа к приватному ключу, так что обратно вам нужно будет передать только файл цепочки (ca-chain.cert.pem) и сертификат (www.example.com.cert.pem).</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Джэми Нгуен. Подписание сертификатов сервера и клиента, 2015">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,167 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="xen,jessie,altlinux,xl,debian,linux,p7" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2016-06-12 -->
+		<title>Запуск AltLinux как domU в Xen</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Запуск AltLinux как domU в Xen</h1>
+
+		<p>При помощи утилиты xen-create-image можно легко создавать виртуальные машины с любой операционной системой, поддержка которой присутствует в каталоге /usr/share/xen-tools/. Заинтересовал вопрос, как же можно создать виртуальную машину не из списка поддерживаемых? В качестве предмета для экспериментов я выбрал AltLinux. Статья делится на две части: подготовка образа для многократного дальнейшего использования и создание из этого образа одной виртуальной машины. </p>
+
+		<p>Сразу предупреждаю, что тут я в хвост и в гриву пользуюсь LVM. Во-первых, это удобно. Во-вторых, ну не зря же я <a href="../raid1-lvm/">мучился</a>? У кого нет LVM, выпутывайтесь сами ;-P</p>
+
+		<h2>1. Подготовка образа для последующего использования</h2>
+
+		<p>Скачиваем один из образов из каталога <a href="http://ftp.altlinux.org/pub/distributions/ALTLinux/p7/images/starterkits/">http://ftp.altlinux.org/pub/distributions/ALTLinux/p7/images/starterkits/</a></p>
+
+		<p>Например, я взял altlinux-p7-vm-net-20160312-x86_64.img.xz:</p>
+
+		<pre class="console">$ cd /home/stupin
+$ wget http://ftp.altlinux.org/pub/distributions/ALTLinux/p7/images/starterkits/altlinux-p7-vm-net-20160312-x86_64.img.xz</pre>
+
+		<p>Распакуем его:</p>
+
+		<pre class="console">$ cd /home/stupin
+$ 7z x altlinux-p7-vm-net-20160312-x86_64.img.xz</pre>
+
+		<p>Получится файл с именем altlinux-p7-vm-net-20160312-x86_64.img размером 504 мегабайт.</p>
+
+		<p>Посмотрим при помощи утилиты file, что представляет собой этот файл:</p>
+
+		<pre class="console"># file /home/stupin/altlinux-p7-vm-net-20160312-x86_64.img
+/home/stupin/altlinux-p7-vm-net-20160312-x86_64.img: DOS/MBR boot sector, LInux i386 boot LOader; partition 1 : ID=0x83, start-CHS (0x0,32,33), end-CHS (0x40,63,63), startsector 2048, 1030144 sectors</pre>
+
+		<p>Это образ диска с таблицей разделов в стиле DOS.</p>
+
+		<p>Создадим логический том такого же размера, что и образ и скопируем в него этот файл посекторно:</p>
+
+		<pre class="console"># lvcreate -n image -L 528482304b stupin
+# cd /home/stupin
+# dd if=altlinux-p7-vm-net-20160312-x86_64.img of=/dev/mapper/stupin-image</pre>
+
+		<p>Если при помощи fdisk посмотреть таблицу разделов в образе, то можно ещё раз убедиться в том, что в образе имеется таблица разделов DOS:</p>
+
+		<pre class="console"># fdisk -l /dev/mapper/stupin-image
+
+Disk /dev/mapper/stupin-image: 504 MiB, 528482304 bytes, 1032192 sectors
+Units: sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 4096 bytes
+I/O size (minimum/optimal): 4096 bytes / 4096 bytes
+Disklabel type: dos
+Disk identifier: 0xd6c97625
+
+Device                    Boot Start     End Sectors  Size Id Type
+/dev/mapper/stupin-image1       2048 1032191 1030144  503M 83 Linux</pre>
+
+		<p>Смонтируем файловую систему из первого раздела в каталог /mnt/root:</p>
+
+		<pre style="background-color: black; color: white"># partprobe
+# mount /dev/mapper/stupin-image1 /mnt/root</pre>
+
+		<p>Исправим файл etc/inittab, убрав оттуда две консоли и создав вместо них консоль, которая будет доступна из dom0:</p>
+
+		<pre class="code">1:2345:respawn:/sbin/mingetty hvc0
+#1:2345:respawn:/sbin/mingetty --noclear tty1
+#2:2345:respawn:/sbin/mingetty tty2</pre>
+
+		<p>Также я отредактировал файл etc/fstab, прописав монтирование корневой файловой системы по имени устройства вместо монтирования по идентификатору:</p>
+
+		<pre class="code">/dev/xvda     /                       ext4    relatime                        1 1
+#UUID=5b7c2d58-0afa-4bf4-9a42-542935636a05 / ext4 relatime 1 1</pre>
+
+		<p>Чтобы в дальнейшем меньше пришлось вписывать в файл конфигурации виртуальной машины, создадим файл конфигурации для загрузчика pygrub. Для этого создадим каталог boot/grub:</p>
+
+		<pre class="console"># cd /mnt/root/boot
+# mkdir grub</pre>
+
+		<p>Внутри каталога создадим файл menu.lst со следующим содержимым:</p>
+
+		<pre class="code">default         0
+timeout         2
+
+title           AltLinux p7 x86_64
+root            (hd0,0)
+kernel          /boot/vmlinuz root=/dev/xvda ipv6.disable=1 ro
+initrd          /boot/initrd.img
+
+title           AltLinux p7 x86_64 (Single-User)
+root            (hd0,0)
+kernel          /boot/vmlinuz root=/dev/xvda ipv6.disable=1 ro single
+initrd          /boot/initrd.img</pre>
+
+		<p>Поменяем пароль по умолчанию у пользователя root:</p>
+
+		<pre class="console"># chroot /mnt/root
+# passwd
+# exit</pre>
+
+		<p>Теперь создадим архив для последующего разворачивания новых виртуальных машин:</p>
+
+		<pre class="console"># cd /mnt/root
+# tar cjvf /home/stupin/altlinux-p7-vm-net-20160312-x86_64.tbz *</pre>
+
+		<p>Наконец, раздел можно отмонтировать и уничтожить:</p>
+
+		<pre class="console"># umount /mnt/root
+# dd if=/dev/zero of=/dev/mapper/stupin-image
+# partprobe
+# lvremove /dev/mapper/stupin-image</pre>
+
+		<h2>2. Создание виртуальной машины</h2>
+
+		<p>Создадим LVM-раздел для размещения корневого раздела будущей виртуальной машины:</p>
+
+		<pre class="console"># lvcreate -n inet-root -L 20G stupin</pre>
+
+		<p>Создадим файловую систему:</p>
+
+		<pre class="console"># mkfs.ext4 /dev/stupin/inet-root</pre>
+
+		<p>Смонтируем файловую систему:</p>
+
+		<pre class="console"># mount /dev/stupin/inet-root /mnt/inet/</pre>
+
+		<p>И распакуем в неё подготовленный архив с системой:</p>
+
+		<pre class="console"># cd /mnt/inet/
+# tar xjvf /home/stupin/altlinux-p7-vm-net-20160312-x86_64.tbz</pre>
+
+		<p>Размонтируем корневую файловую систему будущей виртуальной машины:</p>
+
+		<pre class="console"># cd /
+# umount /mnt/inet</pre>
+
+		<p>Теперь создадим файл конфигурации виртуальной машины /etc/xen/inet.cfg:</p>
+
+		<pre class="code">bootloader = '/usr/lib/xen-4.4/bin/pygrub'
+#kernel = '/boot/vmlinuz'
+#ramdisk = '/boot/initrd.img'
+
+name = 'inet'
+
+vcpus = 1
+memory = 1024
+
+#root = '/dev/xvda ro'
+disk = ['phy:/dev/stupin/inet-root,ioemu:xvda,w']
+vif = ['script=vif-bridge,bridge=xenbr0']
+
+on_poweroff = 'destroy'
+on_reboot = 'restart'
+on_crash = 'restart'
+on_xend_start = 'ignore'
+on_xend_stop = 'ignore'</pre>
+
+		<p>Параметры kernel, ramdisk и root закомментированы, потому что внутри образа имеется файл /boot/grub/menu.lst, в котором прописано, в каком файле лежит образ ядра и образ минимального корневого диска, а также прописаны все параметры, передаваемые загрузчиком ядру. В том числе прописан параметр, настраивающий имя устройства, содержащей корневую файловую систему.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Запуск AltLinux как domU в Xen">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,108 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="blueprint,python,перевод,flask" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-06-09 -->
+		<title>Армин Роначер. Большие приложения во Flask, 2012</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Армин Роначер. Большие приложения во Flask, 2012</h1>
+
+		<p>Перевод статьи: <a href="http://flask.pocoo.org/docs/patterns/packages/">Larger Applications</a></p>
+
+		<p>Автор: Армин Роначер (Armin Ronacher)</p>
+
+		<p>В больших приложениях лучше использовать пакеты вместо модулей. Это очень просто. Представьте, что небольшое приложение выглядит так:</p>
+
+		<pre class="code">/yourapplication
+    /yourapplication.py
+    /static
+        /style.css
+    /templates
+        layout.html
+        index.html
+        login.html
+        ...</pre>
+
+		<h2>1. Простые пакеты</h2>
+
+		<p>Чтобы преобразовать его в чуть большее, просто создайте новый каталог приложения внутри существующего и поместите всё в него. Переименуйте yourapplication.py в __init__.py. (Убедитесь, что удалили все файлы .pyc, иначе скорее всего оно перестанет работать).</p>
+
+		<p>У вас должно получиться что-то такое:</p>
+
+		<pre class="code">/yourapplication
+    /yourapplication
+        /__init__.py
+        /static
+            /style.css
+        /templates
+            layout.html
+            index.html
+            login.html
+            ...</pre>
+
+		<p>Но как теперь запустить приложение? Простой запуск python yourapplication/__init__.py не сработает. Скажем так, Python не хочет запускать модули в пакете, как программы. Но это не проблема, просто добавим во внутренний каталог yourapplication новый файл runserver.py со следующим содержимым:</p>
+
+		<pre class="code">from yourapplication import app
+app.run(debug=True)</pre>
+
+		<p>Что это нам даст? Теперь мы можем реструктурировать приложение и поделить его на несколько модулей. Единственное, о чём нужно помнить, это:</p>
+
+		<ol>
+			<li>Создание приложения Flask должно происходить в файле __init__.py. Так каждый модуль сможет безопасно импортировать его, а переменная __name__ примет значение имени соответствующего пакета.</li>
+
+			<li>Все функции представлений, к которым применён декоратор route(), должны быть импортированы в файл __init__.py. Не сам объект, но модуль с ними. Импорт модуля представлений производится после создания объекта.</li>
+		</ol>
+
+		<p>Вот пример __init__.py:</p>
+
+		<pre class="code">from flask import Flask
+app = Flask(__name__)
+
+import yourapplication.views</pre>
+
+		<p>При этом views.py должен выглядеть так:</p>
+
+		<pre class="code">from yourapplication import app
+@app.route('/')
+def index():
+    return 'Hello World!'</pre>
+
+		<p>В итоге должно получиться что-то вроде этого:</p>
+
+		<pre class="code">/yourapplication
+    /runserver.py
+    /yourapplication
+        /__init__.py
+        /views.py
+        /static
+            /style.css
+        /templates
+            layout.html
+            index.html
+            login.html
+            ...</pre>
+
+		<h2>2. Взаимный импорт</h2>
+
+		<p>Каждый Python-программист его ненавидит, но мы его добавили: два модуля зависят друг от друга. В данном случае views.py зависит от __init__.py. Мы предостерегаем вас от подобного приёма, но здесь он оправдан. Причина заключается в том, что мы на самом деле не используем представления в __init__.py, а просто убеждаемся в том, что модуль импортирован и делаем это в конце файла.</p>
+
+		<p>Однако, у этого подхода всё-же есть проблемы, но если вы хотите использовать декораторы, без него не обойтись. Обратитесь к разделу <a href="http://flask.pocoo.org/docs/becomingbig/">Становимся большими</a> за идеями о том, как с этим справиться.</p>
+
+		<h2>3. Работа с Blueprint'ами</h2>
+
+		<p>Если у вас получаются большие приложения, рекомендуется поделить их на меньшие группы, в которых каждая из групп реализуется при помощи blueprint'ов. За общим введением в тему обратитесь к главе документации <a href="http://flask.pocoo.org/docs/blueprints/">Модульные приложения с использованием Blueprint'ов</a>.</p>
+
+		<h2>4. Примечания переводчика</h2>
+
+		<p><a href="https://flask-russian-docs.readthedocs.org/ru/latest/patterns/packages.html">Этот</a> и другие переводы можно найти на <a href="https://flask-russian-docs.readthedocs.org/">сайте проекта перевода документации по Flask</a>. Автор проекта - Виталий Кузьмин aka ferm32.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Армин Роначер. Большие приложения во Flask, 2012">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

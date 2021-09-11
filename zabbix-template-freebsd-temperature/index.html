@@ -1,0 +1,82 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="zabbix,sysctl,freebsd" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-10-22 -->
+		<title>Контроль температуры с датчиков sysctl во FreeBSD через Zabbix</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Контроль температуры с датчиков sysctl во FreeBSD через Zabbix</h1>
+
+		<p>Для контроля температурного режима серверов под управлением операционной системы FreeBSD можно воспользоваться датчиками температуры, доступными по команде sysctl:</p>
+
+		<pre class="console"># sysctl -a | grep temperature
+hw.acpi.thermal.tz0.temperature: 27.8C
+hw.acpi.thermal.tz1.temperature: 29.8C</pre>
+
+		<p>В выводе команды sysctl, приведённом выше, имеется два датчика температуры, находящихся в "тепловых зонах" с номерами 0 и 1. Кроме этого возможно ещё контролировать температуру процессорных ядер. Для контроля температуры процессорных ядер на процессорах Intel можно подгрузить модуль ядра операционной системы FreeBSD, который называется coretemp:</p>
+
+		<pre class="console"># kldload coretemp</pre>
+
+		<p>После загрузки этого модуля добавятся датчики температуры, соответствующие ядрам процессора:</p>
+
+		<pre class="console"># sysctl -a | grep temperature
+hw.acpi.thermal.tz0.temperature: 27.8C
+hw.acpi.thermal.tz1.temperature: 29.8C
+dev.cpu.0.temperature: 43.0C
+dev.cpu.1.temperature: 43.0C
+dev.cpu.2.temperature: 38.0C
+dev.cpu.3.temperature: 38.0C
+dev.cpu.4.temperature: 41.0C
+dev.cpu.5.temperature: 41.0C
+dev.cpu.6.temperature: 32.0C
+dev.cpu.7.temperature: 32.0C</pre>
+
+		<p>В данном случае у процессора всего четыре ядра, но каждое из них поддерживает так называемый гипертрединг (общепринятое слово "гипертрейдинг" ассоциируется у меня с торговлей в четрырёхмерном пространстве - hyper-trading) - возможность выполнять два независимых потока инструкций, используя общие вычислительные устройства ядра (грубо говоря, в ядре процессора есть два регистровых файла, два устройства управления, но одно арифметико-логическое устройство). Это хорошо видно по тому, что показания каждой из четырёх пар датчиков - одинаковые.</p>
+
+		<p>Чтобы модуль ядра загружался при загрузке операционной системы автоматически, нужно прописать соответствующую опцию в файл конфигурации загрузчика ядра /boot/loader.conf:</p>
+
+		<pre class="code">coretemp_load="YES"</pre>
+
+		<p>Для процессоров AMD имеется соответствующий модуль под названием amdtemp. У меня, однако, таких процессоров нигде нет, поэтому описанное ниже будет относиться только к процессорам Intel.</p>
+
+		<p>Чтобы следить за показаниями датчиков температуры через систему мониторинга Zabbix, на наблюдаемом узле должен быть установлен и настроен Zabbix-агент. Добавим в файл конфигурации Zabbix-агента /usr/local/etc/zabbix24/zabbix_agentd.conf две строчки:</p>
+
+		<pre class="code">UserParameter=sysctl.temperatures.discovery,/sbin/sysctl -N dev.cpu hw.acpi.thermal 2&gt;/dev/null | awk 'BEGIN { printf "{\"data\":["; first=1; } /\.temperature$/ { name=$0; gsub("dev.cpu.", "CPU", name); gsub(".temperature", "", name); gsub("hw.acpi.thermal.tz", "ZONE", name); if (first) first=0; else printf ","; printf "{\"{#SYSCTL}\":\"%s\",\"{#NAME}\":\"%s\"}", $0, name; } END { print "]}"; }'
+UserParameter=sysctl.temperature[*],/sbin/sysctl -n $1 | sed 's/C$//'</pre>
+
+		<p>Чтобы новые настройки вступили в силу, перезапустим Zabbix-агента при помощи следующей команды:</p>
+
+		<pre class="console"># /usr/local/etc/rc.d/zabbix_agentd restart</pre>
+
+		<p>Для контроля показаний датчиков температуры команды sysctl я подготовил два шаблона:</p>
+
+		<ul>
+			<li><a href="Template_App_FreeBSD_Temperature.xml">Template_App_FreeBSD_Temperature.xml</a> - шаблон с элементами данных типа "Zabbix-агент",</li>
+
+			<li><a href="Template_App_FreeBSD_Temperature_Active.xml">Template_App_FreeBSD_Temperature_Active.xml</a> - шаблон с элементами данных типа "Zabbix-агент (активный)".</li>
+		</ul>
+
+		<p>В шаблоне имеется одно правило обнаружения датчиков:</p>
+
+		<img src="sysctl_temperatures_discovery.png" />
+
+		<p>В этом правиле обнаружения есть один прототип элемента данных:</p>
+
+		<img src="sysctl_temperature_itemprototype.png" />
+
+		<p>Добавлять в шаблон триггеры я не стал, т.к. во-первых пороги для "тепловых зон" и для процессорных ядер наверняка будут отличаться друг от друга, во-вторых - пороги будут зависеть от температурного режима серверной и в-третьих, пороги будут зависеть от типовой нагрузки. Например, на абсолютно одинаковых серверах, расположенных в разных серверных, я наблюдал разброс температур процессорных ядер от 32 до 45 градусов Цельсия. Под нагрузкой процессорные ядра разогреваются до 66 градусов Цельсия. Поэтому, если вам нужны пороги по этим датчикам, то добавьте в шаблон триггеры самостоятельно.</p>
+
+		<p>Снимаемые данные выглядят следующим образом:</p>
+
+		<img src="sysctl_temperature_lastdata.png" />
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Контроль температуры с датчиков sysctl во FreeBSD через Zabbix">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

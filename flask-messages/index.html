@@ -1,0 +1,146 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="python,перевод,flask,flashing" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-07-07 -->
+		<title>Армин Роначер. Всплывающие сообщения во Flask, 2012</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Армин Роначер. Всплывающие сообщения во Flask, 2012</h1>
+
+		<p>Перевод статьи: <a href="http://flask.pocoo.org/docs/patterns/flashing/">Message Flashing</a></p>
+
+		<p>Автор: Армин Роначер (Armin Ronacher)</p>
+
+		<p>Хорошие приложения и интерфейсы пользователя дают обратную связь. Если пользователь не получает достаточной обратной связи, вскоре он может начать ненавидеть приложение. Flask предоставляет по-настоящему простой способ дать обратную связь пользователю при помощи системы всплывающих сообщений. Система всплывающих сообщений обычно делает возможным записать сообщение в конце запроса и получить к нему доступ во время обработки следующего и только следующего запроса. Обычно эти сообщения используются в шаблонах макетов страниц, которые его и отображают.</p>
+
+		<h2>1. Пример всплывающих сообщений</h2>
+
+		<p>Вот полный пример:</p>
+
+		<pre class="code">from flask import Flask, flash, redirect, render_template, \
+     request, url_for
+
+app = Flask(__name__)
+app.secret_key = 'some_secret'
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    error = None
+    if request.method == 'POST':
+        if request.form['username'] != 'admin' or \
+           request.form['password'] != 'secret':
+            error = u'Неправильные учётные данные'
+        else:
+            flash(u'Вы успешно вошли')
+            return redirect(url_for('index'))
+    return render_template('login.html', error=error)
+
+if __name__ == "__main__":
+    app.run()</pre>
+
+		<p>А вот шаблон макета layout.html, отображающий сообщение:</p>
+
+		<pre class="code">&lt;!doctype html&gt;
+&lt;title&gt;Моё приложение&lt;/title&gt;
+{% with messages = get_flashed_messages() %}
+  {% if messages %}
+    &lt;ul class=flashes&gt;
+    {% for message in messages %}
+      &lt;li&gt;{{ message }}&lt;/li&gt;
+    {% endfor %}
+    &lt;/ul&gt;
+  {% endif %}
+{% endwith %}
+{% block body %}{% endblock %}</pre>
+
+		<p>А это - шаблон index.html:</p>
+
+		<pre class="code">{% extends "layout.html" %}
+{% block body %}
+  &lt;h1&gt;Обзор&lt;/h1&gt;
+  &lt;p&gt;Не желаете ли &lt;a href="{{ url_for('login') }}"&gt;войти?&lt;/a&gt;
+{% endblock %}</pre>
+
+		<p>И, конечно, шаблон страницы входа:</p>
+
+		<pre class="code">{% extends "layout.html" %}
+{% block body %}
+  &lt;h1&gt;Вход&lt;/h1&gt;
+  {% if error %}
+    &lt;p class=error&gt;&lt;strong&gt;Ошибка:&lt;/strong&gt; {{ error }}
+  {% endif %}
+  &lt;form action="" method=post&gt;
+    &lt;dl&gt;
+      &lt;dt&gt;Имя пользователя:
+      &lt;dd&gt;&lt;input type=text name=username value="{{
+        request.form.username }}"&gt;
+      &lt;dt&gt;Пароль:
+      &lt;dd&gt;&lt;input type=password name=password&gt;
+    &lt;/dl&gt;
+    &lt;p&gt;&lt;input type=submit value="Войти"&gt;
+  &lt;/form&gt;
+{% endblock %}</pre>
+
+		<h2>2. Всплывающие сообщения с категориями</h2>
+
+		<p>Новинка версии 0.3.</p>
+
+		<p>Всплывающему сообщению можно назначить категорию. По умолчанию, если категория не указана, используется категория 'message' - сообщение. Для более качественной обратной связи с пользователем можно указывать другие категории. Например, сообщения об ошибках должны отображаться на красном фоне.</p>
+
+		<p>Для вывода всплывающего сообщения с другой категорией, просто передайте её вторым аргументом функции flash():</p>
+
+		<pre class="code">flash(u'Указан неправильный пароль', 'error')</pre>
+
+		<p>Внутри шаблона можно сообщить функции get_flashed_messages(), что нужно вернуть ещё и категорию. В этом случае цикл выглядит несколько иначе:</p>
+
+		<pre class="code">{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    &lt;ul class=flashes&gt;
+    {% for category, message in messages %}
+      &lt;li class="{{ category }}"&gt;{{ message }}&lt;/li&gt;
+    {% endfor %}
+    &lt;/ul&gt;
+  {% endif %}
+{% endwith %}</pre>
+
+		<p>Это просто пример того, как можно отображать всплывающие сообщения. Можно использовать категорию для добавления к сообщению префикса, например, &lt;strong&gt;Ошибка:&lt;/strong&gt;.</p>
+
+		<h2>3. Фильтрация всплывающих сообщений</h2>
+
+		<p>Новинка версии 0.9.</p>
+
+		<p>При желании можно передать список категорий, который будет использован функцией get_flashed_messages() для фильтрации сообщений. Это полезно в тех случаях, если нужно выводить сообщения каждой категории в отдельном блоке.</p>
+
+		<pre class="code">{% with errors = get_flashed_messages(category_filter=["error"]) %}
+  {% if errors %}
+    &lt;div class="alert-message block-message error"&gt;
+      &lt;a class="close" href="#"&gt;×&lt;/a&gt;
+      &lt;ul&gt;
+      {%- for msg in errors %}
+        &lt;li&gt;{{ msg }}&lt;/li&gt;
+      {% endfor -%}
+      &lt;/ul&gt;
+    &lt;/div&gt;
+  {% endif %}
+{% endwith %}</pre>
+
+		<h2>4. Примечания переводчика</h2>
+
+		<p>В оригинале были "мигающие" или "вспыхивающие" сообщения, но я счёл дословный перевод не вполне соответствующим истине - эти сообщения не мигают и не вспыхивают. Хотя они также и не всплывают, но это слово показалось мне более удачным.</p>
+
+		<p><a href="https://flask-russian-docs.readthedocs.org/ru/latest/patterns/flashing.html">Этот</a> и другие переводы можно найти на <a href="https://flask-russian-docs.readthedocs.org/">сайте проекта перевода документации по Flask</a>. Автор проекта - Виталий Кузьмин aka ferm32.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Армин Роначер. Журналирование ошибок приложения на Flask, 2012">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

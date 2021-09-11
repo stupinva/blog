@@ -1,0 +1,257 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="TV,xresprobe,X-Window,linux,gtf,nouveau,ddcprobe,xrandr" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-01-13 -->
+		<title>Nouveau + Xrandr: Монитор и телевизор</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Nouveau + Xrandr: Монитор и телевизор</h1>
+
+		<p>В прошлом я уже описывал два способа одновременного использования монитора и телевизора на одной видеокарте: <a href="../xinerama/">Xinerama: монитор и телевизор</a> и <a href="../twinview/">TwinView: монитор и телевизор</a>.</p>
+
+		<p>На этот раз мне, по некоторым причинам, понадобилось поставить свободный драйвер Nouveau. Сам по себе он ставится довольно просто, а вот с настройкой одновременного использования монитора и телевизора пришлось попотеть.</p>
+
+		<h2>1. Установка nouveau</h2>
+
+		<p>Итак, сначала опишу процедуру замены проприетарного драйвера nvidia на свободный nouveau. Для этого я воспользовался статьёй <a href="http://wiki.debian.org/ru/Nouveau">Переход на драйвер nouveau с проприетарных драйверов nvidia</a>.</p>
+
+		<p>У меня установлен Wheezy, поэтому я сразу установил драйвер (в ответ на что система сообщила, что у меня уже установлено всё необходимое):</p>
+
+		<pre class="console"># apt-get install libdrm-nouveau1a xserver-xorg-video-nouveau</pre>
+
+		<p>Остановил LightDM из первой консоли:</p>
+
+		<pre class="console"># /etc/init.d/lightdm stop</pre>
+
+		<p>Выгрузил модули nvidia и drm и загрузил модуль nouveau:</p>
+
+		<pre class="console"># rmmod nvidia
+# rmmod drm
+# modprobe nouveau</pre>
+
+		<p>Удостоверился, что система не ругнулась в ответ на загрузку модуля nouveau:</p>
+
+		<pre class="console"># dmesg | tail</pre>
+
+		<p>Сделал резервную копию файла конфигурации X-сервера:</p>
+
+		<pre class="console"># cp /etc/X11/xorg.conf /etc/X11/xorg.conf-nvidia-twinview</pre>
+
+		<p>В исходном файле закомментировал секции Monitor и Screen, соответствующие телевизору, в секции ServerLayout оставил только один Screen, в секции Driver закомментировал использование TwinView.</p>
+
+		<p>Затем удалил пакет nvidia-glx:</p>
+
+		<pre class="console"># apt-get remove nvidia-glx</pre>
+
+		<p>И поставил замену для него:</p>
+
+		<pre class="console"># apt-get install libgl1-mesa-dri libgl1-mesa-glx</pre>
+
+		<p>Затем попробовал запустить LightDM и убедился, что монитор работает:</p>
+
+		<pre class="console"># /etc/init.d/lightdm start</pre>
+
+		<p>Затем, удалил остатки проприетарного драйвера nvidia:</p>
+
+		<pre class="console"># apt-get remove nvidia-\*</pre>
+
+		<p>Добавил модуль проприетарного драйвера в чёрный список, закомментировав строчку с nouveau и прописав строчку с nvidia в файле /etc/modprobe.d/nvidia-kernel-common.conf:</p>
+
+		<pre class="console">#blacklist nouveau
+blacklist nvidia</pre>
+
+		<p>И добавил модуль nouveau в автозагрузку:</p>
+
+		<pre class="console"># echo nouveau &gt;&gt; /etc/modules</pre>
+
+		<p>Теперь настала пора самого сложного - настроить телевизор.</p>
+
+		<h2>2. Настройка монитора и телевизора</h2>
+
+		<p>В результате всех мытарств получился такой /etc/X11/xorg.conf:</p>
+
+		<pre class="code">Section "ServerFlags"
+    Option "AutoAddDevices" "False"
+    Option "AllowEmptyInput" "False"
+    Option "DontZap" "False"
+EndSection
+
+Section "ServerLayout"
+    Identifier     "X.org Configured"
+    Screen      0  "Screen0" 0 0
+    InputDevice    "Mouse0" "CorePointer"
+    InputDevice    "Keyboard0" "CoreKeyboard"
+EndSection
+
+Section "Files"
+    ModulePath   "/usr/lib/xorg/modules"
+    FontPath     "/usr/share/fonts/X11/misc"
+    FontPath     "/usr/share/fonts/X11/Type1"
+    FontPath     "/var/lib/defoma/x-ttcidfont-conf.d/dirs/TrueType"
+EndSection
+
+Section "Module"
+    Load  "dri"
+    Load  "GLcore"
+    Load  "glx"
+    Load  "dbe"
+    Load  "record"
+    Load  "extmod"
+    Load  "xtrap"
+    Load  "Xrandr"
+EndSection
+
+Section "InputDevice"
+    Identifier  "Keyboard0"
+    Driver      "kbd"
+    Option      "XkbRules" "xorg"
+    Option      "XkbModel" "pc104"
+    Option      "XkbLayout" "us,ru"
+    Option      "XkbOptions" "grp:alt_shift_toggle"
+    Option      "XkbVariant" ",winkeys"
+    Option      "AutoRepeat" "250 30"
+EndSection
+
+Section "InputDevice"
+    Identifier  "Mouse0"
+    Driver      "mouse"
+    Option      "Protocol" "auto"
+    Option      "Device" "/dev/input/mice"
+    Option      "ZAxisMapping" "4 5 6 7"
+EndSection
+
+Section "Monitor"
+    DisplaySize  338 270 # mm
+    Identifier   "VGA-1"
+    VendorName   "LG"
+    ModelName    "Flatron L1730S"
+    HorizSync    30.0 - 80.2
+    VertRefresh  56.0 - 75.0
+    Option       "DPMS"
+    # 1280x1024 @ 75.00 Hz (GTF) hsync: 80.17 kHz; pclk: 138.54 MHz
+    Modeline "1280x1024_75.00"  138.54  1280 1368 1504 1728  1024 1025 1028 1069  -HSync +Vsync
+    # 1024x768 @ 75.00 Hz (GTF) hsync: 60.15 kHz; pclk: 81.80 MHz
+    Modeline "1024x768_75.00"  81.80  1024 1080 1192 1360  768 769 772 802  -HSync +Vsync
+    # 800x600 @ 75.00 Hz (GTF) hsync: 47.02 kHz; pclk: 48.91 MHz
+    Modeline "800x600_75.00"  48.91  800 840 920 1040  600 601 604 627  -HSync +Vsync
+    # 640x480 @ 75.00 Hz (GTF) hsync: 37.65 kHz; pclk: 30.72 MHz
+    Modeline "640x480_75.00"  30.72  640 664 728 816  480 481 484 502  -HSync +Vsync
+    Option       "PreferredMode" "1280x1024_75.00"
+EndSection
+
+Section "Monitor"
+    DisplaySize    450 350 # mm
+    Identifier     "TV-1"
+    VendorName     "LG"
+    ModelName      "Flatron RT-21FA32X"
+    HorizSync      15.625 - 29.7
+    VertRefresh    50.0 - 50.0
+    Option         "DPMS"
+    # 720x576 @ 50.00 Hz (GTF) hsync: 29.65 kHz; pclk: 26.57 MHz
+    Modeline "720x576_50.00"  26.57 720 736 808 896  576 577 580 593  -HSync +Vsync
+    Option         "PreferredMode" "720x576_50.00"
+    Option         "RightOf" "VGA-1"
+EndSection
+
+Section "Device"
+    Identifier  "Card0"
+    Driver      "nouveau"
+    VendorName  "nVidia Corporation"
+    BoardName   "NV43 [GeForce 6600]"
+    BusID       "PCI:5:0:0"
+
+    Option      "Monitor-VGA-1" "VGA-1"
+    Option      "Monitor-TV-1" "TV-1"
+EndSection
+
+Section "Screen"
+    Identifier "Screen0"
+    Device     "Card0"
+    Monitor    "VGA-1"
+    DefaultDepth    24
+    SubSection "Display"
+        Depth     24
+    EndSubSection
+EndSection</pre>
+
+		<p>На что следует обратить внимание?</p>
+
+		<p>Во-первых, на опции в секции Device, которые устанавливают соответствие между портами видеокарты и секциями мониторов в файле конфигурации. Порты, по крайней мере на моей видеокарте, имеют названия "VGA-1", "DVI-I-1" и "TV-1" (их названия можно узнать с помощью команды xrandr), поэтому в опциях они будут называться "Monitor-VGA-1", "Monitor-DVI-I-1" и "Monitor-TV-1". Названия же секций мониторов могут быть произвольными - я решил назвать их так же, как и порты.</p>
+
+		<p>Во-вторых, в секции, описывающей один из мониторов, нужно добавить опцию, указывающую его расположение относительно первого. В моём случае эта опция выглядит так:</p>
+
+		<pre class="code">Option         "RightOf" "VGA-1"</pre>
+
+		<p>В-третьих, в секции Screen, описывающей единственный экран, не должно быть посторонних опций вроде ViewPort, Modes и Virtual. Если они указаны, Xrandr может проявить самостоятельность в выборе настроек видеорежимов, если ему что-то не понравится.</p>
+
+		<p>В-четвёртых, предпочитаемый видеорежим монитора можно выбрать с помощью опции PreferredMode. Единственный его недостаток заключается в том, что нельзя ещё дополнительно указать частоту кадровой развёртки. У меня Xrandr упорно выбирал наименьшую из возможных. Для того, чтобы заставить его использовать нужную частоту развёртки, пришлось описать каждый режим вручную в опциях Modeline. Список доступных режимов можно узнать с помощью команды xrandr. Строчки Modeline можно посчитать с помощью команды gtf.</p>
+
+		<p>В-пятых, опция Modeline может быть молча проигнорирована, если Xrandr решит, что такой режим не поддерживается монитором. Для того, чтобы убедить Xrandr всё-же установить запрошенный видеорежим, нужно ещё вручную задать допустимые пределы вертикальной и горизонтальной частот синхронизации. Их значения можно получить с помощью команды ddcprobe и перед внесением в файл конфигурации отредактировать так, чтобы они соответствовали Modeline'у.</p>
+
+		<p>Например, с помощью gtf я рассчитал Modeline для телевизора:</p>
+
+		<pre class="code"># 720x576 @ 50.00 Hz (GTF) hsync: 29.65 kHz; pclk: 26.57 MHz
+Modeline "720x576_50.00"  26.57 720 736 808 896  576 577 580 593  -HSync +Vsync</pre>
+
+		<p>Чтобы им можно было воспользоваться, нужно чтобы верхнее значение горизонтальной частоты синхронизации равнялось, а лучше - было чуть больше, чем указанное в Modeline (hsync: 29.65 kHz). Исходя из этого, я задрал верхнюю планку в настройке HorizSync:</p>
+
+		<pre class="code">HorizSync      15.625 - 29.7</pre>
+
+		<p>Наконец, после прописывания этих настроек, Xrandr установил нужные мне видеорежимы. Нетребовательные люди могут остановиться на устраивающих их настройках, потому что Xrandr довольно хорошо (но не идеально) выбирает режимы сам.</p>
+
+		<p>Ещё один подводный камень возник с XFCE. У него есть собственное меню для настройки видеорежимов - "Дисплей" в "Диспетчере настроек". Чтобы настройки XFCE не сбивали то, что прописано в настройках X-сервера, нужно удалить из домашнего каталога файл ~/.config/xfce4/xfconf/xfce4-perchannel-xml/display.xml и больше не заходить в это меню, потому что при запуске этот файл создаётся снова.</p>
+
+		<p>И, наконец, завершающий штрих.</p>
+
+		<h2>3. Настройка видеорежима в консоли</h2>
+
+		<p>Драйвер nouveau располагает двумя мониторами с разными разрешениями. В режиме отображения консоли он показывает на обоих мониторах одно и то же изображение. Чтобы изображение целиком отображалось на обоих мониторах, он формирует картинку, размеры которой позволяют отобразить её целиком на мониторе с меньшим разрешением (на телевизоре). Соответственно, на мониторе с большим разрешением используется только прямоугольная область в верхнем левом углу, совпадающая по пиксельным размерам с разрешением второго монитора (телевизора).</p>
+
+		<p>Выглядит это не очень приятно, поэтому я настроил на обоих мониторах одинаковое разрешение, которое они оба могут отобразить: 640x480. При этом разрешении текст умещается в экран телевизора, и занимает 100% площади экрана как на мониторе, так и на телевизоре.</p>
+
+		<p>Добавим модуль в загрузочный образ системы. Для этого в файле /etc/initramfs-tools/modules добавим строчку с текстом "nouveau" и обновим загрузочный образ:</p>
+
+		<pre class="console"># update-initramfs -u -k all</pre>
+
+		<p>Теперь добавим настройки видеорежимов к параметрам ядер Linux, загружаемых с помощью GRUB 2. Для этого откроем файл /etc/defaults/grub и добавим в опцию GRUB_CMDLINE_LINUX необходимые настройки. У меня в этой опции было пусто, поэтому она приняла следующий вид:</p>
+
+		<pre class="code">GRUB_CMDLINE_LINUX="video=VGA-1:640x480 video=TV-1:640x480"</pre>
+
+		<p>Теперь сгенерируем новую конфигурацию GRUB 2:</p>
+
+		<pre class="console"># update-grub</pre>
+
+		<p>И перезагрузим компьютер. Оба экрана будут использовать в режиме текстовой консоли разрешения 640x480, а в графическом режиме - настройки X-сервера.</p>
+
+		<h2>4. Ссылки:</h2>
+
+		<ol>
+			<li><a href="http://wiki.debian.org/ru/Nouveau">Переход на драйвер nouveau с проприетарных драйверов nvidia</a></li>
+
+			<li><a href="http://nouveau.freedesktop.org/wiki/Randr12">Enabling Randr12 support in nouveau</a></li>
+
+			<li><a href="http://nouveau.freedesktop.org/wiki/KernelModeSetting">Kernel Mode-setting</a></li>
+
+			<li><a href="http://cgit.freedesktop.org/nouveau/linux-2.6/tree/Documentation/fb/modedb.txt">http://cgit.freedesktop.org/nouveau/linux-2.6/tree/Documentation/fb/modedb.txt</a></li>
+
+			<li><a href="http://odessa-linux.blogspot.ru/2012/08/blog-post.html">Проблема со шрифтами в консоли...</a></li>
+
+			<li><a href="http://www.ylsoftware.com/news/469">Оптимизация initramfs в Debian</a></li>
+
+			<li><a href="http://oper777.blogspot.ru/2010/10/tv-nouveau.html">Отключение режима обнаружения TV драйвером NOUVEAU</a></li>
+
+			<li><a href="http://blog.korphome.ru/2012/09/14/gentoo-%D0%BF%D0%B5%D1%80%D0%B5%D1%85%D0%BE%D0%B4%D0%B8%D0%BC-%D0%BD%D0%B0-grub2/">Gentoo: переходим на Grub2</a></li>
+
+			<li><a href="http://www.linux.org.ru/forum/desktop/7968982">Не работает OpenGL в Debian(Nouveau)</a></li>
+		</ol>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Nouveau + Xrandr: Монитор и телевизор">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

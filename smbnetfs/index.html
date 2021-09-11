@@ -1,0 +1,86 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="xfce,smbnetfs,linux,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-08-04 -->
+		<title>Настройка smbnetfs</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка smbnetfs</h1>
+
+		<p>Каталоги SMB в Thunar можно открывать точно так же, как это было описано для SFTP. Если пользоваться этим не часто, то никаких затруднений обычно не возникает. В противном случае может оказаться удобнее воспользоваться пакетом smbnetfs, основанном на подсистеме FUSE. Дополнительный бонус - с сетевыми папками смогут работать обычные программы, не знающие о существовании GVFS.</p>
+
+		<p>Установим пакет smbnetfs:</p>
+
+		<pre class="console"># apt-get install smbnetfs</pre>
+
+		<p>Добавим пользователя, который будет пользоваться пакетом, в группу fuse:</p>
+
+		<pre class="console"># usermod -aG fuse stupin</pre>
+
+		<p>В домашнем каталоге пользователя создаём каталог с настройками:</p>
+
+		<pre class="console">$ mkdir .smb</pre>
+
+		<p>А в нём - конфиг для подключения к серверам ~/.smb/smbnetfs.conf, содержащий учётные данные для подключения к сетевым каталогам.</p>
+
+		<p>Можно указать через косую черту сервер и каталог, для которого должны использоваться конкретные учётные данные следующим образом:</p>
+
+		<pre class="code">auth "SERVER/SHARE" "username" "password"</pre>
+
+		<p>Вместо сервера с каталогом можно указать только имя сервера или только имя рабочей группы, вот так:</p>
+
+		<pre class="code">auth "SERVER" "username" "password"
+auth "WORKGROUP" "username" "password"</pre>
+
+		<p>Для всех остальных подключений можно задать только имя и пароль:</p>
+
+		<pre class="code">auth "username" "password"</pre>
+
+		<p>Я записал в этот файл нечто подобное:</p>
+
+		<pre class="code">auth "TRASH" "guest" ""
+auth "CORE/stupin" "password"</pre>
+
+		<p>Не забудьте сделать файл с настройками доступным только самому владельцу:</p>
+
+		<pre class="console">$ chmod go= ~/.smb/smbnetfs.conf</pre>
+
+		<p>Теперь осталось создать каталог, в который будет отображаться содержимое сети, и смонтировать представление SMB-сети в него.</p>
+
+		<pre class="console">$ mkdir ~/smb
+$ smbnetfs -o direct_io,readdir_ino ~/smb</pre>
+
+		<p>Для автоматического монтирования сети при входе в XFCE, можно прописать следующую команду в автозапуск:</p>
+
+		<pre class="code">/usr/bin/smbnetfs -o direct_io,readdir_ino /home/stupin/smb</pre>
+
+		<p>Открываем "Сеансы и запуск" в настройках XFCE:</p>
+
+		<img src="smbnetfs1.png" />
+
+		<p>Переходим на вкладку "Автозапуск приложений", добавляем новый элемент (на страничке ):</p>
+
+		<img src="smbnetfs2.png" />
+
+		<p>Вводим команду автозапуска и пояснительный текст:</p>
+
+		<img src="smbnetfs3.png" />
+
+		<p>Отмечаем этот элемент как активный:</p>
+
+		<img src="smbnetfs4.png" />
+
+		<p>Теперь сразу после входа под своей учётной записью можно зайти в каталог smb и увидеть содержимое сети. На первом уровне иерархии будут рабочие группы, потом серверы, потом общие каталоги, а далее - каталоги и файлы внутри общей папки. Для примера, снимок окна Thunar:</p>
+
+		<img src="smbnetfs5.png" />
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка smbnetfs">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

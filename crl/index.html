@@ -1,0 +1,132 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="перевод,crl,ssl,openssl,Джэми Нгуен" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-01-01 -->
+		<title>Джэми Нгуен. Списки отозванных сертификатов - CRL, 2015</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Джэми Нгуен. Списки отозванных сертификатов - CRL, 2015</h1>
+
+		<p>Перевод статьи: <a href="https://jamielinux.com/docs/openssl-certificate-authority/certificate-revocation-lists.html">Certificate revocation lists</a></p>
+
+		<p>Автор: Джэми Нгуен (Jamie Nguyen)</p>
+
+		<p>Списки отозванных сертификатов (CRL) предоставляют список сертификатов, которые были отозваны. Приложение клиента, такое как веб-браузер, может использовать списки отозванных сертификатов для проверки подлинности сервера. Приложение сервера, такое как Apache или OpenVPN, могут использовать списки отозванных сертификатов для запрета доступа клиентам, которые утратили доверие.</p>
+
+		<p>Публикация списков отозванных сертификатов - это их размещение в публично доступном месте (например, http://example.com/intermediate.crl.pem). Сторонние потребители могут получить список отозванных сертификатов из этого места, чтобы проверить, были ли отозваны сертификаты, относящиеся к этому списку.</p>
+
+		<p><b>Замечание.</b> Некоторые разработчики приложений считают списки отозванных сертификатов устаревшими и используют вместо них <a href="../ocsp/">протокол интерактивного статуса сертификата (OCSP)</a>.</p>
+
+		<h2><a name="prepare-config">1. Подготовка файла конфигурации</a></h2>
+
+		<p>Когда удостоверяющий центр подписывает сертификат, обычно он добавляет в сертификат место расположения списка отозванных сертификатов. Добавьте опцию crlDistributionPoints в соответствующие разделы. В нашем случае нужно добавить опцию в раздел [server_cert].</p>
+
+		<pre class="code">[server_cert]
+# ... пропущено ...
+crlDistributionPoints = URI:http://example.com/intermediate.crl.pem</pre>
+
+		<h2><a name="create-crl">2. Создание CRL</a></h2>
+
+		<pre class="console"># cd /root/ca
+# openssl ca -config intermediate/openssl.cnf \
+  -gencrl -out intermediate/crl/intermediate.crl.pem</pre>
+
+		<p><b>Замечание.</b> Обратитесь к разделу ОПЦИИ CRL на странице руководства инструмента ca, чтобы получить более подробную информацию о создании списков отозванных сертификатов.</p>
+
+		<p>Проверить содержимое списков отозванных сертификатов можно при помощи инструмента crl.</p>
+
+		<pre class="console"># openssl crl -in intermediate/crl/intermediate.crl.pem -noout -text</pre>
+
+		<p>Ещё нет отозванных сертификатов, поэтому вывод содержит "No Revoked Certificates".</p>
+
+		<p>Список отозванных сертификатов нужно регулярно пересоздавать. По умолчанию список отозванных сертификатов устаревает через 30 дней. Период устаревания управляется опцией default_crl_days в разделе [CA_default].</p>
+
+		<h2><a name="revoke-certificate">3. Отзыв сертификата</a></h2>
+
+		<p>Рассмотрим пример. Алиса запустила веб-сервер Apache и у неё есть секретный каталог с фотографиями милых котиков. Алиса хочет предоставить доступ к этой коллекции своему другу - Бобу.</p>
+
+		<p>Боб создаёт приватный ключ и запрос на подпись сертификата (CSR).</p>
+
+		<pre class="console">$ cd /home/bob
+$ openssl genrsa -out bob@example.com.key.pem 2048
+$ openssl req -new -key bob@example.com.key.pem \
+  -out bob@example.com.csr.pem
+You are about to be asked to enter information that will be incorporated # У вас будет запрошена информация, которая будет вставлена
+into your certificate request.                                           # в ваш запрос сертификата.
+-----
+Country Name (2 letter code) [XX]:US                                     # Название страны (двухбуквенный код) [XX]:US
+State or Province Name []:California                                     # Название штата или провинции []:Калифорния
+Locality Name []:San Francisco                                           # Название местности []:Сан-Франциско
+Organization Name []:Bob Ltd                                             # Название организации []:ООО Боб
+Organizational Unit Name []:                                             # Название подразделения []:
+Common Name []:bob@example.com                                           # Общее имя []:bob@example.com
+Email Address []:                                                        # Адрес электронной почты []:</pre>
+
+		<p>Боб отправляет свой запрос на подпись сертификата Алисе, которая затем подписывает его.</p>
+
+		<pre class="console"># cd /root/ca
+# openssl ca -config intermediate/openssl.cnf \
+  -extensions usr_cert -notext -md sha256 \
+  -in intermediate/csr/bob@example.com.csr.pem \
+  -out intermediate/certs/bob@example.com.cert.pem
+Sign the certificate? [y/n]: y                              # Подписать сертификат? [д/н]: д
+1 out of 1 certificate requests certified, commit? [y/n]: y # 1 из 1 запросов на сертификат подписано, подтвердить? [д/н]: д</pre>
+
+		<p>Алиса проверяет, что этот сертификат действителен:</p>
+
+		<pre class="console"># openssl verify -CAfile intermediate/certs/ca-chain.cert.pem \
+  intermediate/certs/bob@example.com.cert.pem
+bob@example.com.cert.pem: OK</pre>
+
+		<p>В файле index.txt должна появиться новая запись.</p>
+
+		<pre class="code">V 160420124740Z 1001 unknown ... /CN=bob@example.com</pre>
+
+		<p>Алиса отправляет Бобу подписанный сертификат. Боб устанавливает сертификат в свой веб-браузер и теперь ему доступны Алисины фотографии кошечек. Ура!</p>
+
+		<p>К сожалению, впоследствии Боб поместил Алисины фотографии кошечек на сайт Новости Хакеров, как будто это его фотографии, и приобрёл высокую популярность. Алиса обнаружила это и хочет немедленно отобрать у него доступ.</p>
+
+		<pre class="console"># cd /root/ca
+# openssl ca -config intermediate/openssl.cnf \
+  -revoke intermediate/certs/bob@example.com.cert.pem
+Enter pass phrase for intermediate.key.pem: secretpassword # Введите ключевую фразу для intermediate.key.pem: секретныйпароль
+Revoking Certificate 1001.                                 # Отзывается сертификат 1001.
+Data Base Updated                                          # База данных обновлена</pre>
+
+		<p>Теперь в файле index.txt строчка, соответствующая сертификату Боба, начинается с символа R. Это означает, что сертификат был отозван.</p>
+
+		<pre class="code">R 160420124740Z 150411125310Z 1001 unknown ... /CN=bob@example.com</pre>
+
+		<p>После отзыва сертификата Боба Алиса должна <a href="#create-crl">пересоздать список отозванных сертификатов</a>.</p>
+
+		<h2><a name="crl-server">4. Использование CRL сервером</a></h2>
+
+		<p>Проверкой клиентских сертификатов обычно занимается приложение-сервер (например, Apache). Это приложение должно иметь локальный доступ к списку отозванных сертификатов.</p>
+
+		<p>В случае Алисы, она может добавить директиву SSLCARevocationPath в конфигурацию Apache и скопировать список отозванных сертификатов на веб-сервер. При следующем подключении Боба к веб-серверу, Apache проверит клиентский сертификат по списку отозванных сертификатов и запретит доступ.</p>
+
+		<p>Подобная директива crl-verify есть и в OpenVPN, так что доступ клиентам с отозванными сертификатами будет заблокирован.</p>
+
+		<h2><a name="crl-client">5. Использование CRL клиентом</a></h2>
+
+		<p>Сертификаты сервера обычно проверяет приложение клиента (например, веб-браузер). Это приложение должно иметь удалённый доступ к списку отозванных сертификатов.</p>
+
+		<p>Если сертификат был подписан расширением, включающим crlDistributionPoints, то клиентское приложение может прочитать эту информацию и получить список отозванных сертификатов из указанного места.</p>
+
+		<p>Точки распространения списка отозванных сертификатов можно увидеть в информации о сертификате в разделе X509v3.</p>
+
+		<pre class="console"># openssl x509 -in cute-kitten-pictures.example.com.cert.pem -noout -text
+    X509v3 CRL Distribution Points: # Точки распространения списка отозванных сертификатов X509v3
+        Full Name:                  #     Полное имя
+            URI:http://example.com/intermediate.crl.pem</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Джэми Нгуен. Списки отозванных сертификатов - CRL, 2015">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

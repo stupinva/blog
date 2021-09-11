@@ -1,0 +1,241 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="lighttpd,nginx,debian,linux,wheezy,php-fpm,dokuwiki" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2014-03-16 -->
+		<title>Установка и настройка dokuwiki</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Установка и настройка dokuwiki</h1>
+
+		<p>На этот раз я опишу настройку dokuwiki - небольшой wiki-системы на PHP, не использующей базы данных SQL. Поскольку не так давно я начал использовать вместо Lighttpd веб-сервер nginx, я опишу два варианта настройки.</p>
+
+		<h2>1. Настройка веб-сервера и сервера приложений</h2>
+
+		<h3>1.1. Вариант 1 - настройка Lighttpd</h3>
+
+		<p>Установим веб-сервер Lighttpd и PHP:</p>
+
+		<pre class="console"># apt-get install lighttpd php5-cgi</pre>
+
+		<p>Для того, чтобы dokuwiki работала на отдельном домене, нужно исправить файл конфигурации /etc/lighttpd/conf-available/50-dokuwiki.conf до следующего состояния:</p>
+
+		<pre class="code">$HTTP["host"] == "wiki.domain.tld" {
+  server.document-root = "/usr/share/dokuwiki"
+
+  $HTTP["url"] =~ "^/" {
+    server.follow-symlink = "enable"
+  }
+
+  $HTTP["url"] =~ "/(\.|_)ht" {
+    url.access-deny = ( "" )
+  }
+
+  $HTTP["url"] =~ "^/(bin|data|inc|conf)" {
+    url.access-deny = ( "" )
+  }
+}</pre>
+
+		<p>В случае, если dokuwiki должна работать из каталога сайта, можно создать такой файл конфигурации /etc/lighttpd/conf-available/50-dokuwiki.conf:</p>
+
+		<pre class="code">$HTTP["host"] == "domain.tld" {
+  $HTTP["url"] =~ "^/wiki" {
+    server.document-root = "/usr/share/dokuwiki"
+
+    $HTTP["url"] =~ "^/" {
+      server.follow-symlink = "enable"
+    }
+
+    $HTTP["url"] =~ "/(\.|_)ht" {
+      url.access-deny = ( "" )
+    }
+
+    $HTTP["url"] =~ "^/(bin|data|inc|conf)" {
+      url.access-deny = ( "" )
+    }
+  }
+}</pre>
+
+		<p>Осталось включить поддержку fastcgi, PHP в fastcgi и только что созданный файл конфигурации:</p>
+
+		<pre class="console"># lighty-enable-mod fastcgi
+# lighty-enable-mod fastcgi-php
+# lighty-enable-mod dokuwiki</pre>
+
+		<p>Чтобы настройки веб-сервера вступили в силу, нужно его перезапустить:</p>
+
+		<pre class="console"># /etc/init.d/lighttpd restart</pre>
+
+		<h3>1.2. Вариант 2 - настройка nginx и php5-fpm</h3>
+
+		<p>Установим веб-сервер и менеджер управления FastCGI-процессами PHP:</p>
+
+		<pre class="console"># apt-get install nginx-light php5-fpm</pre>
+
+		<p>php5-fpm устанавливается с преднастроенным пулом процессов в файле /etc/php/fpm/pool.d/www.conf, так что дополнительные настройки не требуются. Но при желании можно настроить имеющийся пул или создать отдельный пул.</p>
+
+		<p>Теперь добавим файл /etc/nginx/sites-available/dokuwiki с настройками для dokuwiki, если нужно настроить её на отдельном домене:</p>
+
+		<pre class="code">server {
+  listen 80;
+
+  server_name wiki.domain.tld;
+
+  root /usr/share/dokuwiki;
+  index index.php;
+
+  location /bin/ {
+    deny all;
+  }
+
+  location /data/ {
+    deny all;
+  }
+
+  location /inc/ {
+    deny all;
+  }
+
+  location /conf/ {
+    deny all;
+  }
+
+  location ~ \.ht {
+    deny all;
+  }
+
+  location ~ \.php$ {
+    fastcgi_pass unix:/var/run/dokuwiki.sock;
+    fastcgi_index index.php;
+
+    include fastcgi_params;
+  }
+}</pre>
+
+		<p>Или, если dokuwiki должна работать из отдельного каталога на имеющемся сайте, можно добавить в файл конфигурации этого сайта следующие настройки:</p>
+
+		<pre class="code">location /wiki/bin/ {
+  deny all;
+}
+
+location /wiki/data/ {
+  deny all;
+}
+
+location /wiki/inc/ {
+  deny all;
+}
+
+location /wiki/conf/ {
+  deny all;
+}
+
+location /wiki {
+  alias /usr/share/dokuwiki;
+  index index.php;
+
+  location ~ \.ht {
+    deny all;
+  }
+
+  location ~ \.php$ {
+    fastcgi_pass unix:/var/run/php5-fpm.sock;
+    fastcgi_index index.php;
+
+    include fastcgi_params;
+  }
+}</pre>
+
+		<p>Осталось включить использование конфигурации сайта, если вы настраивали dokuwiki на отдельном домене:</p>
+
+		<pre class="console"># cd /etc/nginx/sites-enabled
+# ln -s /etc/nginx/sites-available/dokuwiki .</pre>
+
+		<p>И перезапустить nginx, чтобы его новые настройки вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/nginx restart</pre>
+
+		<p>Можно было бы написать ещё и третий вариант настройки - для использования Lighttpd совместно с php5-fpm, но я не стану этого делать. Кому понадобится такой вариант - тот разберётся в нём сам.</p>
+
+		<h2>2. Установка dokuwiki</h2>
+
+		<p>Установка dokuwiki проста - нужно лишь установить соответствующий пакет:</p>
+
+		<pre class="console"># apt-get install dokuwiki</pre>
+
+		<p>В процессе установки будет задано несколько вопросов:</p>
+
+		<img src="dokuwiki1.png" />
+
+		<img src="dokuwiki2.png" />
+
+		<img src="dokuwiki3.png" />
+
+		<img src="dokuwiki4.png" />
+
+		<p>После установки можно зайти в веб-интерфейс с паролем администратора, который мы указали при установке:</p>
+
+		<img src="dokuwiki5.png" />
+
+		<img src="dokuwiki6.png" />
+
+		<p>Я также пользуюсь темой arctic для dokuwiki. Пакет с этой темой можно взять у меня: <a href="dokuwiki-arctic-theme_0.0.20081104_all.deb">dokuwiki-arctic-theme_0.0.20081104_all.deb</a></p>
+
+		<h2>3. Настройка dokuwiki</h2>
+
+		<h3>3.1. Вариант 1 - настройка dokuwiki через файлы конфигурации</h3>
+
+		<p>dokuwiki можно настраивать как прямым редактированием конфигурационных файлов, так и через веб-интерфейс. Если вам не хочется тратить время на ручную правку файлов, можете перейти к следующему разделу.</p>
+
+		<p>Для первичной настройки достаточно лишь прописать в файл /etc/dokuwiki/local.php несколько настроек:</p>
+
+		<pre class="code">$conf['title'] = 'wiki.domain.tld'; # Название wiki, которое будет на ней отображаться
+$conf['license'] = '';              # Название лицензии, под которой выкладываются материалы
+$conf['lang'] = 'ru';               # Язык интерфейса
+$conf['useacl'] = 1;                # Включает использование списков ограничения доступом
+$conf['superuser'] = '@admin';      # Группа для администраторов
+$conf['template'] = 'arctic';       # Используемая тема</pre>
+
+		<p>Любую из настроек можно не вписывать - у них у всех есть значения по умолчанию.</p>
+
+		<p>В файле /etc/dokuwiki/plugins.local.php я отключил использование плагина, отсылающего разработчикам статистику использования dokuwiki:</p>
+
+		<pre class="code">&lt;?php
+$plugins['popularity']      = 0;
+?&gt;</pre>
+
+		<p>В файле acl.auth.php можно настраивать права доступа к определённым разделам wiki. Например, вот так можно ограничить доступ к разделу private для незарегистрированных пользователей:</p>
+
+		<pre class="code">*               @ALL          1
+*               @user         8
+private:*       @ALL          0</pre>
+
+		<p>В теме arctic, которую я использую, в файле /etc/dokuwiki2/themes/arctic/default.php я удаляю из настроек всех правых и левых панелей страницу index, поскольку для каждого раздела я создаю вручную страницу sidebar, которая и выполняет роль оглавления раздела.</p>
+
+		<h3>3.2. Вариант 2 - настройка dokuwiki через веб</h3>
+
+		<p>Для того, чтобы можно было менять настройки из самой DokuWiki, нужно назначить права доступа веб-сервера к каталогу /etc/dokuwiki:</p>
+
+		<pre class="console"># chgrp www-data /etc/dokuwiki
+# chmod ug=rwx,o=rx /etc/dokuwiki</pre>
+
+		<p>Также нужно поменять права доступа веб-сервера к файлу /etc/dokuwiki/local.php и, по желанию, к другим файлам в этом каталоге:</p>
+
+		<pre class="console"># chown www-data /etc/dokuwiki/local.php
+# chmod u=rw,go=r /etc/dokuwiki/local.php</pre>
+
+		<p>После этих манипуляций можно настраивать dokuwiki через меню "Управление".</p>
+
+		<p>Вот так выглядит настроенная мной dokuwiki с темой arctic:</p>
+
+		<img src="dokuwiki7.png" />
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Установка и настройка dokuwiki">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,187 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="stretch,virtualbox,debian,linux,windows" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2018-04-22 -->
+		<title>VirtualBox в Debian Stretch</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>VirtualBox в Debian Stretch</h1>
+
+		<p>Когда-то я тестировал несколько эмуляторов, о чём написал заметку <a href="../virtualbox-qemu/">Эмуляторы VirtualBox и QEmu в Debian</a>. Недавно мне снова понадобилось воспользоваться эмулятором и я решил воспользоваться старыми наработками. Однако, ситуация с тех пор несколько изменилась. Во-первых, VirtualBox теперь отсутствует в стандартных репозиториях Debian, а во-вторых, графическая оболочка qemulator для qemu теперь обросла функциями и сменила название на virtualbricks.</p>
+
+		<h2>1. VirtualBricks</h2>
+
+		<p>Попробуем установить virtualbricks:</p>
+
+		<pre class="console"># apt-get install virtualbricks</pre>
+
+		<p>Сразу после запуска программа выводит сообщение об отсутствующих компонентах:</p>
+
+		<img src="virtualbricks1.png" />
+
+		<p>Если проигнорировать это сообщение, создать виртуальную машину и попытаться перейти к её настройке, выводится сообщение о том, что virtualbricks не смог распознать версию qemu:</p>
+
+		<img src="virtualbricks2.png" />
+
+		<p>Если попытаться установить недостающие компоненты, сообщений об отсутствующих компонентах станет меньше.</p>
+
+		<pre class="console"># apt-get install vde2-cryptcab qemu ksmtuned</pre>
+
+		<img src="virtualbricks3.png" />
+
+		<p>Однако делу это совершенно не помогает: если после создания виртуальной машины попытаться перейти к её настройке, то программа по-прежнему продолжает выводить сообщение о нераспознанной версии qemu. Как видно, попытка нарастить функциональности при помощи груды кода на Python, не пошла проекту на пользу. На этом я решил закончить эксперименты с virtualbricks, удалил всё установленное и решил снова попытать судьбу с VirtualBox.</p>
+
+		<h2>2. Установка VirtualBox</h2>
+
+		<p>На официальном сайте проекта в разделе скачивания <a href="https://www.virtualbox.org/wiki/Linux_Downloads">Download VirtualBox for Linux Hosts</a> имеется рекомендация устанавливать VirtualBox в Debian Jessie из репозитория <a href="https://download.virtualbox.org/virtualbox/debian">https://download.virtualbox.org/virtualbox/debian</a>. Пропишем его в файл /etc/apt/sources.list:</p>
+
+		<pre class="code">deb http://download.virtualbox.org/virtualbox/debian stretch contrib</pre>
+
+		<p>Обратите внимание, что на официальном сайте указана ссылка, использующая протокол https. Эта ссылка не работает. Чтобы репозиторий подключился без ошибок, нужно поменять в ссылке протокол https на http, как это и было сделано в строчке выше.</p>
+
+		<p>Сразу же скачаем и установим в систему PGP-ключи репозитория:</p>
+
+		<pre class="console"># wget -q https://www.virtualbox.org/download/oracle_vbox_2016.asc -O- | sudo apt-key add -
+# wget -q https://www.virtualbox.org/download/oracle_vbox.asc -O- | sudo apt-key add -</pre>
+
+		<p>Обновим списки пакетов, доступных через репозитории:</p>
+
+		<pre class="console"># apt-get update</pre>
+
+		<p>И установим пакет с VirtualBox:</p>
+
+		<pre class="console"># apt-get install virtualbox-5.2</pre>
+
+		<p>При попытке запуска созданной виртуальной машины может появиться сообщение об ошибке следующего вида:</p>
+
+		<img src="virtualbox19.png" />
+
+		<p>Для работы VirtualBox использует собственный модуль ядра vboxdrv. Если этот модуль не загружен, то и VirtualBox не будет работать. Для устранения ошибки нужно подгрузить модуль ядра:</p>
+
+		<pre class="console"># modprobe vboxdrv</pre>
+
+		<p>Чтобы этот модуль автоматически загружался при загрузке системы, его можно вписать в файл /etc/modules:</p>
+		
+		<pre class="code">vboxdrv</pre>
+
+		<p>Если в системе отсутствует модуль ядра vboxdrv для текущей версии ядра, то modprobe будет ругаться следующим образом:</p>
+
+		<pre class="console"># modprobe vboxdrv
+modprobe: FATAL: Module vboxdrv not found in directory /lib/modules/4.9.0-6-amd64</pre>
+
+		<p>В частности, такая ошибка может появиться, если вы обновляли систему и было установлено ядро новой версии. В таком случае нужно собрать модуль ядра снова. Для этого надо выполнить команду vboxconfig:</p>
+
+		<pre class="console"># vboxconfig</pre>
+
+		<p>Если в системе не установлены заголовочные файлы ядра, то команда сообщит об ошибке сборки модуля ядра вот таким образом:</p>
+
+		<pre class="console">vboxdrv.sh: Building VirtualBox kernel modules.
+This system is currently not set up to build kernel modules.
+Please install the Linux kernel "header" files matching the current kernel
+for adding new hardware support to the system.
+The distribution packages containing the headers are probably:
+    linux-headers-amd64 linux-headers-4.9.0-6-amd64</pre>
+
+		<p>Чтобы решить эту проблему, нужно установить пакет с заголовочными файлами ядра:</p>
+
+		<pre class="console"># apt-get install linux-headers-amd64</pre>
+
+		<p>Таким образом, нужно сначала установить заголовочные файлы ядра, потом собрать модуль ядра vboxdrv при помощи команды vboxconfig, затем подгрузить модуль ядра и прописать его автозагрузку в файл /etc/modules:</p>
+
+		<pre class="console"># apt-get install linux-headers-amd64
+# vboxconfig
+# modprobe vboxdrv
+# vim /etc/modules</pre>
+
+		<p>Последняя команда в списке запускает текстовый редактор для редактирования файла /etc/modules, куда нужно вписать одну строчку:</p>
+
+		<pre class="code">vboxdrv</pre>
+
+		<h3>2.1. Настройка виртуальной машины</h3>
+
+		<p>После установки запустим VirtualBox при помощи команды virtualbox, создадим и настроим виртуальную машину:</p>
+
+		<img src="virtualbox1.png" />
+
+		<img src="virtualbox2.png" />
+
+		<img src="virtualbox3.png" />
+
+		<img src="virtualbox4.png" />
+
+		<img src="virtualbox5.png" />
+
+		<img src="virtualbox6.png" />
+
+		<img src="virtualbox7.png" />
+
+		<p>Виртуальная машина в целом создана, теперь просмотрим и отредактируем остальные её свойства:</p>
+
+		<img src="virtualbox8.png" />
+
+		<p>Для установки Windows в виртуальную машину уберём из виртуальной машины дисковод для дискет и вставим в CD-ROM виртуальной машины образ установочного диска:</p>
+
+		<img src="virtualbox9.png" />
+
+		<img src="virtualbox10.png" />
+
+		<img src="virtualbox11.png" />
+
+		<img src="virtualbox12.png" />
+
+		<img src="virtualbox13.png" />
+
+		<img src="virtualbox14.png" />
+
+		<p>Настройка общей папки, через которую впоследствии можно будет обмениваться файлами между компьютером и виртуальной машиной:</p>
+
+		<img src="virtualbox15.png" />
+
+		<img src="virtualbox16.png" />
+
+		<img src="virtualbox17.png" />
+
+		<h3>2.2. Установка Windows и Oracle VM VirtualBox Guest Additions</h3>
+
+		<p>Запустим созданную виртуальную машину:</p>
+		
+		<img src="virtualbox18.png" />
+
+		<p>На этом экране можно видеть сводку свойств виртуальной машины:</p>
+
+		<img src="virtualbox22.png" />
+
+		<p>После установки Windows в виртуальную машину (не показано), стоит поставить в неё Oracle VM VirtualBox Guest Additions - дополнительные драйверы и программы, делающие работу с виртуальной машиной более комфортной:</p>
+
+		<img src="virtualbox24.png" />
+
+		<img src="virtualbox25.png" />
+
+		<img src="virtualbox26.png" />
+
+		<img src="virtualbox27.png" />
+
+		<img src="virtualbox29.png" />
+
+		<img src="virtualbox30.png" />
+
+		<img src="virtualbox31.png" />
+
+		<img src="virtualbox32.png" />
+
+		<img src="virtualbox33.png" />
+
+		<p>После установки Oracle VM VirtualBox Guest Additions заработал общий каталог с хост-системой, ради чего, преимущественно, эти дополнения и ставились:</p>
+
+		<img src="virtualbox34.png" />
+
+		<p><a href="mailto:vladimir@stupin.su?subject=VirtualBox в Debian Stretch">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,51 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="gvfs-backends,tumbler,thunar,linux,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-07-14 -->
+		<title>Thunar: доступ по SFTP и миниатюры</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Thunar: доступ по SFTP и миниатюры</h1>
+
+		<p>Ещё один тривиальный пост о том, как подключаться из Thunar по SFTP и о том, как заставить Thunar показывать миниатюры.</p>
+
+		<p>До недавних пор у меня не возникало желания подключаться по SFTP чем-либо, кроме консольного клиента sftp, но буквально только что такое желание возникло. Всё оказалось очень просто - нужно лишь поставить пакет gvfs-backends:</p>
+
+		<pre class="console"># apt-get install gvfs-backends</pre>
+
+		<p>Теперь вводим в адресной строке Thunar URI нужного нам ресурса (sftp://ufadeb.homelinux.org):</p>
+
+		<img src="thunar-sftp1.png" />
+
+		<p>В открывшемся окне вводим учётные данные пользователя удалённого компьютера:</p>
+
+		<img src="thunar-sftp2.png" />
+
+		<p>И получаем доступ:</p>
+
+		<img src="thunar-sftp3.png" />
+
+		<p>В адресной строке можно также указать имя пользователя (sftp://stupin@ufadeb.homelinux.org), в таком случае система предложит лишь ввести его пароль.</p>
+
+		<p>Заодно настроил построение миниатюр. Ранее этим заведовал пакет thunar-tumbnailers, однако в мире Linux постоянно всё течёт и меняется и теперь этим занимается пакет с названием tumbler. Нужно лишь поставить пакет:</p>
+
+		<pre class="console"># apt-get install tumbler</pre>
+
+		<p>Затем, выставить в настройках Thunar галочку, предписывающую показывать миниатюры, если это возможно:</p>
+
+		<img src="tumbler1.png" />
+
+		<p>И Thunar начнёт показывать миниатюры картинок:</p>
+
+		<img src="tumbler2.png" />
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Thunar: доступ по SFTP и миниатюры">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

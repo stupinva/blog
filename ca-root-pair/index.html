@@ -1,0 +1,286 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="перевод,ssl,openssl,Джэми Нгуен" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2016-12-11 -->
+		<title>Джэми Нгуен. Создание корневой пары, 2015</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Джэми Нгуен. Создание корневой пары, 2015</h1>
+
+		<p>Перевод статьи: <a href="https://jamielinux.com/docs/openssl-certificate-authority/create-the-root-pair.html">Create the root pair</a></p>
+
+		<p>Автор: Джэми Нгуен (Jamie Nguyen)</p>
+
+		<p>Работа в качестве удостоверяющего центра (CA) подразумевает использование криптографических пар приватных ключей и публичных сертификатов. Самая первая криптографическая пара, которую мы создадим - это корневая пара. Она состоит из корневого ключа (ca.key.pem) и корневого сертификата (ca.cert.pem). Эта пара образует удостоверение удостоверяющего центра.</p>
+
+		<p>Обычно корневой удостоверяющий центр не подписывает непосредственно сертификаты сервера или клиента. Корневой удостоверяющий центр используется только для создания одного или более промежуточных удостоверяющих центров, которым корневой удостоверяющий центр доверяет подписывать сертификаты от своего имени. Это лучшая практика. Она позволяет корневому ключу храниться автономно и использоваться как можно реже, потому что компрометация корневого ключа очень опасна.</p>
+
+		<p><b>Замечание.</b> Лучшей практикой считается создание корневой пары в безопасной среде. Лучше всего, если это будет полностью зашифрованный компьютер, постоянно отключенный от Интернета. Лучше даже изъять из него беспроводные карты и залить клеем Ethernet-порты.</p>
+
+		<h2><a name="prepare-dir">1. Подготовка каталога</a></h2>
+
+		<p>Выберем каталог (/root/ca) для хранения всех ключей и сертификатов.</p>
+
+		<pre class="console"># mkdir /root/ca</pre>
+
+		<p>Создадим структуру каталогов. Файлы index.txt и serial выступают в роли плоской базы данных для отслеживания подписанных сертификатов.</p>
+
+		<pre class="console"># cd /root/ca
+# mkdir certs crl newcerts private
+# chmod 700 private
+# touch index.txt
+# echo 1000 &gt; serial</pre>
+
+		<h2><a name="prepare-confing">2. Подготовка файла конфигурации</a></h2>
+
+		<p>Нужно создать файл конфигурации, который будет использоваться OpenSSL. Скопируем файл конфигурации корневого удостоверяющего центра из <a href="../ca-configs/#config-root">Приложения А</a> в файл /root/ca/openssl.cnf.</p>
+
+		<p>Раздел [ca] обязателен. Здесь мы сообщаем OpenSSL, что нужно использовать опции из раздела [CA_default].</p>
+
+		<pre class="code">[ca]
+# `man ca`
+default_ca = CA_default</pre>
+
+		<p>Раздел [CA_default] содержит набор значений по умолчанию. Убедитесь, что указан выбранный ранее каталог (/root/ca).</p>
+
+		<pre class="code">[CA_default]
+# Местонахождение каталогов и файлов
+dir              = /root/ca
+certs            = $dir/certs
+crl_dir          = $dir/crl
+new_certs_dir    = $dir/newcerts
+database         = $dir/index.txt
+serial           = $dir/serial
+RANDFILE         = $dir/private/.rand
+
+# Корневой ключ и корневой сертификат
+private_key      = $dir/private/ca.key.pem
+certificate      = $dir/certs/ca.cert.pem
+
+# Настройки списков отозванных сертификатов
+crlnumber        = $dir/crlnumber
+crl              = $dir/crl/ca.crl.pem
+crl_extensions   = crl_ext
+default_crl_days = 30
+
+# SHA-1 устарел, поэтому используем вместо него SHA-2
+default_md       = sha256
+
+name_opt         = ca_default
+cert_opt         = ca_default
+default_days     = 375
+preserve         = no
+policy           = policy_strict</pre>
+
+		<p>Мы применим строгую политику policy_strict для всех подписей корневого удостоверяющего центра, потому что корневой удостоверяющий центр используется только для создания промежуточных удостоверяющих центров.</p>
+
+		<pre class="code">[policy_strict]
+# Корневой удостоверяющий центр должен подписывать только соответствующие промежуточные сертификаты
+# Обратитесь к разделу ФОРМАТ ПОЛИТИКИ из `man ca`
+countryName            = match
+stateOrProvinceName    = match
+organizationName       = match
+organizationalUnitName = optional
+commonName             = supplied
+emailAddress           = optional</pre>
+
+		<p>Мы применим свободную политику policy_loose для всех подписей промежуточных удостоверяющих центров, потому что промежуточные удостоверяющие центры подписывают сертификаты серверов и клиентов, которые могут поступать от разнообразных сторонних лиц.</p>
+
+		<pre class="code">[policy_loose]
+# Разрешим промежуточному удостоверяющему центру подписывать более широкий диапазон сертификатов
+# Обратитесь к разделу ФОРМАТ ПОЛИТИКИ из `man ca`
+countryName            = optional
+stateOrProvinceName    = optional
+localityName           = optional
+organizationName       = optional
+organizationalUnitName = optional
+commonName             = supplied
+emailAddress           = optional</pre>
+
+		<p>Опции из раздела [req] применяются при создании сертификатов или запросов на подпись сертификата.</p>
+
+		<pre class="code">[req]
+# Опции утилиты `req` (`man req`)
+default_bits       = 2048
+distinguished_name = req_distinguished_name
+string_mask        = utf8only
+
+# SHA-1 устарел, поэтому используем вместо него SHA-2
+default_md         = sha256
+
+# Расширения, добавляемые при использовании опции -x509
+x509_extensions    = v3_ca</pre>
+
+		<p>Раздел [req_distinguished_name] объявляет информацию обычно требуемую в запросе на подпись сертификата. Можно указать дополнительные значения по умолчанию.</p>
+
+		<pre class="code">[req_distinguished_name]
+# Обратитесь к <a href="https://en.wikipedia.org/wiki/Certificate_signing_request">https://en.wikipedia.org/wiki/Certificate_signing_request</a>
+countryName                     = Название страны (двухбуквенный код)
+stateOrProvinceName             = Название штата или провинции
+localityName                    = Название местности
+0.organizationName              = Название организации
+organizationalUnitName          = Название подразделения организации
+commonName                      = Общее имя
+emailAddress                    = Адрес электронной почты
+
+# На выбор, можно указать несколько значений по умолчанию
+countryName_default             = GB
+stateOrProvinceName_default     = England
+localityName_default            =
+0.organizationName_default      = Alice Ltd
+#organizationalUnitName_default =
+#emailAddress_default           =</pre>
+
+		<p>Следующие несколько разделов - это расширения, которые могут быть применены при подписывании сертификатов. Например, передача аргумента командной строки -extensions v3_ca применит опции из набора в разделе [v3_ca].</p>
+
+		<p>При <a href="#create-root-certificate">создании корневого сертификата</a> применим расширение v3_ca.</p>
+
+		<pre class="code">[v3_ca]
+# Расширения для типичного удостоверяющего центра (`man x509v3_config`)
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints       = critical, CA:true
+keyUsage               = critical, digitalSignature, cRLSign, keyCertSign</pre>
+
+		<p>При <a href="../ca-intermediate-pair/#create-intermediate-certificate">создании промежуточного сертификата</a> применим расширение v3_ca_intermediate. pathlen:0 гарантирует, что у промежуточного удостоверяющего центра не будет дочерних промежуточных удостоверяющих центров.</p>
+
+		<pre class="code">[v3_intermediate_ca]
+# Расширения для типичного промежуточного удостоверяющего центра (`man x509v3_config`)
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints       = critical, CA:true, pathlen:0
+keyUsage               = critical, digitalSignature, cRLSign, keyCertSign</pre>
+
+		<p>Расширение usr_cert будем применять при подписании клиентских сертификатов, которые будут использоваться для аутентификации удалённых пользователей.</p>
+
+		<pre class="code">[usr_cert]
+# Расширения для клиентских сертификатов (`man x509v3_config`)
+basicConstraints       = CA:FALSE
+nsCertType             = client, email
+nsComment              = "Сертификат клиента создан OpenSSL"
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer
+keyUsage               = critical, nonRepudiation, digitalSignature, keyEncipherment
+extendedKeyUsage       = clientAuth, emailProtection</pre>
+
+		<p>Применим расширение server_cert при подписании сертификатов серверов, например, используемых веб-серверами.</p>
+
+		<pre class="code">[server_cert]
+# Расширения для сертификатов серверов (`man x509v3_config`)
+basicConstraints       = CA:FALSE
+nsCertType             = server
+nsComment              = "Сертификат сервера создан OpenSSL"
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer:always
+keyUsage               = critical, digitalSignature, keyEncipherment
+extendedKeyUsage       = serverAuth</pre>
+
+		<p>Расширение crl_ext применяется автоматически при <a href="../crl/">создании списков отозванных сертификатов</a>.</p>
+
+		<pre class="code">[crl_ext]
+# Расширение для списков отозванных сертификатов (`man x509v3_config`)
+authorityKeyIdentifier = keyid:always</pre>
+
+		<p>Применим расширение ocsp при подписании сертификата для <a href="../ocsp/">протокола интерактивного статуса сертификата (Online Certificate Status Protocol - OCSP)</a>.</p>
+
+		<pre class="code">[ocsp]
+# Расширение для подписи сертификатов OCSP (`man ocsp`)
+basicConstraints       = CA:FALSE
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid,issuer
+keyUsage               = critical, digitalSignature
+extendedKeyUsage       = critical, OCSPSigning</pre>
+
+		<h2><a name="create-root-key">3. Создание корневого ключа</a></h2>
+
+		<p>Создадим корневой ключ (ca.key.pem) и сохраним его в полной безопасности. Злоумышленник, заполучивший корневой ключ, сможет выпускать доверенные сертификаты. Зашифруйте корневой ключ при помощи 256-битного шифрования AES и сильного пароля.</p>
+
+		<p><b>Замечание.</b> Используйте 4096 бит для всех корневых и промежуточных ключей удостоверяющих центров. Вы по-прежнему сможете подписывать сертификаты серверов и клиентов более короткой длины.</p>
+
+		<pre class="console"># cd /root/ca
+# openssl genrsa -aes256 -out private/ca.key.pem 4096
+Enter pass phrase for ca.key.pem: secretpassword             # Введите ключевую фразу для ca.key.pem: секретныйпароль
+Verifying - Enter pass phrase for ca.key.pem: secretpassword # Проверка - Введите ключевую фразу для ca.key.pem: секретныйпароль
+# chmod 400 private/ca.key.pem</pre>
+
+		<h2><a name="create-root-certificate">4. Создание корневого сертификата</a></h2>
+
+		<p>Воспользуемся корневым ключом (ca.key.pem) для создания корневого сертификата (ca.cert.pem). Примем срок действия корневого сертификата достаточно длинным, например - двенадцать лет. По истечении срока действия корневого сертификата все сертификаты, подписанные этим удостоверяющим центром, станут недействительными.</p>
+
+		<p><b>Предупреждение!</b> При каждом использовании утилиты req нужно указывать используемый файл конфигурации с помощью опции -config, в противном случае OpenSSL будет использовать файл по умолчанию /etc/pki/tls/openssl.cnf.</p>
+
+		<pre class="console"># cd /root/ca
+# openssl req -config openssl.cnf \
+  -key private/ca.key.pem \
+  -new -x509 -days 7300 -sha256 -extensions v3_ca \
+  -out certs/ca.cert.pem
+Enter pass phrase for ca.key.pem: secretpassword                         # Введите ключевую фразу для ca.key.pem: секретныйпароль
+You are about to be asked to enter information that will be incorporated # У вас будет запрошена информация, которая будет вставлена
+into your certificate request.                                           # в ваш запрос сертификата.
+-----
+Country Name (2 letter code) [XX]:GB                                     # Название страны (двухбуквенный код) [XX]:GB
+State or Province Name []:England                                        # Название штата или провинции []:Англия
+Locality Name []:                                                        # Название местности []:
+Organization Name []:Alice Ltd                                           # Название организации []:ООО Алиса
+Organizational Unit Name []:Alice Ltd Certificate Authority              # Название подразделения []:Удостоверяющий центр ООО Алиса
+Common Name []:Alice Ltd Root CA                                         # Общее имя []:Корневой удостоверяющий центр ООО Алиса
+Email Address []:                                                        # Адрес электронной почты []:
+# chmod 444 certs/ca.cert.pem</pre>
+
+		<h2><a name="check-root-certificate">5. Проверка корневого сертификата</a></h2>
+
+		<pre class="console"># openssl x509 -noout -text -in certs/ca.cert.pem</pre>
+
+		<p>В выводе будут отображены:</p>
+
+		<ul>
+			<li>используемый алгоритм подписания,</li>
+
+			<li>даты действия сертификата,</li>
+
+			<li>битовая длина публичного ключа,</li>
+
+			<li>эмитент, который подписал этот сертификат,</li>
+
+			<li>субъект, который относится к этому сертификату.</li>
+		</ul>
+
+		<p>Эмитент и субъект идентичны в случае самозаверенного сертификата. Отметим, что все корневые сертификаты являются самозаверенными.</p>
+
+		<pre class="console">Signature Algorithm: sha256WithRSAEncryption                  # Алгоритм подписания: sha256WithRSAEncryption
+    Issuer: C=GB, ST=England,                                 #     Эмитент: C=GB, ST=Англия,
+            O=Alice Ltd, OU=Alice Ltd Certificate Authority,  #              O=ООО Алиса, OU=Удостоверяющий центр ООО Алиса,
+            CN=Alice Ltd Root CA                              #              CN=Корневой удостоверяющий центр ООО Алиса
+    Validity                                                  #     Действительность
+        Not Before: Apr 11 12:22:58 2015 GMT                  #         Не ранее: 11 апреля 2015 года в 12:22:58 по Гринвичу
+        Not After : Apr 6 12:22:58 2035 GMT                   #         Не позднее: 6 апреля 2035 года 12:22:58 по Гринвичу
+    Subject: C=GB, ST=England,                                #     Субъект: C=GB, ST=Англия,
+             O=Alice Ltd, OU=Alice Ltd Certificate Authority, #              O=ООО Алиса, OU=Удостоверяющий центр ООО Алиса,
+             CN=Alice Ltd Root CA                             #              CN=Корневой удостоверяющий центр ООО Алиса
+    Subject Public Key Info:                                  #     Информация публичного ключа субъекта:
+        Public Key Algorithm: rsaEncryption                   #         Алгоритм публичного ключа: rsaEncryption
+            Public-Key: (4096 bit)                            #             Публичный ключ: (4096 бит)</pre>
+
+		<p>В выводе также отображаются расширения X509v3. Мы применили расширение v3_ca, поэтому в выводе должны отобразиться опции из [v3_ca].</p>
+
+		<pre class="console">X509v3 extensions:                                    # Расширения X509v3:
+    X509v3 Subject Key Identifier:                    #     Идентификатор ключа субъекта X509v3:
+        38:58:29:2F:6B:57:79:4F:39:FD:32:35:60:74:92:60:6E:E8:2A:31
+    X509v3 Authority Key Identifier:                  #     Идентификатор ключа подлинности X509v3:
+        keyid:38:58:29:2F:6B:57:79:4F:39:FD:32:35:60:74:92:60:6E:E8:2A:31
+
+    X509v3 Basic Constraints: critical                #     Базовые ограничения X509v3: критично
+        CA:TRUE
+    X509v3 Key Usage: critical                        #     Использование ключа X509v3: критичное
+        Digital Signature, Certificate Sign, CRL Sign #         Цифровая подпись, подписание сертификата, подписание списка отозванных сертификатов</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Джэми Нгуен. Создание корневой пары, 2015">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

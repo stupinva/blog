@@ -1,0 +1,145 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="rs2wc040,9.0,8.2,freebsd,raid" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-09-01 -->
+		<title>Intel RS2WC040 во FreeBSD 8.2</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Intel RS2WC040 во FreeBSD 8.2</h1>
+
+		<p>Однажды на работе передо мной поставили задачу: заставить работать RAID-контроллер Intel RS2WC040 во FreeBSD 8.2 архитектуры amd64 и сделать установочную флешку со встроенной поддержкой этого контроллера. Сейчас я подумал, что не стоит пропадать добру, и решил выложить рецепт, который у меня получился.</p>
+
+		<p>Подробнее о контроллере: <a href="http://www.nix.ru/autocatalog/controllers_intel/Intel_RAID_Controller_RS2WC040_PCIE_x8_SAS_SATAIIRAID0_4Channel_106740.html">Intel RAID Controller RS2WC040 (RTL) PCI-E x8, SAS / SATA-IIRAID0 / 1 / 5 / 10 / 50, 4-Channel</a></p>
+
+		<p>На самом деле контроллер этой модели может быть выполнен с использованием разных микросхем. Нас интересует контроллер с Vendor ID 0x1000 и Device ID 0x0073, который не поддерживается FreeBSD 8.2 и 9.0 из коробки. Точно установить, какой именно набор микросхем используется, можно с помощью команды pciconf. К сожалению, сейчас я не помню, какие дополнительные параметры нужно ей указать, а FreeBSD нет под рукой.</p>
+
+		<p>Для сборки ядра и подготовки установочной флешки нам понадобится уже установленная FreeBSD. Скачем с официального сайта образ загрузочной флешки FreeBSD-8.2-RELEASE-amd64-memstick.img, запишем образ на флешку. Скачаем из темы <a href="http://forums.freebsd.org/showthread.php?t=27268">Installing FreeBSD 9 on the IBM System x3550 M3</a> <a href="http://www.ime.unicamp.br/~rodolfo/files/mfi_fbsd82_x64_rbm.tgz">исходники драйвера</a>. Если заглянуть вовнутрь исходников драйвера, то там можно найти таблицу идентификаторов поддерживаемого оборудования, среди которых есть и интересующее нас.</p>
+
+		<h2>1. Сборка ядра с драйвером</h2>
+
+		<p>Загружаемся в установленную FreeBSD, записываем скачанный образ установочной флешки и монтируем её:</p>
+
+		<pre class="console"># dd if=FreeBSD-8.2-RELEASE-amd64-memstick.img of=/dev/da0
+# mount /dev/da0 /mnt/install-flash</pre>
+
+		<p>Если нет свободной флешки, можно смонтировать файл образа с помощью mdconfig:</p>
+
+		<pre class="console"># mdconfig -a -t vnode -f FreeBSD-8.2-RELEASE-amd64-memstick.img
+# mount /dev/md0a /mnt/install-flash</pre>
+
+		<p>Распаковываем исходники системы:</p>
+
+		<pre class="console"># cd /mnt/install-flash/8.2-RELEASE/src
+# ./install.sh all</pre>
+
+		<p>Переходим в каталог с драйверами устройств и заменяем исходники имеющегося драйвера mfi на исходники скачанного драйвера mfi:</p>
+
+		<pre class="console"># cd /usr/src/sys/dev/mfi
+# rm *
+# cp /root/mfi/* .</pre>
+
+		<p>Редактируем файл /usr/src/sys/conf/files, после строчки </p>
+
+		<pre class="console">dev/mfi/mfi_cam.c optional mfi</pre>
+
+		<p>добавляем строчку</p>
+
+		<pre class="console">dev/mfi/mfi_syspd.c optional mfi</pre>
+
+		<p>Создаём свой файл конфигурации ядра. Переходим в каталог /usr/src/sys/amd64/conf и копируем файл GENERIC под именем RAID:</p>
+
+		<pre class="console"># cd /usr/src/sys/amd64/conf
+# cp GENERIC RAID</pre>
+
+		<p>Открываем файл RAID и комментируем в нём две строчки, добавив перед ними знак решётки:</p>
+
+		<pre class="code">device cbb #cardbus (yenta) bridge</pre>
+
+		<p>и</p>
+
+		<pre class="code">makeoptions     DEBUG=-g</pre>
+
+		<p>Вторая опция отменяет создание отладочной информации, которая занимает много места и нас не интересует.</p>
+
+		<p>Теперь переходим в каталог /usr/src, собираем и инсталлируем ядро:</p>
+
+		<pre class="console"># cd /usr/src
+# make buildkernel KERNCONF=RAID
+# make installkernel KERNCONF=RAID</pre>
+
+		<p>Ядро собрано и установлено. Вернём старое ядро, а новое переместим на установочную флешку:</p>
+
+		<pre class="console"># cd /boot/
+# mv kernel /mnt/install-flash/boot/
+# mv kernel.old kernel</pre>
+
+		<p>Новое ядро скопируем временно в каталог /root, где будем готовить его для внедрения в инсталлятор:</p>
+
+		<pre class="console"># cp -R /mnt/install-flash/boot/kernel /root/kernel
+# cd /root
+# mv kernel GENERIC</pre>
+
+		<p>С этого момента инсталлятор на флешке уже может загружаться и видеть диски в RAID-контроллере. Можно даже поставить на диски RAID-контроллера систему, но она не сможет загрузиться, поскольку установленное ядро не содержит необходимый драйвер.</p>
+
+		<h2>2. Подготовка собранного ядра для внедрения в инсталлятор</h2>
+
+		<p>Запакуем подготовленное ядро, разрежем на части и удалим исходный тарболл:</p>
+
+		<pre class="console"># tar -czvf generic.tgz GENERIC
+# split -b 1425408 generic.tgz generic.
+# rm generic.tgz</pre>
+
+		<p>Создадим файл generic.mtree:</p>
+
+		<pre class="console"># mtree -c -p GENERIC -k gname,mode,nlink,size,link,uname,md5digest &gt; generic.mtree</pre>
+
+		<p>Теперь можно удалить ядро из каталога /root:</p>
+
+		<pre class="console"># rm -R /root/GENERIC</pre>
+
+		<p>Создадим файл generic.inf:</p>
+
+		<pre class="console"># /usr/src/release/scripts/info.sh generic &gt; generic.inf</pre>
+
+		<p>Подсчитаем контрольные суммы файлов:</p>
+
+		<pre class="console"># md5 generic.* &gt; CHECKSUM.MD5
+# sha256 generic.* &gt; CHECKSUM.SHA256</pre>
+
+		<p>У нас получились файлы generic с двухбуквенными расширениями (кусочки архива с ядром), файл generic.mtree, файл generic.inf и файлы контрольных сумм CHECKSUM.MD5 и CHECKSUM.SHA256.</p>
+
+		<h2>3. Внедрение ядра в инсталлятор</h2>
+
+		<p>Все эти файлы нам нужно поместить на установочную флеку в каталог 8.2-RELEASE/kernels взамен имеющихся.</p>
+
+		<p>Удалим ненужное:</p>
+
+		<pre class="console"># rm /mnt/install-flash/8.2-RELEASE/kernels/*</pre>
+
+		<p>Переместим туда нужное:</p>
+
+		<pre class="console"># mv generic.* CHECKSUM.* /mnt/install-flash/8.2-RELEASE/kernels/*</pre>
+
+		<p>Всё, теперь можно отмонтировать флешку и пользоваться инсталлятором:</p>
+
+		<pre class="console"># umount /mnt/install-flash</pre>
+
+		<p>Если вы выполняли все манипуляции над образом, то можно отмонтировать его и записать на реальную флешку объёмом не менее 2 Гигабайт (всё её содержимое будет затёрто):</p>
+
+		<pre class="console"># umount /mnt/install-flash
+# dd if=FreeBSD-8.2-RELEASE-amd64-memstick.img of=/dev/da0</pre>
+
+		<p>Подобную методику можно использовать для внедрения любых сторонних драйверов в инсталлятор. Проще, конечно, сначала поставить систему, а потом пересобрать её с необходимым сторонним драйвером.</p>
+
+		<p>Единственная трудность в описанном случае заключается в том, что систему нужно собрать до её установки - нельзя поставить систему на RAID-контроллер, который ею не поддерживается, потом загрузить её и пересобрать уже с поддержкой RAID-контроллера. Чтобы разрубить этот гордиев узел, нужна промежуточная система, которую можно загрузить и собрать в ней этот драйвер. Инсталлятор, правда, было делать не обязательно, но я его и делал не для себя.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Intel RS2WC040 во FreeBSD 8.2">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

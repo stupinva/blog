@@ -1,0 +1,49 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="перевод,awk,gawk" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2010-08-04 -->
+		<title>Джеймс Хайннэнт. Наслаждайтесь Gawk, 2010</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Джеймс Хайннэнт. Наслаждайтесь Gawk, 2010</h1>
+
+		<p>Перевод статьи: <a href="http://www.linuxjournal.com/content/tech-tip-fun-gawk">Fun With Gawk</a></p>
+
+		<p>15 февраля 2010, Джеймс Хайннэнт (James Hinnant)</p>
+
+		<p>Когда grep и sed бывает недостаточно, gawk может предоставить дополнительную лошадиную силу, которая вам необходима. Следующий совет содержит образец того, что можно делать с помощью gawk.</p>
+
+		<p>Выделить последний столбец из текстового файла, столбцы которого разделены пробелами:</p>
+
+		<pre class="console">$ cat myfile | gawk '{print $NF}'</pre>
+
+		<p>или:</p>
+
+		<pre class="console">$ gawk '{print $NF}' myfile</pre>
+
+		<p>Вывести количества файлов, которыми владеет каждый из пользователей в текущем каталоге:</p>
+
+		<pre class="console">$ /bin/ls -l | \
+  gawk 'NR &gt; 1 {counts[$3]++;}
+END {for (s in counts) {
+printf(" %-15s : % 5d\n",
+s, counts[s]);}}' | \
+  sort</pre>
+
+		<p>Завершить ваши процессы (одно из применений - завершить зависший сеанс, если вы можете удалённо войти на рабочую станцию с другого компьютера):</p>
+
+		<pre class="console">$ ps -elf | \
+  gawk -v me="$USER" '$3 == me {print $4}' | \
+  egrep -v $$ | \
+  xargs -i@@ kill -9 @@; kill -9 $$</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Джеймс Хайннэнт. Наслаждайтесь Gawk, 2010">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

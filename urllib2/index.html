@@ -1,0 +1,299 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="python,python27,urllib,urllib2,httplib,poster" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-03-12 -->
+		<title>Использование urllib2 в Python</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Использование urllib2 в Python</h1>
+
+		<p>Как известно, Python поставляется с "батарейками" - в комплекте идёт масса различных модулей. Одним из таких модулей является модуль urllib2, позволяющий выполнять веб-запросы. К сожалению, этот модуль не блещет наглядностью, потому что для выполнения запроса зачастую требуется соединить между собой несколько объектов. Это может быть привычным по идеологии для программистов, пишущих на Java, но вот у большинства программистов, использующих скриптовые языки, этот подход напрочь отбивает всё желание пользоваться этим модулем. В результате я наблюдаю, например, что коллеги для выполнения веб-запросов часто пользуются сторонними, более дружелюбными модулями. Трое из них пользовались <a href="https://pypi.python.org/pypi/pycurl/">pycurl</a>, а один - <a href="https://pypi.python.org/pypi/requests/">requests</a>. Кстати, девиз модуля requests звучит как "Python HTTP для людей", что как бы намекает на то, что по мнению авторов модуля requests модуль urllib2 сделан для инопланетян. Пожалуй, в этом есть доля истины.</p>
+
+		<p>Не знаю почему, но я старался пользоваться родным модулем из Python. Возможно потому, что его использование позволяет обойтись без дополнительных зависимостей. Возможно также, что я пытался пользоваться родным модулем, потому что ранее в скриптах на Perl пользовался родным для него модулем LWP и у меня с ним не возникало никаких проблем. Я ожидал, что с родным модулем из Python тоже не должно возникнуть никаких проблем. Мне было трудно, но, к счастью, разбираться с модулем мне пришлось поэтапно, так что со временем в моих скриптах и программах набралось достаточное количество примеров на самые разные случаи с обработкой всех встречавшихся мне исключений. Я решил собрать все эти примеры в одном месте и поделиться ими в этой статье.</p>
+
+		<h2>1. GET-запрос</h2>
+
+		<p>Начнём с самого простого - с выполнения GET-запроса. Нужно просто скачать страницу.</p>
+
+		<pre class="code">import warnings, urllib, urllib2, socket, ssl
+warnings.filterwarnings('ignore', category=UserWarning, module='urllib2')
+
+def http_get(str_url, dict_params, dict_headers, float_timeout):
+    query = urllib.urlencode(dict_params)
+    req = urllib2.Request(str_url + '?' + query, headers=dict_headers)
+    
+    opener = urllib2.build_opener()
+    
+    try:
+        res = opener.open(req, timeout=float_timeout)
+    except urllib2.HTTPError as e:
+        res = e
+    except urllib2.URLError as e:
+        return None, None
+    except socket.timeout:
+        return None, None
+    except ssl.SSLError:
+        return None, None
+  
+    return res.code, res.read()</pre>
+
+		<p>Здесь можно увидеть функцию http_get, которая принимает параметры:</p>
+
+		<ul>
+			<li>str_url - строка с URL страницы, которую нужно скачать,</li>
+			<li>dict_params - словарь с параметрами и их значениями, из которых будет сформирована строка запроса. Эта строка запроса потом будет добавлена к строке URL после знака вопроса. Ключи словаря являются именами параметров, а значения - соответственно значениями,</li>
+
+			<li>dict_headers - словарь с дополнительными заголовками, которые будут добавлены в GET-запрос. Ключи словаря являются именами заголовков, а значения - их значениями,</li>
+
+			<li>float_timeout - число с плавающей запятой, задающее таймаут ожидания запроса.</li>
+		</ul>
+
+		<p>Функция возвращает кортеж из двух значений: первое значение содержит код ошибки от веб-сервера, а второе значение содержит тело ответа. Если в строке URL содержится ошибка, не отвечает DNS-сервер, DNS-сервер сообщает об ошибке поиска имени или если соединиться с веб-сервером не удалось, будет возвращён кортеж с двумя значениями None. Если вам нужно различать ошибки разного рода, переделайте обработку ошибок под свои нужды.</p>
+
+		<p>Если вам нужно узнать заголовки из ответа, то имейте в виду, что объект res принадлежит классу httplib.HTTPResponse. У объектов этого класса есть методы getheader и getheaders. Метод getheader вернёт значение заголовка с указанным именем или значение по умолчанию. Метод getheaders вернёт список кортежей с именами заголовков и их значениями. Например, словарь из заголовков и их значений (исключая заголовки с несколькими значениями) можно было бы получить следующим образом:</p>
+
+		<pre class="code">headers = dict(res.getheaders())</pre>
+
+		<h2>2. POST-запрос enctype=application/x-www-form-urlencoded</h2>
+
+		<p>Можно сказать, что это "обычный" POST-запрос. В таких POST-запросах применяется кодирование параметров, аналогичное тому, которое используется для кодирования параметров в GET-запросах. В случае с GET-запросами строка с параметрами добавляется после вопросительного знака к строке URL запрашиваемого ресурса. В случае с POST-запросом эта строка с параметрами помещается в тело запроса. В запросах такого рода нельзя передать на сервер файл.</p>
+
+		<pre class="code">import warnings, urllib, urllib2, socket, ssl
+warnings.filterwarnings('ignore', category=UserWarning, module='urllib2')
+
+def http_post(str_url, dict_params, dict_headers, float_timeout):
+    query = urllib.urlencode(dict_params)
+    dict_headers['Content-type'] = 'application/x-www-form-urlencoded'
+    req = urllib2.Request(str_url, data=query, headers=dict_headers)
+    
+    opener = urllib2.build_opener()
+    
+    try:
+        res = opener.open(req, timeout=float_timeout)
+    except urllib2.HTTPError as e:
+        res = e
+    except urllib2.URLError as e:
+        return None, None
+    except socket.timeout:
+        return None, None
+    except ssl.SSLError:
+        return None, None
+  
+    return res.code, res.read()</pre>
+
+		<p>Функция http_post по входным и выходным параметрам полностью аналогична функции http_get, только выполняет POST-запрос.</p>
+
+		<h2>3. POST-запрос enctype=multipart/form-data</h2>
+
+		<p>Если в запросе нужно отправить много данных, то они могут оказаться слишком большими, чтобы уместиться в одной строке. В таких случаях, например если нужно приложить файл, в веб-приложениях используются формы с типом "multipart/form-data". Для отправки подобных запросов переделаем предыдущую функцию, воспользовавшись модулем <a href="https://pypi.python.org/pypi/poster/">poster</a>.</p>
+
+		<pre class="code">import warnings, urllib2, socket, ssl
+warnings.filterwarnings('ignore', category=UserWarning, module='urllib2')
+<b>from poster.encode import multipart_encode</b>
+
+def http_post_multipart(str_url, dict_params, dict_headers, float_timeout):
+    <b>body, headers = multipart_encode(dict_params)
+    dict_headers.update(headers)</b>
+    req = urllib2.Request(str_url, data=body, headers=dict_headers)
+    
+    opener = urllib2.build_opener()
+    
+    try:
+        res = opener.open(req, timeout=float_timeout)
+    except urllib2.HTTPError as e:
+        res = e
+    except urllib2.URLError as e:
+        return None, None
+    except socket.timeout:
+        return None, None
+    except ssl.SSLError:
+        return None, None
+  
+    return res.code, res.read()</pre>
+
+		<p>Функция http_post_multipart по входным и выходным параметрам полностью аналогична функциям http_get и http_post, только выполняет POST-запрос, закодировав параметры способом, пригодным для передачи данных большого объёма, в том числе - файлов.</p>
+
+		<h2>4. GET-запрос с аутентификацией</h2>
+
+		<p>Продемонстрирую аутентификацию на примере с GET-запросом:</p>
+
+		<pre class="code">import warnings, urllib, urllib2, socket, ssl
+warnings.filterwarnings('ignore', category=UserWarning, module='urllib2')
+
+def http_get_auth(str_url, dict_params, dict_headers, float_timeout, str_user, str_password):
+    query = urllib.urlencode(dict_params)
+    req = urllib2.Request(str_url + '?' + query, headers=dict_headers)
+    
+    <b>passman = urllib2.HTTPPasswordMgrWithDefaultRealm()
+    passman.add_password(None, str_url, str_user, str_password)
+    authhandler = urllib2.HTTPBasicAuthHandler(passman)
+    
+    opener = urllib2.build_opener(authhandler)</b>
+    
+    try:
+        res = opener.open(req, timeout=float_timeout)
+    except urllib2.HTTPError as e:
+        res = e
+    except urllib2.URLError as e:
+        return None, None
+    except socket.timeout:
+        return None, None
+    except ssl.SSLError:
+        return None, None
+  
+    return res.code, res.read()</pre>
+
+		<p>Как видно, функция http_get_auth по выходным параметрам совпадает со всеми предыдущими функциями, но среди входных параметров появилось два новых:</p>
+
+		<ul>
+			<li>str_user - строка, содержащая имя пользователя,</li>
+
+			<li>str_password - строка, содержащая пароль пользователя.</li>
+		</ul>
+
+		<p>Внутри функции появились три новые строчки, выделенные жирным шрифтом. Эти строчки создают менеджер паролей и дополнительный обработчик ответа от веб-сервера. В четвёртой выделенной строчке создаётся объект, который будет выполнять запрос с использованием этого дополнительного обработчика. Задача обработчика простая - если при запросе без аутентификации будет возвращён код ошибки 401, то в запрос будет добавлен дополнительный заголовок, содержащий имя пользователя и его пароль, после чего запрос будет повторён.</p>
+
+		<p>Менеджер паролей может предоставлять обработчику разные пароли, в зависимости от области доступа (часто называемой realm'ом), которую сообщит веб-сервер или в зависимости от URL запрашиваемого ресурса.</p>
+
+		<h2>5. GET-запрос с безусловной аутентификацией</h2>
+
+		<p>Обработчик HTTPBasicAuthHandler устроен таким образом, что сначала всегда делает запрос без передачи логина и пароля. И только если получен ответ с кодом 401, уже пытается выполнить запрос с аутентификацией.</p>
+
+		<p>При попытке выполнить запрос к API, реализованному на основе библиотеки swagger, возникают некоторые трудности с аутентификацией. При обращении к API без аутентификации, API возвращает HTML-справку по использованию API с кодом ответа 403, поэтому дополнительных попыток получить страницу с аутентификацией не предпринимается.</p>
+
+		<p>Чтобы исправить эту ситуацию, я воспользовался ответом, подсмотренным здесь: <a href="http://stackoverflow.com/questions/4628610/does-urllib2-support-preemptive-authentication-authentication">does urllib2 support preemptive authentication authentication?</a></p>
+
+		<pre class="code">import warnings, urllib, urllib2, socket, ssl, base64
+warnings.filterwarnings('ignore', category=UserWarning, module='urllib2')
+
+class PreemptiveBasicAuthHandler(urllib2.HTTPBasicAuthHandler):
+    '''Preemptive basic auth.
+
+    Instead of waiting for a 403 to then retry with the credentials,
+    send the credentials if the url is handled by the password manager.
+    Note: please use realm=None when calling add_password.'''
+    def http_request(self, req):
+        url = req.get_full_url()
+        realm = None
+        # this is very similar to the code from retry_http_basic_auth()
+        # but returns a request object.
+        user, pw = self.passwd.find_user_password(realm, url)
+        if pw:
+            raw = "%s:%s" % (user, pw)
+            auth = 'Basic %s' % base64.b64encode(raw).strip()
+            req.add_unredirected_header(self.auth_header, auth)
+        return req
+
+    https_request = http_request
+
+def http_get_preemptive_auth(str_url, dict_params, dict_headers, float_timeout, str_user, str_password):
+    query = urllib.urlencode(dict_params)
+    req = urllib2.Request(str_url + '?' + query, headers=dict_headers)
+    
+    passman = urllib2.HTTPPasswordMgrWithDefaultRealm()
+    passman.add_password(None, str_url, str_user, str_password)
+    <b>authhandler = PreemptiveBasicAuthHandler(passman)</b>
+    
+    opener = urllib2.build_opener(authhandler)
+    
+    try:
+        res = opener.open(req, timeout=float_timeout)
+    except urllib2.HTTPError as e:
+        res = e
+    except urllib2.URLError as e:
+        return None, None
+    except socket.timeout:
+        return None, None
+    except ssl.SSLError:
+        return None, None
+  
+    return res.code, res.read()</pre>
+
+		<p>Функция http_get_preemptive_auth по входным и выходным параметрам полностью аналогична функции http_get_auth, но в ней используется другой дополнительный обработчик - PreemptiveBasicAuthHandler, который отличается от обработчика HTTPBasicAuthHandler тем, что не выполняет запрос без аутентификации, ожидая получить ошибку 401, а сразу отправляет логин и пароль, соответствующие запрашиваемому URL.</p>
+
+		<h2>6. GET-запрос через прокси</h2>
+
+		<p>Смотрим пример:</p>
+
+		<pre class="code">import warnings, urllib, urllib2, socket, ssl
+warnings.filterwarnings('ignore', category=UserWarning, module='urllib2')
+
+def http_get_proxy(str_url, dict_params, dict_headers, float_timeout, str_proxy):
+    query = urllib.urlencode(dict_params)
+    req = urllib2.Request(url + '?' + query, headers=dict_headers)
+    
+    <b>proxyhandler = urllib2.ProxyHandler(str_proxy)
+
+    opener = urllib2.build_opener(proxyhandler)</b>
+    
+    try:
+        res = opener.open(req, timeout=float_timeout)
+    except urllib2.HTTPError as e:
+        res = e
+    except urllib2.URLError as e:
+        return None, None
+    except socket.timeout:
+        return None, None
+    except ssl.SSLError:
+        return None, None
+  
+    return res.code, res.read()</pre>
+
+		<p>Функция http_get_proxy по выходным параметрам полностью соответствует функции http_get, а среди входных параметров имеется один дополнительный:</p>
+
+		<ul>
+			<li>str_proxy - строка с адресом веб-прокси. Имеет вид http://proxy.domain.tld:3128</li>
+		</ul>
+
+		<p>В этом примере используется дополнительный обработчик запросов ProxyHandler, который позволяет отправлять запросы через веб-прокси. На самом деле, этому обработчику можно передать не строку с одним веб-прокси, а передать словарь, в котором для разных протоколов будут указаны разные прокси:</p>
+
+		<pre class="code">{
+ 'http': 'http://proxy-http.domain.tld:3128',
+ 'https': 'http://proxy-https.domain.tld:3128',
+ 'ftp': 'http://proxy-ftp.domain.tld:3128'
+}</pre>
+
+		<h2>7. Использование нескольких обработчиков запросов одновременно</h2>
+
+		<p>Когда в запросе нужно использовать несколько обработчиков одновременно, то можно растеряться, т.к. в примерах выше каждый раз используется только один обработчик для аутентификации или для прокси. Но использовать несколько обработчиков совсем не трудно. Это можно сделать, указав их через запятую, вот так:</p>
+
+		<pre class="code">opener = urllib2.build_opener(authhandler, proxyhandler)</pre>
+
+		<p>Но и в этом случае можно растеряться, если список обработчиков нужно формировать динамически, так что каждый конкретный обработчик может отсутствовать. Тут тоже всё просто. Можно добавлять обработчики в массив, а затем использовать этот массив как список аргументов:</p>
+
+		<pre class="code"># В начале список обработчиков пуст
+handlers = []
+
+# Если нужна аутентификация, добавляем обработчик в список
+if ...:
+    ...
+    authhandler = ...
+    handlers.append(authhandler)
+
+# Если запрос нужно выполнить через прокси, добавляем обработчик в список
+if ...:
+    ...
+    proxyhandler = ...
+    handlers.append(proxyhandler)
+
+# Выполняем запрос, используя все обработчики из списка
+opener = urllib2.build_opener(*handlers)</pre>
+
+		<p>Если нужно пройти аутентификацию и на прокси и на веб-ресурсе, то для аутентификации на прокси можно использовать обработчик ProxyBasicAuthHandler, так что всего будет использоваться аж сразу три обработчика запросов.</p>
+
+		<p>Этих примеров достаточно для того, чтобы научиться пользоваться модулем urllib2 и понимать, в каком направлении надо копать, чтобы сделать что-то такое, что здесь не описано. Если у вас есть чем дополнить эту статью, прошу написать мне об этом в комментариях.</p>
+
+		<p>Дополнение от 4 сентября 2017 года: Исправил место указания таймаута. Судя по тому, что за почти полгода никто не указал на ошибку, либо статья не очень востребована, либо людям лень указывать на ошибку и они просто переходят к другой статье на ту же тему :)</p>
+
+		<p>Дополнение от 21 декабря 2017 года: Добавил импорт пропущенных модулей, в которых определяются объекты исключений, перехватываемых в примерах.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Использование urllib2 в Python">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

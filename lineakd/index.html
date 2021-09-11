@@ -1,0 +1,121 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="xfce,lineakd,linux,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2012-04-22 -->
+		<title>Настройка мультимедиа-клавиатуры A4Tech KD-600 в XFCE</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка мультимедиа-клавиатуры A4Tech KD-600 в XFCE</h1>
+
+		<p>На этой неделе поменял работу. Коллеги с прошлой работы подарили клавиатуру A4Tech KD-600. Спасибо им большое, клавиатура действительно классная. Выглядит она вот так:</p>
+
+		<img src="keyboard.jpg" />
+
+		<p>Кроме того, что она чёрного цвета и того, что у неё низкие клавиши, на ней есть ещё 10 дополнительных "мультимедийных" клавиш. Наконец, у меня дошли руки настроить эти клавиши на моём домашнем компьютере под Debian GNU/Linux в XFCE.</p>
+
+		<p>Как оказалось, всё довольно просто. Больше времени у меня ушло на выбор программ и действий, которые нужно выполнять при нажатии мультимедийных клавиш.</p>
+
+		<p>Итак, перво-наперво, нужно узнать коды клавиш. Для этого запускаем программу xev, нажимаем последовательно клавиши и записываем их коды, появляющиеся в окне консоли.</p>
+
+		<p>Например, код клавиши PrtSc равен 111:</p>
+
+		<pre class="console">KeyRelease event, serial 34, synthetic NO, window 0x2e00001,
+&nbsp;&nbsp;&nbsp; root 0x335, subw 0x0, time 4811863, (90,272), root:(641,688),
+&nbsp;&nbsp;&nbsp; state 0x0, <b>keycode 111</b> (keysym 0xff61, Print), same_screen YES,
+&nbsp;&nbsp;&nbsp; XLookupString gives 0 bytes: 
+&nbsp;&nbsp;&nbsp; XFilterEvent returns: False</pre>
+
+		<p>Теперь ставим пакет lineakd:</p>
+
+		<pre class="console"># apt-get install lineakd</pre>
+
+		<p>В её файле конфигурации /etc/lineakd.def я не нашёл своей модели клавиатуры, поэтому добавил её описание:</p>
+
+		<pre class="code">[A4-KD600]
+&nbsp; brandname = "A4tech"
+&nbsp; modelname = "Multimedia keyboard KD-600"
+&nbsp; [KEYS]
+&nbsp;&nbsp;&nbsp; ScreenShot&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; =&nbsp; 111
+&nbsp;&nbsp;&nbsp; WebBrowser&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; =&nbsp; 178
+&nbsp;&nbsp;&nbsp; Email&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; =&nbsp; 236
+&nbsp;&nbsp;&nbsp; Search&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; =&nbsp; 229
+&nbsp;&nbsp;&nbsp; Previous&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; =&nbsp; 234
+&nbsp;&nbsp;&nbsp; Next&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; =&nbsp; 233
+
+&nbsp;&nbsp;&nbsp; MediaPlayer&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; =&nbsp; 129
+&nbsp;&nbsp;&nbsp; Play|Pause&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; =&nbsp; 162
+&nbsp;&nbsp;&nbsp; Mute&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; =&nbsp; 160
+&nbsp;&nbsp;&nbsp; VolumeDown&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; =&nbsp; 174
+&nbsp;&nbsp;&nbsp; VolumeUp&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; =&nbsp; 176
+
+&nbsp; [END KEYS]
+[END A4-RFKBS26]</pre>
+
+		<p>Теперь запускаем под обычным пользователем, настройки клавиатуры которого нужно создать, lineakd таким образом:</p>
+
+		<pre class="console">$ lineakd -c A4-KD600</pre>
+
+		<p>A4-KD600 - это название секции файла /etc/lineakd.def, описывающей нашу клавиатуру.</p>
+
+		<p>После запуска в домашнем каталоге пользователя будет создан файл .lineakd/lineakd.conf. В этом файле можно задать команды, выполняемые при нажатии клавиш. Я задал такие команды (более ничего не трогая):</p>
+
+		<pre class="code">Email = /usr/bin/iceweasel https://mail.yandex.ru
+MediaPlayer = /usr/bin/deadbeef --play
+Mute = /usr/bin/deadbeef --stop
+Next = /usr/bin/deadbeef --next
+Play|Pause = /usr/bin/deadbeef --play-pause
+Previous = /usr/bin/deadbeef --prev
+Search = /usr/bin/iceweasel https://google.com
+VolumeDown = /usr/bin/amixer set Master 1-
+VolumeUp = /usr/bin/amixer set Master 1+
+WebBrowser = /usr/bin/thunar /home/stupin
+ScreenShot = /usr/bin/xfce4-screenshooter -w</pre>
+
+		<p>Итак, клавиши справа сверху вниз выполняют следующие действия:</p>
+
+		<ul>
+			<li>запуск файлового менеджера с открытым домашним каталогом,</li>
+
+			<li>запуск браузера с открытой страницей Яндекс-почты (или, если браузер уже запущен, открытие этой страницы в новой вкладке),</li>
+
+			<li>запуск браузера с открытой страницей поиска Гугл (или, если браузер уже запущен, открытие этой страницы в новой вкладке),</li>
+
+			<li>переход к предыдущей дорожке в музыкальном проигрывателе Deadbeef (с его запуском при необходимости),</li>
+
+			<li>переход к следующей дорожке в музыкальном проигрывателе Deadbeef (с его запуском при необходимости).</li>
+		</ul>
+
+		<p>Клавиши слева сверху вниз выполняют следующие действия:</p>
+
+		<ul>
+			<li>запуск музыкального проигрывателя Deadbeef для воспроизведения (или, если проигрыватель уже запущен, воспроизведение текущей дорожки сначала),</li>
+
+			<li>переключение между режимами паузы и воспроизведения в музыкальном проигрывателе Deadbeef (с его запуском при необходимости),</li>
+
+			<li>остановка воспроизведения текущей дорожки в музыкальном проигрывателе Deadbeef (с его запуском при необходимости, хоть это и не имеет смысла),</li>
+
+			<li>уменьшение громкости главного звукового канала звуковой карты,</li>
+
+			<li>увеличение громкости главного звукового канала звуковой карты.</li>
+		</ul>
+
+		<p>И дополнительно я назначил на клавишу PrtSc запуск программы xfce4-screenshooter для создания снимка текущего окна.</p>
+
+		<p>Осталось добавить lineakd в автозагрузку в XFCE. Делается это просто:</p>
+
+		<img src="autorun1.png" />
+
+		<img src="autorun2.png" />
+
+		<p>Осталось завершить сеанс XFCE и снова войти - lineakd начнёт работу в штатном режиме.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка мультимедиа-клавиатуры A4Tech KD-600 в XFCE">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,33 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="перевод,X-Window" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2010-08-04 -->
+		<title>Эрик Фэлор. Доступ к буферу обмена X Window System из командной строки с помощью xclip, 2009</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Эрик Фэлор. Доступ к буферу обмена X Window System из командной строки с помощью xclip, 2009</h1>
+
+		<p>Перевод статьи: <a href="http://www.linuxjournal.com/content/access-x-window-system-clipboard-command-line-xclip">Access the X Window System Clipboard from the Command Line with xclip</a></p>
+
+		<p>17 марта 2009, Эрик Фэлор (Erik Falor)</p>
+
+		<p>Вы когда-нибудь выделяли текст в окне терминала, чтобы скопировать его в X-приложение? Отбросьте мышь и воспользуйтесь вместо неё xclip. С помощью xclip вы просто перенаправляете через конвейер в xclip тот текст, который вы хотите скопировать:</p>
+
+		<pre class="console">$ lspci | xclip</pre>
+
+		<p>Теперь перейдите в X-приложение и вставьте захваченный вывод в программу. xclip также позволит вам “вставить” выбранный текст в терминал. Просто воспользуйтесь опцией -o для вывода выделенного текста:</p>
+
+		<pre class="console">$ xclip -o</pre>
+
+		<p>xclip можно найти на sourceforge.net/projects/xclip.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Эрик Фэлор. Доступ к буферу обмена X Window System из командной строки с помощью xclip, 2009">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

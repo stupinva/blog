@@ -1,0 +1,340 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="buster,ssd,debian,linux" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2020-08-23 -->
+		<title>Обновление прошивок на SSD Micron 5200 MAX</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Обновление прошивок на SSD Micron 5200 MAX</h1>
+
+		<p>После перевода таблиц истории и тенденций Zabbix, хранившихся в MySQL, с движка InnoDB на TokuDB, базы данных на всех серверах Zabbix ужались примерно в 10 раз. Проблемы с нехваткой места на дисках решены и больше не приходится урезать глубину хранения истории или тенденций.</p>
+
+		<p>Т.к. базы данных стали значительно меньше, появился смысл использовать накопители SSD меньшего объёма с программным RAID вместо SAS-дисков и аппаратных RAID-контроллеров. При сравнимой цене накопителей SSD и SAS-дисков, SSD позволяют обеспечить более высокую скорость работы дисковой подсистемы.</p>
+
+		<p>После консультации с более опытным коллегой (привет, Рамиль), уже имеющим опыт использования накопителей SSD, выбор остановился на накопителе SSD 480GB SATA 2.5« 5200 MAX &lt;mtfddak480tdn&gt; Micron (MTFDDAK480TDN-1A T1ZABYY).</p>
+
+		<p>Накопители SSD содержат микросхемы флеш-памяти, в которых читать или записывать можно только страницу целиком. При этом записывать данные можно только в пустую страницу. Страницы группируются в блоки и очистить можно только блок целиком. У каждой страницы количество перезаписей ограничено, по достижении которого данные могут начать записываться с ошибками. Если страницу долгое время не читать, то данные на ней могут исказиться и пропасть. Контроллеру флеш-памяти в SSD приходится учитывать все эти ограничения. Для каждой страницы он должен вести учёт, содержит ли страница данные или она пустая, сколько раз её перезаписывали, как давно её последний раз читали. Прежде чем очистить блок, контроллеру нужно скопировать страницы с данными из этого блока в пустые страницы другого блока. Записывать данные лучше всего в те страницы, которые имеют меньшее количество перезаписей. При каждом перемещении данных из одной страницы в другую контроллеру нужно отметить соответствие линейного адреса страницы, которым манипулирует контроллер SATA, реальному положению страницы во флеш-памяти. Страницы, которые давно не читались, нужно периодически перечитывать, чтобы информация на них не пропала.</p>
+
+		<p>Вот почему версия прошивки SSD может оказывать значительно большее влияние на срок службы и надёжность, чем версия прошивки обычного жёсткого диска. Именно поэтому стоит обновить прошивку SSD до самой свежей версии, прежде чем вводить сервер в эксплуатацию.</p>
+
+		<p>Эта инструкция по обновлению прошивок SSD была написана по просьбе менее опытного коллеги (привет, Кирилл), которому придётся продолжить работу, начатую мной.</p>
+
+		<h2>1. Сайт производителя</h2>
+
+		<p>На сайте производителя <a href="https://www.micron.com/">www.micron.com</a> доступны утилита, прошивки и документация. Для их получения нужно зарегистрироваться на сайте. Список субъектов федерации на сайте довольно забавен. В частности, в выпадающем списке нет Башкирии, зато есть «Пермякия», которую я и выбрал по сочетанию сходства с реальным названием и близости географического расположения.</p>
+
+		<p>На странице <a href="https://www.micron.com/products/solid-state-drives/enterprise-ssd-downloads">Enterprise SSD Downloads</a> в разделе msecli Software for Linux Systems можно найти установщик фирменной утилиты msecli для Linux. В этом разделе есть ссылка на скачивание <a href="https://www.micron.com/-/media/client/global/documents/products/software/storage-executive-software/msecli/msecli_linux.run">Download</a>.</p>
+
+		<p>На той же странице <a href="https://www.micron.com/products/solid-state-drives/enterprise-ssd-downloads">Enterprise SSD Downloads</a> в разделе Storage Executive Command Line Interface можно найти документацию на фирменную утилиту msecli. В этом разделе есть ссылка на скачивание <a href="https://www.micron.com/-/media/client/global/documents/products/software/storage-executive-software/msecli/storage_executive_cli_user_guide.pdf">Download</a>.</p>
+
+		<p>На странице <a href="https://www.micron.com/support/software-and-drivers">Software and Drivers</a> в разделе 5200 D1MU020/D1MU420/D1MU520/D1MU820 Storage Executive Firmware Update можно найти свежие прошивки для дисков. В нём есть ссылка на скачивание <a href="https://www.micron.com/-/media/client/global/documents/products/software/5200-firmware/5200_d1mu_020_420_520_820_fwbin.zip">Download</a>.</p>
+
+		<h2>2. Подготовка загрузочной флешки для обновления прошивок</h2>
+
+		<p>На странице <a href="https://clonezilla.org/liveusb.php">Clonezilla Live on USB flash drive or USB hard drive</a> описана процедура подготовки загрузочной флешки с Clonezilla. На странице <a href="https://clonezilla.org/downloads.php">Clonezilla Live Download</a> можно скачать zip-архив для распаковки на флешку. Я выбрал стабильную версию на основе Debian и попал на страницу <a href="https://clonezilla.org/downloads/download.php?branch=stable">Downloads</a>. В меню выбрал архитектуру amd64, формат zip, репозитории auto и нажал кнопку Download.</p>
+
+		<p>После скачивания zip-архива нужно разметить флешку, распаковать на неё этот архив и установить загрузчик.</p>
+
+		<p>Не вставляя флешку, определяем имена имеющихся в системе дисков:</p>
+
+		<pre class="console">~# ls /dev/sd*
+/dev/sda  /dev/sda1  /dev/sda2 /dev/sdb  /dev/sdb1  /dev/sdb2</pre>
+
+		<p>Теперь вставляем флешку и повторяем операцию:</p>
+
+		<pre class="console">~# ls /dev/sd*
+/dev/sda  /dev/sda1  /dev/sda2 /dev/sdb  /dev/sdb1  /dev/sdb2 /dev/sdc  /dev/sdc1</pre>
+
+		<p>Видно, что в системе появилось новое блочное устройство /dev/sdc, на котором определился один раздел.</p>
+
+		<p>Запустим утилиту fdisk для изменения разделов на блочном устройстве /dev/sdc:</p>
+
+		<pre class="console">~# fdisk /dev/sdc
+
+Welcome to fdisk (util-linux 2.29.2).
+Changes will remain in memory only, until you decide to write them.
+Be careful before using the write command.</pre>
+
+		<p>Создадим на диске пустую таблицу разделов типа DOS командой o:</p>
+
+		<pre class="console">Command (m for help): o
+Created a new DOS disklabel with disk identifier 0x2806276a.</pre>
+
+		<p>Посмотрим на список имеющихся разделов, введя команду p:</p>
+
+		<pre class="console">Command (m for help): p
+Disk /dev/sdc: 14,4 GiB, 15502147584 bytes, 30277632 sectors
+Units: sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+Disklabel type: dos
+Disk identifier: 0x2806276a</pre>
+
+		<p>Создаём новый первичнй раздел от начала до конца свободного места на флешке. Вводим команду создания нового раздела n:</p>
+
+		<pre class="console">Command (m for help): n
+Partition type
+   p   primary (0 primary, 0 extended, 4 free)
+   e   extended (container for logical partitions)</pre>
+
+		<p>Утилита спрашивает, раздел какого типа нужно создать: первичный или расширенный. В качестве загрузочного раздела можно использовать только первичный. Расширенный раздел может быть только один. Максимальное количество первичных и расширенных разделов в сумме может быть не больше 4. Внутри расширенного раздела можно создавать практически не ограниченное количество логических разделов, но ни один из них не может быть загрузочным. Т.к. нам нужно загрузить Clonezilla с этой флешки, выбираем первичный раздел, нажимая букву p:</p>
+
+		<pre class="console">Select (default p): p</pre>
+
+		<p>Выбираем номер раздела, по умолчанию предлагается создать раздел с номером 1. Соглашаемся на предложение нажатием Enter:</p>
+
+		<pre class="console">Partition number (1-4, default 1): </pre>
+
+		<p>Выбираем сектор, начиная с которого должен начаться раздел. Соглашаемся с предложением по умолчанию начать раздел с сектора 2048 нажатием Enter:</p>
+
+		<pre class="console">First sector (2048-30277631, default 2048): </pre>
+
+		<p>Выбираем сектор, которым должен заканчиваться раздел. Можно ввести номер сектора, а можно указать размер раздела в секторах, килобайтах, мегабайтах, гигабайтах, терабайтах или петабайтах. По умолчанию предлагается последний сектор из неразмеченного пространства.</p>
+
+		<p>Clonezilla требует создавать раздел размером не менее 200 мегабайт. На самом деле это ложь и раздела размером 200 мегабайт не хватит, т.к. даже zip-архив больше 200 мегабайт. Кроме того, нужно создать раздел с запасом для размещения утилиты для msecli_Linux.run и прошивок для SSD. Подойдёт раздел размером 512 мегабайт, но стоит сделать его меньше на зарезервированные в начале 2048 секторов. Поступим проще, просто посчитаем номер последнего сектора: 512*1024*1024/512=1048576. Введём получившееся число:</p>
+
+		<pre class="console">Last sector, +sectors or +size{K,M,G,T,P} (2048-30277631, default 30277631): 1048576
+
+Created a new partition 1 of type 'Linux' and of size 511 MiB.</pre>
+
+		<p>Раздел нужного размера создан, но нужно поменять его тип. Для этого введём команду t:</p>
+
+		<pre class="console">Command (m for help): t
+Selected partition 1</pre>
+
+		<p>Программа не спрашивает у нас номер раздела, т.к. он всего один, а сразу предлагает ввести номер типа раздела или ввести команду L, чтобы увидеть список всех возможных идентификаторов типов разделов. После ввода L получаем такой список:</p>
+
+		<pre class="console">Partition type (type L to list all types): L
+
+ 0  Empty           24  NEC DOS         81  Minix / old Lin bf  Solaris
+ 1  FAT12           27  Hidden NTFS Win 82  Linux swap / So c1  DRDOS/sec (FAT-
+ 2  XENIX root      39  Plan 9          83  Linux           c4  DRDOS/sec (FAT-
+ 3  XENIX usr       3c  PartitionMagic  84  OS/2 hidden or  c6  DRDOS/sec (FAT-
+ 4  FAT16 &lt;32m      40  Venix 80286     85  Linux extended  c7  Syrinx
+ 5  Extended        41  PPC PReP Boot   86  NTFS volume set da  Non-FS data
+ 6  FAT16           42  SFS             87  NTFS volume set db  CP/M / CTOS / .
+ 7  HPFS/NTFS/exFAT 4d  QNX4.x          88  Linux plaintext de  Dell Utility
+ 8  AIX             4e  QNX4.x 2nd part 8e  Linux LVM       df  BootIt
+ 9  AIX bootable    4f  QNX4.x 3rd part 93  Amoeba          e1  DOS access
+ a  OS/2 Boot Manag 50  OnTrack DM      94  Amoeba BBT      e3  DOS R/O
+ b  W95 FAT32       51  OnTrack DM6 Aux 9f  BSD/OS          e4  SpeedStor
+ c  W95 FAT32 (LBA) 52  CP/M            a0  IBM Thinkpad hi ea  Rufus alignment
+ e  W95 FAT16 (LBA) 53  OnTrack DM6 Aux a5  FreeBSD         eb  BeOS fs
+ f  W95 Ext'd (LBA) 54  OnTrackDM6      a6  OpenBSD         ee  GPT
+10  OPUS            55  EZ-Drive        a7  NeXTSTEP        ef  EFI (FAT-12/16/
+11  Hidden FAT12    56  Golden Bow      a8  Darwin UFS      f0  Linux/PA-RISC b
+12  Compaq diagnost 5c  Priam Edisk     a9  NetBSD          f1  SpeedStor
+14  Hidden FAT16 &lt;3 61  SpeedStor       ab  Darwin boot     f4  SpeedStor
+16  Hidden FAT16    63  GNU HURD or Sys af  HFS / HFS+      f2  DOS secondary
+17  Hidden HPFS/NTF 64  Novell Netware  b7  BSDI fs         fb  VMware VMFS
+18  AST SmartSleep  65  Novell Netware  b8  BSDI swap       fc  VMware VMKCORE
+1b  Hidden W95 FAT3 70  DiskSecure Mult bb  Boot Wizard hid fd  Linux raid auto
+1c  Hidden W95 FAT3 75  PC/IX           bc  Acronis FAT32 L fe  LANstep
+1e  Hidden W95 FAT1 80  Old Minix       be  Solaris boot    ff  BBT</pre>
+
+		<p>Нам нужен раздел для размещения файловой системы FAT 32, флешка имеет линейную адресацию секторов, поэтому наиболее подходящим выбором будет вариант «W95 FAT32 (LBA)». Вводим тип c и нажимаем Enter:</p>
+
+		<pre class="console">Partition type (type L to list all types): c
+Changed type of partition 'Linux' to 'W95 FAT32 (LBA)'.</pre>
+
+		<p>Осталось пометить раздел как загрузочный. Вводим команду a:</p>
+
+		<pre class="console">Command (m for help): a
+Selected partition 1
+The bootable flag on partition 1 is enabled now.</pre>
+
+		<p>Раздел 1 помечен как загрузочный.</p>
+
+		<p>Посмотрим на список разделов снова. Для этого введём команду p:</p>
+
+		<pre class="console">Command (m for help): p
+Disk /dev/sdc: 14,4 GiB, 15502147584 bytes, 30277632 sectors
+Units: sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+Disklabel type: dos
+Disk identifier: 0x2806276a
+
+Device     Boot Start     End Sectors  Size Id Type
+/dev/sdc1  *     2048 1048576 1046529  511M  c W95 FAT32 (LBA)</pre>
+
+		<p>Всё верно, вводим команду w для записи изменений на флешку:</p>
+
+		<pre class="console">Command (m for help): w
+The partition table has been altered.
+Calling ioctl() to re-read partition table.
+Syncing disks.</pre>
+
+		<p>fdisk сообщает, что таблица разделов записана.</p>
+
+		<p>Теперь можно создать пустую файловую систему FAT 32 на флешке в разделе 1. Для этого воспользуемся такой командой:</p>
+
+		<pre class="console">~# mkfs.vfat -F 32 /dev/sdc1
+mkfs.fat 4.1 (2017-01-24)</pre>
+
+		<p>Готово. Теперь нужно смонтировать раздел в какой-нибудь пустой каталог. У меня для подобных целей имеется каталог /mnt:</p>
+
+		<pre class="console">~# mount /dev/sdc1 /mnt/</pre>
+
+		<p>Теперь нужно распаковать содержимое zip-архива с Clonezilla в этот каталог:</p>
+
+		<pre class="console">~# cd /mnt
+/mnt# unzip /home/stupin/Downloads/clonezilla-live-2.6.6-15-amd64.zip</pre>
+
+		<p>Полный вывод второй команды не привожу, т.к. в нём перечисляются все извлечённые файлы, которых много.</p>
+
+		<p>Теперь переходим в каталог utils/linux и запускаем команду установки загрузчика:</p>
+
+		<pre class="console">/mnt# cd utils/linux/
+/mnt/utils/linux# bash makeboot.sh /dev/sdc1
+This command will install MBR and syslinux/extlinux bootloader on /dev/sdc
+Clonezilla files are assumed to be on /dev/sdc1
+--------------------------------------------
+Machine: Unknown product name:
+Model: Kingston DataTraveler 3.0 (scsi)
+Disk /dev/sdc: 15.5GB
+Sector size (logical/physical): 512B/512B
+Partition Table: msdos
+Disk Flags: 
+
+Number  Start   End    Size   Type     File system  Flags
+ 1      1049kB  537MB  536MB  primary  fat32        boot, lba
+
+--------------------------------------------
+Are you sure you want to continue?</pre>
+
+		<p>Установщик загрузчика показал нам информацию о разделе, загрузчик для которого мы хотим установить и спрашивает у нас подтверждения. Подтверждаем выбор буквой y:</p>
+
+		<pre class="console">[y/n] y
+OK! Let's do it!
+--------------------------------------------
+File system of /dev/sdc1: vfat
+--------------------------------------------
+Do you want to install MBR on /dev/sdc on this machine "Unknown product name" ?</pre>
+
+		<p>Установщик спрашивает, хотим ли мы устновить главную загрузочную запись на диск /dev/sdc. Соглашаемся нажатием y:</p>
+
+		<pre class="console">[y/n] y
+OK! Let's do it!
+Running: cat "/mnt/utils/mbr/mbr.bin" &gt; /dev/sdc
+--------------------------------------------
+Do you want to install the syslinux boot files on /dev/sdc1 on this machine "Unknown product name" ?</pre>
+
+		<p>Установщик спрашивает, хотим ли мы установить файлы загрузчика syslinux в раздел /dev/sdc1. Подтверждаем наше желание нажатием y:</p>
+
+		<pre class="console">[y/n] y
+OK! Let's do it!
+A filesystem supporting Unix file mode for syslinux is required. Copying syslinux to /tmp/linux_tmp.fZmDyo
+'/mnt/utils/linux/x64/syslinux' -&gt; '/tmp/linux_tmp.fZmDyo/syslinux'
+Running: "/tmp/linux_tmp.fZmDyo/syslinux" -d syslinux -f -i "/dev/sdc1"
+//NOTE// If your USB flash drive fails to boot (maybe buggy BIOS), try to use "syslinux -d syslinux -fs /dev/sdc1", i.e. running with "-fs".
+syslinux ran successfully in installation mode.
+Done!</pre>
+
+		<p>Флешка готова. Осталось поместить на неё утилиту и файлы с прошивок. Перейдём в корневой каталог флешки, создадим каталог ssd, поместим в него установщик утилиты msecli и распакованные прошивки:</p>
+
+		<pre class="console">/mnt/utils/linux# cd ../..
+/mnt# mkdir ssd
+/mnt# cd ssd
+/mnt/ssd# cp /home/stupin/Downloads/msecli_Linux.run .
+/mnt/ssd# unzip /home/stupin/Downloads/5200_D1MU_020_420_520_820_fwbin.zip
+Archive:  /home/stupin/Downloads/5200_D1MU_020_420_520_820_fwbin.zip
+  inflating: D1MU020/1.bin
+  inflating: D1MU420/1.bin
+  inflating: D1MU520/1.bin
+  inflating: D1MU820/1.bin
+  inflating: firmware.properties</pre>
+
+		<p>Выставим права исполнимости на установщик утилиты msecli_Linux.run:</p>
+
+		<pre class="console">/mnt/ssd# chmod +x msecli_Linux.run</pre>
+
+		<p>Теперь можно выйти из каталога, в который смонтирована флешка, отмонтировать его и на всякий случай снять с флешки образ:</p>
+
+		<pre class="console">/mnt/ssd# cd 
+~# umount /mnt
+~# dd bs=1M count=512 if=/dev/sdc of=/home/stupin/Downloads/clonezilla-live-2.6.6-15-amd64.img</pre>
+
+		<p>Т.к. образ снят под пользователем root, не забываем поменять владельца файла, чтобы потом можно было без проблем удалить его или переместить в другое место:</p>
+
+		<pre class="console">~# chown stupin:stupin /home/stupin/Downloads/clonezilla-live-2.6.6-15-amd64.img</pre>
+
+		<p>В файле /home/stupin/Downloads/clonezilla-live-2.6.6-15-amd64.img будет сохранён образ, который в дальнейшем можно будет записать на любую флешку размером не менее 512 мегабайт. Например, для записи образа на флешку /dev/sdc можно будет воспользоваться такой командой:</p>
+
+		<pre class="console">~# dd if=/home/stupin/Downloads/clonezilla-live-2.6.6-15-amd64.img of=/dev/sdc</pre>
+
+		<h2>3. Обновление прошивок</h2>
+
+		<p>После загрузки с флешки нужно выбрать в меню загрузку в командную строку. Прежде чем приступить непосредственно к обновлению прошивок, нужно устанавить в систему утилиту msecli. Запускаем установщик:</p>
+
+		<pre class="console"># /usr/lib/live/mount/medium/ssd/msecli_Linux.run</pre>
+
+		<p>Читаем лицензию, принимаем, соглашаемся на установку утилиты.</p>
+
+		<p>Узнаём текущие версии прошивок:</p>
+
+		<pre class="console"># msecli -F
+Device Name   FW-Rev
+/dev/sda      D1MU004
+/dev/sdb      D1MU004
+/dev/sdс      D1MU004
+
+Firmware version retrieved successfully
+CMD_STATUS   : Success
+STATUS_CODE  : 0
+
+Copyright (C) 2019 Micron Technology, Inc.</pre>
+
+		<p>Как видно, на трёх имеющихся в системе накопителях SSD определилась прошивка версии D1MU004. При подготовке флешки содержимое zip-архива с прошивками мы распаковали в каталог /ssd. В файле firmware.properties можно найти информацию о совместимости прошивок с моделями накопителей. Для Micron 5200MAX подходит прошивка, находящаяся в каталоге D1MU020.</p>
+
+		<p>Обновляем прошивки до свежих версий:</p>
+
+		<pre class="console"># msecli -U -i D1MU020 -n /dev/sda
+This will update the 5200MAX drive in the system
+Are you sure you want to continue(Y|N):Y
+
+Updating firmware on drive /dev/sda (Serial No. XXXXXXXXXXXX)
+..................
+Device Name  : /dev/sda
+Firmware Update on /dev/sda Succeded!
+CMD_STATUS   : Success
+STATUS_CODE  : 0
+
+Copyright (C) 2019 Micron Technology, Inc.
+
+# msecli -U -i D1MU020 -n /dev/sdb
+This will update the 5200MAX drive in the system
+Are you sure you want to continue(Y|N):Y
+
+Updating firmware on drive /dev/sdb (Serial No. XXXXXXXXXXXX)
+..................
+Device Name  : /dev/sdb
+Firmware Update on /dev/sdb Succeded!
+CMD_STATUS   : Success
+STATUS_CODE  : 0
+
+Copyright (C) 2019 Micron Technology, Inc.
+
+# msecli -U -i D1MU020 -n /dev/sdс
+This will update the 5200MAX drive in the system
+Are you sure you want to continue(Y|N):Y
+
+Updating firmware on drive /dev/sdc (Serial No. XXXXXXXXXXXX)
+..................
+Device Name  : /dev/sdc
+Firmware Update on /dev/sdc Succeded!
+CMD_STATUS   : Success
+STATUS_CODE  : 0
+
+Copyright (C) 2019 Micron Technology, Inc.</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Обновление прошивок на SSD Micron 5200 MAX">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

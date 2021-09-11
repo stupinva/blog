@@ -1,0 +1,95 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="thunderbolt,wheezy,iceweasel,linux,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2014-02-16 -->
+		<title>Дополнения Thunderbird/Icedove</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Дополнения Thunderbird/Icedove</h1>
+
+		<p>Настройка серверной части почтовой системы была подробно рассмотрена в прошлых заметках <a href="../postfixadmin-2/">Установка и настройка Postfixadmin</a>, <a href="../dovecot/">Установка и настройка Dovecot</a>, <a href="../postfix/">Установка и настройка Postfix, OpenDKIM, ClamAV-Milter, Milter-Greylist</a> и <a href="../ssl-postfix-dovecot-lighttpd/">Настройка SSL/TLS в Postfix, Dovecot, Lighttpd</a>.</p>
+
+		<p>На этот раз я немного отвлекусь от темы и опишу полезные дополнения к почтовому клиенту Thunderbird, известному в Debian под названием Icedove. Упомянуты будут как плагины, полезные для работы непосредственно с настроенной нами почтовой системой, так и другие, просто полезные, плагины.</p>
+
+		<h2>1. Display Quota</h2>
+
+		<p>Настроенный нами IMAP-сервер поддерживает квоты почтового ящика и умеет сообщать клиенту о текущем значении и использовании квоты.</p>
+
+		<p>Дополнение Display Quota отображает процент использования квоты в строке статуса и умеет оповещать о достижении указанного в настройка порога использования квоты.</p>
+
+		<img src="display_quota.png" alt="Строка статуса с Display Quota" />
+
+		<h2>2. IMAP ACL Extension</h2>
+
+		<p>IMAP-сервер, настройка которого была описана, позволяет пользователям почтовой системы предоставлять доступ к папкам в своих почтовых ящиках.</p>
+
+		<p>Дополнение IMAP-ACL-Extension позволяет задавать разрешения на доступ к почтовому ящику для других пользователей почтовой системы. После его подключения во вкладке "Совместное использование" свойств папки появляется кнопка "Set Permission".</p>
+
+		<img src="imap_acl_extension.png" alt="Вкладка &laquo;Совместное использование&raquo; в диалоговом окне &laquo;Свойства папки&raquo;" />
+
+		<h2>3. DKIM Verifier</h2>
+
+		<p>Настроенный нами SMTP-сервер добавляет DKIM-подпись к письмам, отправляемым его собственным пользователям. В то же время нашим пользователям тоже может быть полезно видеть результат проверки DKIM-подписей от других почтовых систем.</p>
+
+		<p>Дополнение DKIM Verifier добавляет в информацию о письме строчку с результатом проверки DKIM-подписи письма:</p>
+
+		<img src="dkim_verifier.png" alt="Демонстрация работы плагина DKIM Verifier" />
+
+		<p>Плагин можно установить только в Icedove версии 17, которая есть в репозитории security.debian.org. Для использования этого репозитория нужно прописать в файл /etc/apt/sources.list одну из двух строк (или обе сразу):</p>
+
+		<pre class="code">deb http://security.debian.org wheezy/updates main
+deb http://mirror.yandex.ru/debian-security wheezy/updates main</pre>
+
+		<p>А затем обновить список пакетов и установить обновлённые пакеты, среди которых будет Icedove свежей версии:</p>
+
+		<pre class="console"># apt-get update
+# apt-get upgrade</pre>
+
+		<h2>4. Sieve</h2>
+
+		<p>Настроенный нами LDA из Dovecot позволяет производить сортировку полученной почты в соответствии со скриптами Sieve. Почтовый клиент по протоколу Manage Sieve может управлять Sieve-скриптами.</p>
+
+		<p>Для того, чтобы воспользоваться функционалом Sieve и Manage Sieve, можно воспользоваться дополнением с незамысловатым названием Sieve.</p>
+
+		<p>Пункты меню для входа в окно настройки подключения к ManageSieve и для настройки самих правил Sieve:</p>
+
+		<img src="sieve1.png" alt="Пункты меню" />
+
+		<p>Настройка подключения к ManageSieve:</p>
+
+		<img src="sieve2.png" alt="Настройка ManageSieve" />
+
+		<p>Список скриптов Sieve, имеющихся на сервере. Можно включить только один скрипт одновременно:</p>
+
+		<img src="sieve3.png" alt="Список правил Sieve" />
+
+		<p>Пример скрипта Sieve, перемещающий письмо для указанного получателя в отдельную папку (особенно удобно для сортировки писем с различных рассылок):</p>
+
+		<img src="sieve4.png" alt="Скрипт Sieve" />
+
+		<p>Описание синтаксиса правил можно найти в Википедии, на странице <a href="http://ru.wikipedia.org/wiki/Sieve">Sieve</a></p>
+
+		<h2>5. ImportExportTools</h2>
+
+		<p>Добавляет инструменты для импорта и экспорта сообщений и папок.</p>
+
+		<img src="import_export_tools.png" alt="Демонстрация работы плагина ImportExportTools" />
+
+		<h2>6. Remove Duplicate Messages</h2>
+
+		<p>Добавляет в контекстное меню папки функцию удаления дубликатов сообщений.</p>
+
+		<img src="remove_duplicate_messages.png" alt="Демонстрация работы плагина Remove Duplicate Messages" />
+
+		<p>В следующей заметке будет рассмотрена настройка почтового клиента RoundCube, позволяющего полноценно работать с почтовым IMAP-сервером через веб-интерфейс.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Дополнения Thunderbird/Icedove">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

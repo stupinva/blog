@@ -1,0 +1,73 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="zabbix,postfix,freebsd,linux" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-04-23 -->
+		<title>Контроль длины очереди отложенных писем Postfix через Zabbix</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Контроль длины очереди отложенных писем Postfix через Zabbix</h1>
+
+		<p>В прошлом я писал статьи о настройке Postfix для пересылки сообщений для администратора через полноценный почтовый сервер:</p>
+
+		<ul>
+			<li><a href="../postfix-relay/">Postfix как локальный SMTP-ретранслятор</a>,</li>
+
+			<li><a href="../postfix-relay-freebsd/">Postfix как локальный SMTP-ретранслятор во FreeBSD</a></li>
+		</ul>
+
+		<p>Когда таких серверов становится много, а некоторые из них рассылают большое количество писем, становится трудно своевременно обнаруживать проблемы с отправкой писем. Помочь в таком случае может система мониторинга. При проблемах с отправкой писем почтовый сервер откладывает проблемные письма в отдельную очередь, чтобы через некоторое время попробовать отправить эти письма снова. В Postfix эта очередь отложенных писем называется deferred. Для контроля количества писем в этой очереди нам понадобится настроенный Zabbix-агент и установленный пакет sudo. Настройку Zabbix-агента и установку sudo не описываю в виду их тривиальности.</p>
+
+		<p>При помощи команды visudo разрешим пользователям из группы zabbix выполнять от имени пользователя root команду поиска файлов в очереди Postfix:</p>
+
+		<pre class="code">%zabbix    ALL=(ALL) NOPASSWD:/usr/bin/find /var/spool/postfix/deferred -type f</pre>
+
+		<p>В файл конфигурации Zabbix-агента /etc/zabbix/zabbix_agentd.conf (или /usr/local/etc/zabbix24/zabbix_agentd.conf для случая FreeBSD с Zabbix-агентом версии 2.4) пропишем пользовательский параметр, который будет выполнять команду, подсчитывающую количество файлов, найденных в очереди отложенных писем Postfix:</p>
+
+		<pre class="code">UserParameter=postfix.deferred.length,sudo /usr/bin/find /var/spool/postfix/deferred -type f | wc -l</pre>
+
+		<p>После внесения изменений в конфигурацию Zabbix-агента, не забудьте его перезапустить:</p>
+
+		<pre class="console"># /etc/init.d/zabbix-agent restart</pre>
+
+		<p>В шаблоне есть:</p>
+
+		<ul>
+			<li>один элемент данных с ключом postfix.deferred.length, с помощью которого раз в 5 минут контролируется количество писем в очереди отложенных,</li>
+
+			<li>один макрос {$POSTFIX_DEFERRED_LIMIT} со значением 200, который задаёт порог срабатывания триггера,</li>
+
+			<li>один триггер "Проблемы с отправкой почты", который срабатывает, если в очереди скопилось больше писем, чем указано в макросе.</li>
+		</ul>
+
+		<p>Вот как выглядят соответствующие вкладки шаблона:</p>
+
+		<img src="postfix_queue_items.png" />
+
+		<img src="postfix_queue_macro.png" />
+
+		<img src="postfix_queue_triggers.png" />
+
+		<p>Вот наиболее интересный фрагмент графика с одного из серверов:</p>
+
+		<img src="postfix_queue_lastdata.png" />
+
+		<p>Готовые шаблоны можно взять по ссылкам:</p>
+
+		<ul>
+			<li><a href="Template_App_Postfix_Queue.xml">Template_App_Postfix_Queue.xml</a> - элемент данных типа "Zabbix-агент",</li>
+
+			<li><a href="Template_App_Postfix_Queue_Active.xml">Template_App_Postfix_Queue_Active.xml</a> - элемент данных типа "Zabbix-агент (активный)".</li>
+		</ul>
+
+		<p>Ничего сложного или специфичного в этих шаблонах нет, поэтому и решил поделиться.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Контроль длины очереди отложенных писем Postfix через Zabbix">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,44 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="bash" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2012-05-15 -->
+		<title>Настройки bash</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройки bash</h1>
+
+		<h2>1. Настройка автодополнения</h2>
+
+		<p>Ставим пакет bash-completion:</p>
+
+		<pre class="console"># apt-get install bash-completion</pre>
+
+		<p>Настраиваем свой ~/.bashrc, добавив в него следующие строчки:</p>
+
+		<pre class="code">if [ -f /etc/bash_completion ]
+then
+  . /etc/bash_completion
+fi
+  
+complete -cf sudo</pre>
+
+		<p>Теперь достаточно перелогиниться, и будет доступно умное автодополнение в командной строке. В том числе автодополняться будут опции многих команд и ожидаемые аргументы.</p>
+
+		<h2>2. Убрать дубли из истории</h2>
+
+		<p>При листании истории с помощью стрелок, часто бывает, что приходится проматывать довольно много одинаковых подряд идущих команд. Чтобы дубликаты не помещались в историю, нужно в файл ~/.bashrc прописать следующую переменную:</p>
+
+		<pre class="code">export HISTCONTROL=ignoredups</pre>
+
+		<p>После перелогина дубли исчезнут из истории.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройки bash">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

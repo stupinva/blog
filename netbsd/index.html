@@ -1,0 +1,101 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="netbsd" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2009-05-09 -->
+		<title>Раскручиваем свежеустановленную NetBSD</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Раскручиваем свежеустановленную NetBSD</h1>
+
+		<p>Решил записать действия по первичной настройке NetBSD, которую я гоняю в виртуалке. В отличие от привычных Linux'ов, эту систему нужно сразу после установки немного донастроить.</p>
+
+		<p>Для начала нужно настроить сеть. Смотрим список доступных интерфейсов:</p>
+
+		<pre class="console">$ ifconfig -a</pre>
+
+		<p>В моей локальной сети есть DHCP-сервер, поэтому я настроил сетевой интерфейс по DHCP.</p>
+
+		<pre class="console"># dhclient ne2</pre>
+
+		<p>Теперь с помощью консольного ftp-клиента скачаем файл ftp.netbsd.org/pub/pkgsrc/pkgsrc-2009Q1/pkgsrc-2009Q1.tar.bz2 в каталог /usr и распакуем его:</p>
+
+		<pre class="console"># cd /usr
+# ftp ftp://ftp.netbsd.org/pub/pkgsrc/pkgsrc-2009Q1/pkgsrc-2009Q1.tar.bz2
+# tar xjvf pkgsrc-2009Q1.tar.bz2</pre>
+
+		<p>Этот архив содержит систему управления пакетами pkgsrc, аналогичную ports из FreeBSD. Суффикс 2009Q1 указывает на то, что это - первая стабильная ветка в 2009 году.</p>
+
+		<p>Запускаем процедуру bootstraping'а - самоустановки системы pkgsrc:</p>
+
+		<pre class="console"># cd /usr/pkgsrc/bootstrap
+# ./bootstrap</pre>
+
+		<p>И ждём, когда система соберёт минимальный набор инструментов для дальнейшего её использования.</p>
+
+		<p>В общем и целом система очень сильно напоминает ports FreeBSD:</p>
+
+		<ul>
+			<li>Система ports располагается в каталоге /usr/ports, а pkgsrc - в каталоге /usr/pkgsrc.</li>
+
+			<li>Система ports устанавливает программы каталог /usr/local, а pkgsrc - в каталог /usr/pkg.</li>
+
+			<li>В системе ports главный конфигурационный файл находится в файле /etc/mk.conf, а у pkgsrc - в /usr/pkg/etc/mk.conf.</li>
+
+			<li>В системе ports для поиска порта используются команды make search name=&lt;имя_пакета&gt; и make search key=&lt;ключевое_слово&gt;, а в системе pkgsrc - только make search key=&lt;ключевое_слово_или_имя_пакета&gt;.</li>
+
+			<li>В системе ports для выбора опций сборки порта используется команда make config, а в pkgsrc доступные опции можно посмотреть с помощью команды make show-options и задать их при сборке в командной строке make, в переменной окружения PKG_DEFAULT_OPTIONS, PKG_DEFAULT_OPTIONS.&lt;имя пакета&gt; или прописать эти переменные в файле /usr/pkg/etc/mk.conf.</li>
+		</ul>
+
+		<p>Я попробовал установить wget из pkgsrc. В виртуальной машине на копиляцию perl, digest и wget ушло около 3 часов. Мне это не понравилось, поэтому я решил попробовать воспользоваться установкой уже готовых двоичных пакетов.</p>
+
+		<p>Для этого найдём подходящее зеркало на странице http://www.netbsd.org/mirrors/#ftp, прописываем выбранное зеркало в переменную окружения PKG_PATH и экспортируем её:</p>
+
+		<pre class="console"># PKG_PATH="ftp://ftp.fr.netbsd.org/pub/pkgsrc/packages/NetBSD/i386/5.0_2009Q1/All"
+# export PKG_PATH</pre>
+
+		<p>Установим привычный bash:</p>
+
+		<pre class="console"># pkg_add bash</pre>
+
+		<p>Посмотрим где он лежит:</p>
+
+		<pre class="console"># which bash</pre>
+
+		<p>Пропишем его у root оболочкой по-умолчанию:</p>
+
+		<pre class="console"># vipw</pre>
+
+		<p>и заменяем /bin/sh на /usr/pkg/bin/bash</p>
+
+		<p>Теперь настроим привычный вид приглашения, любоваться на название оболочки и номер её версии глупо - это не самая востребованная информация. Пропишем приглашение вида "пользователь@узел каталог$ " или "пользователь@узел каталог# " в зависимости от того, является ли текущий пользователь пользователем root. Для этого в файл /root/.profile пропишем строчку:</p>
+
+		<pre class="code">PS1='\u@\h \w\$ '</pre>
+
+		<p>Завершим сеанс и войдём в систему снова. Будет запущен привычный bash с привычным удобным приглашением.</p>
+
+		<p>Ну и наконец, пропишем немного в начальную конфигурацию системы /etc/rc.conf:</p>
+
+		<pre class="code">hostname="netbsd.ufanet.ru"
+dhclient=YES
+dhclient_flags="ne2"</pre>
+
+		<p>Ссылки:</p>
+
+		<ol>
+			<li><a href="http://www.netbsd.org/docs/network/dhcp.html">Настройка DHCP-клиента в NetBSD</a></li>
+
+			<li><a href="http://www.netbsd.org/mirrors/#ftp">Список FTP-зеркал NetBSD</a></li>
+
+			<li><a href="http://www.netbsd.org/docs/pkgsrc/users-guide.html">Руководство по системе pkgsrc</a></li>
+		</ol>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Раскручиваем свежеустановленную NetBSD">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

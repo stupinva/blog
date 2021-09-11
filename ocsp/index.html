@@ -1,0 +1,167 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="ocsp,перевод,ssl,openssl,Джэми Нгуен" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-01-08 -->
+		<title>Джэми Нгуен. Протокол интерактивного статуса сертификата - OCSP, 2015</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Джэми Нгуен. Протокол интерактивного статуса сертификата - OCSP, 2015</h1>
+
+		<p>Перевод статьи: <a href="https://jamielinux.com/docs/openssl-certificate-authority/online-certificate-status-protocol.html">Online Certificate Status Protocol</a></p>
+
+		<p>Автор: Джэми Нгуен (Jamie Nguyen)</p>
+
+		<p>OCSP был создан в качестве альтернативы <a href="../crl/">спискам отозванных сертификатов - CRL</a>. Подобно CRL, OCSP позволяет запрашивающей стороне (например, веб-браузеру) определить, отозван ли сертификат.</p>
+
+		<p>Когда удостоверяющий центр подписывает сертификат, обычно он добавляет в сертификат адрес сервера OCSP (например, http://ocsp.example.com). Это похоже на функцию crlDistributionPoints, используемую в случае CRL.</p>
+
+		<p>Например, когда веб-браузер встречает сертификат сервера, он отправляет запрос серверу OCSP, указанному в сертификате. На этом адресе OCSP-ответчик ожидает запросы и сообщает о статусе сертификата - отозван он или нет.</p>
+
+		<p><b>Замечание.</b> Рекомендуется использовать OCSP везде, где это возможно. Но на практике OCSP обычно используют только для проверки сертификатов веб-сайтов. В некоторых веб-браузерах поддержка CRL считается устаревшей или вовсе удалена.</p>
+
+		<h2><a name="prepare-config">1. Подготовка файла конфигурации</a></h2>
+
+		<p>Для использования OCSP удостоверяющий центр должен добавлять местонахождение сервера OCSP в подписываемые им сертификаты. Воспользуйтесь опцией authorityInfoAccess в соответствующих разделах, которыми в нашем случае являются разделы [server_cert].</p>
+
+		<pre class="code">[server_cert]
+# ... пропущено ...
+authorityInfoAccess = OCSP;URI:http://ocsp.example.com</pre>
+
+		<h2><a name="create-ocsp-pair">2. Создание пары OCSP</a></h2>
+
+		<p>Ответчику OCSP необходима криптографическая пара для подписания ответа, который он отправляет запрашивающей стороне. Криптографическая пара OCSP должна быть подписана тем же удостоверяющим центром, которым подписан проверяемый сертификат.</p>
+
+		<p>Создадим приватный ключ и зашифруем его при помощи алгоритма шифрования AES-256.</p>
+
+		<pre class="console"># cd /root/ca
+# openssl genrsa -aes256 \
+  -out intermediate/private/ocsp.example.com.key.pem 4096</pre>
+
+		<p>Создадим запрос на подписание сертификата - CSR. Особенности в целом должны совпадать с подписывающим удостоверяющим центром. Однако, в поле Common Name должно быть указано полное доменное имя.</p>
+
+		<pre class="console"># cd /root/ca
+# openssl req -config intermediate/openssl.cnf -new -sha256 \
+  -key intermediate/private/ocsp.example.com.key.pem \
+  -out intermediate/csr/ocsp.example.com.csr.pem
+Enter pass phrase for intermediate.key.pem: secretpassword               # Введите ключевую фразу для intermediate.key.pem: секретныйпароль
+You are about to be asked to enter information that will be incorporated # У вас будет запрошена информация, которая будет вставлена
+into your certificate request.                                           # в ваш запрос сертификата.
+-----
+Country Name (2 letter code) [XX]:GB                                     # Название страны (двухбуквенный код) [XX]:GB
+State or Province Name []:England                                        # Название штата или провинции []:Англия
+Locality Name []:                                                        # Название местности []:
+Organization Name []:Alice Ltd                                           # Название организации []:ООО Алиса
+Organizational Unit Name []:Alice Ltd Certificate Authority              # Название подразделения []:Удостоверяющий центр ООО Алиса
+Common Name []:ocsp.example.com                                          # Общее имя []:ocsp.example.com
+Email Address []:                                                        # Адрес электронной почты []:</pre>
+
+		<p>Подпишем запрос на сертификат промежуточным удостоверяющим центром.</p>
+
+		<pre class="console"># openssl ca -config intermediate/openssl.cnf \
+  -extensions ocsp -days 375 -notext -md sha256 \
+  -in intermediate/csr/ocsp.example.com.csr.pem \
+  -out intermediate/certs/ocsp.example.com.cert.pem</pre>
+
+		<p>Проверим, что у сертификата имеются правильные расширения X509v3.</p>
+
+		<pre class="console"># openssl x509 -noout -text \
+  -in intermediate/certs/ocsp.example.com.cert.pem
+    X509v3 Key Usage: critical          # Использование ключа X509v3: критичное
+        Digital Signature               #     Цифровая подпись
+    X509v3 Extended Key Usage: critical # Использование расширенного ключа X509v3: критичное
+        OCSP Signing                    #     Подписывание OCSP</pre>
+
+		<h2><a name="revoke-certificate">3. Отзыв сертификата</a></h2>
+
+		<p>Утилита OpenSSL ocsp может выступать в роли ответчика OCSP, но она предназначена только для тестирования. Существуют промышленные ответчики OCSP, но они не обсуждаются в рамках этого руководства.</p>
+
+		<p>Создадим сертификат сервера для проверки.</p>
+
+		<pre class="console"># cd /root/ca
+# openssl genrsa -out intermediate/private/test.example.com.key.pem 2048
+# openssl req -config intermediate/openssl.cnf \
+  -key intermediate/private/test.example.com.key.pem \
+  -new -sha256 -out intermediate/csr/test.example.com.csr.pem
+# openssl ca -config intermediate/openssl.cnf \
+  -extensions server_cert -days 375 -notext -md sha256 \
+  -in intermediate/csr/test.example.com.csr.pem \
+  -out intermediate/certs/test.example.com.cert.pem</pre>
+
+		<p>Запустим ответчика OCSP локально. Прежде чем поместить статус отзыва в отдельный файл CRL, ответчик OCSP читает непосредственно файл index.txt. Ответ подписывается криптографической парой OCSP (с помощью опций -rkey и -rsigner).</p>
+
+		<pre class="console"># openssl ocsp -port 127.0.0.1:2560 -text -sha256 \
+  -index intermediate/index.txt \
+  -CA intermediate/certs/ca-chain.cert.pem \
+  -rkey intermediate/private/ocsp.example.com.key.pem \
+  -rsigner intermediate/certs/ocsp.example.com.cert.pem \
+  -nrequest 1
+Enter pass phrase for ocsp.example.com.key.pem: secretpassword # Введите ключевую фразу для ocsp.example.com.key.pem: секретныйпароль</pre>
+
+		<p>В другом терминале отправим запрос к ответчику OCSP. Опция -cert указывает проверяемый сертификат.</p>
+
+		<pre class="console"># openssl ocsp -CAfile intermediate/certs/ca-chain.cert.pem \
+  -url http://127.0.0.1:2560 -resp_text \
+  -issuer intermediate/certs/intermediate.cert.pem \
+  -cert intermediate/certs/test.example.com.cert.pem</pre>
+
+		<p>Начало вывода показывает:</p>
+
+		<ul>
+			<li>был ли получен успешный ответ (OCSP Response Status),</li>
+
+			<li>удостоверение ответчика (Responder Id),</li>
+
+			<li>состояние, отозван ли сертификат (Cert Status)</li>
+		</ul>
+
+		<pre class="console">OCSP Response Data:                                                # Данные ответа OCSP:
+    OCSP Response Status: successful (0x0)                         #     Статус ответа OCSP: успешно (0x0)
+    Response Type: Basic OCSP Response                             #     Тип ответа: Базовый ответ OCSP
+    Version: 1 (0x0)                                               #     Версия: 1 (0x0)
+    Responder Id: ... CN = ocsp.example.com                        #     Идентификатор ответчика: ... CN = ocsp.example.com
+    Produced At: Apr 11 12:59:51 2015 GMT                          #     Сформирован: 11 апреля 2015 года в 12:59:51 по Гринвичу
+    Responses:                                                     #     Ответы:
+    Certificate ID:                                                #     Идентификатор сертификата:
+        Hash Algorithm: sha1                                       #         Алгоритм хэширования: sha1
+        Issuer Name Hash: E35979B6D0A973EBE8AEDED75D8C27D67D2A0334 #         Хэш имени выпустившего: E35979B6D0A973EBE8AEDED75D8C27D67D2A0334
+        Issuer Key Hash: 69E8EC547F252360E5B6E77261F1D4B921D445E9  #         Хэш ключа выпустившего: 69E8EC547F252360E5B6E77261F1D4B921D445E9
+        Serial Number: 1003                                        #         Серийный номер: 1003
+    Cert Status: good                                              #     Статус сертификата: хороший
+    This Update: Apr 11 12:59:51 2015 GMT                          #     Это обновление: 11 апреля 2015 года в 12:59:51 по Гринвичу</pre>
+
+		<p>Отзываем этот сертификат.</p>
+
+		<pre class="console"># openssl ca -config intermediate/openssl.cnf \
+  -revoke intermediate/certs/test.example.com.cert.pem
+Enter pass phrase for intermediate.key.pem: secretpassword # Введите ключевую фразу для intermediate.key.pem: секретныйпароль
+Revoking Certificate 1003.                                 # Отозвание сертификата 1003.
+Data Base Updated                                          # База данных обновлена</pre>
+
+		<p>Как и прежде, запустим OCSP-ответчик и в другом терминале отправим запрос. В этот раз в выводе будут строки Cert Status: revoked и Revocation Time.</p>
+
+		<pre class="console">OCSP Response Data:                                                # Данные ответа OCSP:
+    OCSP Response Status: successful (0x0)                         #     Статус ответа OCSP: успешно (0x0)
+    Response Type: Basic OCSP Response                             #     Тип ответа: Базовый ответ OCSP
+    Version: 1 (0x0)                                               #     Версия: 1 (0x0)
+    Responder Id: ... CN = ocsp.example.com                        #     Идентификатор ответчика: ... CN = ocsp.example.com
+    Produced At: Apr 11 12:59:51 2015 GMT                          #     Сформирован: 11 апреля 2015 года в 13:03:00 по Гринвичу
+    Responses:                                                     #     Ответы:
+    Certificate ID:                                                #     Идентификатор сертификата:
+        Hash Algorithm: sha1                                       #         Алгоритм хэширования: sha1
+        Issuer Name Hash: E35979B6D0A973EBE8AEDED75D8C27D67D2A0334 #         Хэш имени выпустившего: E35979B6D0A973EBE8AEDED75D8C27D67D2A0334
+        Issuer Key Hash: 69E8EC547F252360E5B6E77261F1D4B921D445E9  #         Хэш ключа выпустившего: 69E8EC547F252360E5B6E77261F1D4B921D445E9
+        Serial Number: 1003                                        #         Серийный номер
+    Cert Status: revoked                                           #     Статус сертификата: отозван
+    Revocation Time: Apr 11 13:01:09 2015 GMT                      #     Время отзыва: 11 апреля 2015 года в 13:01:09 по Гринвичу
+    This Update: Apr 11 12:59:51 2015 GMT                          #     Это обновление: 11 апреля 2015 года в 13:03:00 по Гринвичу</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Джэми Нгуен. Протокол интерактивного статуса сертификата - OCSP, 2015">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

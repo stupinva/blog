@@ -1,0 +1,321 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="pppd,l2tp,xl2tpd,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-04-28 -->
+		<title>VPN-подключение к Уфанет с помощью xl2tpd</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>VPN-подключение к Уфанет с помощью xl2tpd</h1>
+
+		<p>Прочитал на днях на уфанетовском форуме новость начале тестирования PPPoE, который в Уфе доступен пока ещё не везде. Попробовал на всякий случай настроить, хотя и ожидал, что не заработает - мой район попадает в ту область, где PPPoE ещё нет. Всё же почувствовал себя немного обманутым и решил попробовать настроить L2TP, так как зуд в руках и голове не давал успокоиться :)</p>
+
+		<p>Настройка в общих чертах совпадает с описанной в <a href="../ufanet-pptp-ethernet/">VPN-подключение к Уфанет и локальные ресурсы через Ethernet</a>.</p>
+
+		<h2>1. Установка пакетов</h2>
+
+		<p>Для начала установим необходимые пакеты:</p>
+
+		<pre class="console"># apt-get install resolvconf iproute bind9-host</pre>
+
+		<p>Забегая вперёд, хочу сказать, что в процессе настройки xl2tpd я столкнулся с одной проблемой - значение опции ipparam, настроенное в файле /etc/ppp/options.l2tp, игнорировалось им и вместо него подставлялся IP-адрес VPN-сервера 10.8.0.1.</p>
+
+		<p>Можно понять, почему так происходит, если посмотреть вывод команды:</p>
+
+		<pre class="console"># systemctl status xl2tpd.service</pre>
+
+		<p>В списке опций pppd опция ipparam с IP-адресом идёт после опции file, поэтому перекрывает определённое в файле опций. Это видно по строчке:</p>
+
+		<pre class="code">/usr/sbin/pppd passive nodetach : name 111111 debug file /etc/ppp/options.l2tp ipparam 10.8.0.1 /dev/pts/0</pre>
+
+		<p>Поиски подобных проблем в интернете приводят на страницу: <a href="http://forum.russianfedora.ru/viewtopic.php?f=17&amp;t=3436">обновил xl2tpd пропал ipparam</a>.</p>
+
+		<p>Чтобы посмотреть на пресловутый кусок кода, заходим на сайт компании-разработчика xl2tpd: <a href="http://xelerance.com">http://xelerance.com</a>, переходим в разделы меню Services &rarr; Other Software &rarr; xl2tpd и попадаем на страницу <a href="http://www.xelerance.com/services/software/xl2tpd/">http://www.xelerance.com/services/software/xl2tpd/</a>, где сообщается, что проект располагается по адресу <a href="https://github.com/xelerance/xl2tpd">https://github.com/xelerance/xl2tpd</a>.</p>
+
+		<p>Если посмотреть исходники файла control.c, то можно увидеть несколько фрагментов, похожих на этот:</p>
+
+		<pre class="code">
+            if (c-&gt;lac-&gt;pppoptfile[0])
+            {
+                po = add_opt (po, "file");
+                po = add_opt (po, c-&gt;lac-&gt;pppoptfile);
+            }
+        };
+        if (c-&gt;lac-&gt;pass_peer)
+        {
+            po = add_opt (po, "ipparam");
+            po = add_opt (po, IPADDY (t-&gt;peer.sin_addr));
+        }</pre>
+
+		<p>Для того, чтобы значения опций из файла имели приоритет над определёнными автоматически, нужно переместить блок if так, чтобы он обрабатывался раньше предыдущего блока (который оканчивается на точку с запятой, которые в этом случае излишни).</p>
+
+		<p>Чтобы исправить это, качаем исходники для сборки пакета:</p>
+
+		<pre class="console"># apt-get source xl2tpd
+# vim xl2tpd-1.3.1+dfsg/control.c</pre>
+
+		<p>Переносим пары строк, добавляющих опцию ipparam выше блоков, в которых добавляется опция file.</p>
+
+		<p>Готовим исходники для сборки своей версии deb-пакета:</p>
+
+		<pre class="console"># cd xl2tpd-1.3.1+dfsg/
+# dch -i</pre>
+
+		<p>Приводим верхнюю запись в changelog к следующему виду:</p>
+
+		<pre class="code">xl2tpd (1.3.1+dfsg-1.1) UNRELEASED; urgency=low
+
+  * Non-maintainer upload.
+  * Moved "ipparam" option detection before adding "file" option.
+
+ -- Vladimir Stupin &lt;vladimir@stupin.su&gt;  Sat, 27 Apr 2013 13:35:45 +0600</pre>
+
+		<p>И выходим из редактора.</p>
+
+		<p>Теперь осталось собрать и установить новый пакет (перед сборкой мне потребовалось поставить дополнительный пакет-зависимость):</p>
+
+		<pre class="console"># apt-get install libpcap0.8-dev
+# dpkg-buildpackage -B -us -uc -rfakeroot
+# cd ..
+# dpkg -i xl2tpd_1.3.1+dfsg-1.1_i386.deb</pre>
+
+		<p>Теперь всё готово для того, чтобы начать настройку. Скачать получившийся пакет можно здесь: <a href="xl2tpd_1.3.1_dfsg-1.1_i386.deb">xl2tpd_1.3.1_dfsg-1.1_i386.deb</a>.</p>
+
+		<p>Не стесняясь самоплагиата, помещу сюда описание процедуры настройки интерфейса Ethernet, расстановку приоритетов DNS-серверов и настройки маршрутизации по политикам (полиси-роутинг).</p>
+
+		<h2>2. Настроим сетевые интерфейсы</h2>
+
+		<p>Настроим локальный петлевой интерфейс, Ethernet-интерфейс Уфанет, и автоматическое подключение внешнего VPN-соединения.</p>
+
+		<p>В файл /etc/network/interfaces пропишем следующие настройки:</p>
+
+		<pre class="code">auto lo
+iface lo inet loopback
+
+auto <b>eth0</b>
+iface <b>eth0</b> inet dhcp</pre>
+
+		<p>Добавляем в файл конфигурации DHCP-клиента /etc/dhcp3/dhclient.conf новую секцию, связанную с интерфейсом eth0:</p>
+
+		<pre class="code">interface "<b>eth0</b>" {
+  script "/root/bin/dhclient-ufanet";
+}</pre>
+
+		<p>Вам может понадобиться заменить в файлах инициализации интерфейс eth0 (выше он выделен жирным шрифтом) на тот, к которому подключен Ethernet-кабель Уфанет.</p>
+
+		<p>Копируем сценарий, выполняющийся по умолчанию, в каталог /root/bin/ под именем dhclient-ufanet:</p>
+
+		<pre class="console"># mkdir /root/bin/
+# cp /sbin/dhclient-script /root/bin/dhclient-ufanet</pre>
+
+		<p>Заменяем в скопированном сценарии строчки следующего вида в двух местах:</p>
+
+		<pre class="code">for router in $new_routers; do
+    route add default dev $interface gw $router $metric_arg
+done</pre>
+
+		<p>на блок:</p>
+
+		<pre class="code">for router in $new_routers; do
+  for dns in $new_domain_name_servers; do
+    ip route add $dns/32 dev $interface via $router $metric_arg
+    vpn=`host -t A pptp.ufanet.ru $dns | cut -d" " -f4`
+    ip route add $vpn/32 dev $interface via $router $metric_arg
+    ip route add default dev $interface src $new_ip_address via $router $metric_arg table lufanet
+    ip rule add from $new_ip_address table lufanet
+  done
+done</pre>
+
+		<h2>3. Настроим приоритеты DNS-серверов</h2>
+
+		<p>DNS-серверы на интерфейсе ppp должны быть приоритетнее DNS-серверов на интерфейсе Ethernet, поэтому в файле /etc/resolvconf/interface-order строчку ppp* поместим перед eth*.</p>
+
+		<p>Файл /etc/resolvconf/interface-order примет следующий вид:</p>
+
+		<pre class="code"># interface-order(5)
+lo.inet*
+lo.dnsmasq
+lo.pdnsd
+lo.!(pdns|pdns-recursor)
+lo
+tun*
+tap*
+ppp*
+eth*
+ath*
+wlan*
+*</pre>
+
+		<h2>4. Создадим таблицы маршрутизации</h2>
+
+		<p>Добавим две таблицы с именами lunlim и iunlim, которые будут содержать маршруты ответственные за работу ответного трафика соединений устанавливаемых снаружи.</p>
+
+		<p>В файл /etc/iproute2/rt_tables приведём к следующему виду:</p>
+
+		<pre class="code">#
+# reserved values
+#
+255     local
+254     main
+253     default
+0       unspec
+#
+# local
+#
+#1      inr.ruhep
+
+201     ufanet
+202     lufanet</pre>
+
+		<h2>5. Подготовим скрипты для управления маршрутами через VPN-подключение</h2>
+
+		<p>Создадим и пропишем в файл /etc/ppp/ip-up.d/route следующее:</p>
+
+		<pre class="code">#!/bin/sh
+
+case "$PPP_IPPARAM" in
+        ufanet)
+
+        ip route add default dev $PPP_IFACE src $PPP_LOCAL table main
+
+        ip route add default dev $PPP_IFACE src $PPP_LOCAL table ufanet
+        ip rule add from $PPP_LOCAL table ufanet
+        ;;
+
+        *)
+        echo "No PPP_IPPARAM defined"
+        ;;
+esac</pre>
+
+		<p>Создадим парный файл /etc/ppp/ip-down.d/route и пропишем в него следующее:</p>
+
+		<pre class="code">#!/bin/sh
+
+case "$PPP_IPPARAM" in
+        ufanet)
+
+        ip route del default dev $PPP_IFACE src $PPP_LOCAL table main
+
+        ip route del default dev $PPP_IFACE src $PPP_LOCAL table ufanet
+        ip rule del from $PPP_LOCAL table ufanet
+        ;;
+
+        *)
+        echo "No PPP_IPPARAM defined"
+        ;;
+esac</pre>
+
+		<p>Не забываем проставить у файлов флаг выполнимости:</p>
+
+		<pre class="console"># chmod +x /etc/ppp/ip-up.d/route
+# chmod +x /etc/ppp/ip-down.d/route</pre>
+
+		<h2>6. Настройка xl2tpd</h2>
+
+		<p>В файл конфигурации /etc/xl2tpd/xl2tdp.conf пропишем следующие настройки:</p>
+
+		<pre class="code">[global]
+access control = yes
+
+[lac ufanet]
+lns = vpn.ufanet.ru
+redial = yes
+redial timeout = 10
+require chap = yes
+require authentication = no
+ppp debug = yes
+pppoptfile = /etc/ppp/options.l2tp
+require pap = no
+autodial = yes
+name = <b>111111</b></pre>
+
+		<p>Создаём файл /etc/ppp/options.l2tp с настройками для демона pppd:</p>
+
+		<pre class="code">unit 0
+remotename vpn.ufanet.ru
+ipparam ufanet
+connect /bin/true
+mru 1460
+mtu 1460
+nodeflate
+nobsdcomp
+persist
+maxfail 0
+nopcomp
+noaccomp
+noauth
+noproxyarp
+name <b>111111</b></pre>
+
+		<p>Теперь нужно создать файл /etc/xl2tpd/l2tp-secrets с паролем для подключения:</p>
+
+		<pre class="code"><b>111111</b>          vpn.ufanet.ru   <b>password</b></pre>
+
+		<p>Во всех трёх файлах вместо отмеченных жирным шрифтом цифр нужно указать ваш логин для подключения, а в последнем файле выделенное жирным шрифтом слово password - заменить на ваш пароль.</p>
+
+		<p>Теперь, в принципе, всё готово для установки подключения. Достаточно перезапустить сеть и запустить демон xl2tpd:</p>
+
+		<pre class="console"># /etc/init.d/networking stop
+# /etc/init.d/networking start
+# /etc/init.d/xl2tpd start</pre>
+
+		<p>Для автоматического запуска xl2tpd в процессе загрузки можно выполнить следующую команду:</p>
+
+		<pre class="console"># update-rc.d xl2tpd defaults</pre>
+
+		<p>Я же на этом не остановился и, поскольку на домашнем компьютере использую systemd, написал service-файл.</p>
+
+		<h2>7. Настройка systemd для запуска xl2tpd</h2>
+
+		<p>По умолчанию systemd использует скрипты из каталога /etc/init.d, если для них нет service-файла с таким-же именем. Попробуем создать service-файл /etc/systemd/system/xl2tpd.service со следующим содержимым:</p>
+
+		<pre class="code">[Unit]
+Description=layer 2 tunelling protocol daemon xl2tpd
+After=network.target
+
+[Service]
+ExecStart=/usr/sbin/xl2tpd -D -c /etc/xl2tpd/xl2tpd.conf -s /etc/xl2tpd/l2tp-secrets -p /run/xl2tpd/xl2tpd.pid -C /run/xl2tpd/l2tp-control
+ExecStop=/usr/sbin/xl2tpd-control -c /run/xl2tpd/l2tp-control disconnect ufanet
+Type=simple
+PIDFile=/var/run/xl2tpd/xl2tpd.pid
+
+[Install]
+WantedBy=multi-user.target</pre>
+
+		<p>Для запуска xl2tpd понадобится создать каталог /run/xl2tpd. Для этого создадим файл /etc/tmpfiles.d/xl2tpd.conf с настройками для создания каталога:</p>
+
+		<pre class="code">d /run/xl2tpd 0755 root root -</pre>
+
+		<p>Теперь можно сообщить systemd об изменении настроек:</p>
+
+		<pre class="console"># systemctl daemon-reload</pre>
+
+		<p>Сообщить systemd о том, что нужно запускать xl2tpd.service при загрузке системы:</p>
+
+		<pre class="console"># systemctl enable xl2tpd.service</pre>
+
+		<p>И запустить xl2tpd средствами systemd:</p>
+
+		<pre class="console"># systemctl start xl2tpd.service</pre>
+
+		<p>У этого service-файла есть одна недоработка, которую я не смог побороть: правильное завершение процесса xl2tpd. После завершения сервиса, systemd назначает сервису статус ошибки.</p>
+
+		<p>Использованные материалы:</p>
+
+		<ol>
+			<li><a href="http://wiki.debian.org/ru/xl2tpd">Настройка VPN (протокол L2TP) на примере провайдера Корбина Телеком</a>,</li>
+
+			<li><a href="http://forum.russianfedora.ru/viewtopic.php?f=17&amp;t=3436">обновил xl2tpd пропал ipparam</a>.</li>
+		</ol>
+
+		<p>P.S. Работает не стабильно, поэтому вернулся обратно, на PPTP.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=VPN-подключение к Уфанет с помощью xl2tpd">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

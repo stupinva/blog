@@ -1,0 +1,57 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="quake,игры,linux" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2009-01-17 -->
+		<title>Quake в Linux</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Quake в Linux</h1>
+
+		<p>Некоторое время меня интересовал вопрос запуска Quake 1 в Linux. Готовых пакетов для Debian или Ubuntu я не нашёл, а запускать Quake в Wine как-то глупо, потому что исходники Quake открыты и было сделано очень много портов и модификаций этой игры.</p>
+
+		<p>В частности есть Quake использующий библиотеку OpenGL (оригинальная игра для отрисовки изображения пользовалась ТОЛЬКО программными расчётами). Неоднократно слышал, что Quake портировали на Linux, на мобильные телефоны и т.п.</p>
+
+		<p>Наткнулся на один из таких неофициальных движков на сайте <a href="http://ezquake.sourceforge.net/">http://ezquake.sourceforge.net/</a>. Это Quake работающий на платформах Linux, FreeBSD, MacOS X, Windows и для отрисовки изображения использующий OpenGL. По ссылкам на сайте можно скачать два варианта для Linux: для архитектуры x86 и x86_64. Первое соответствует принятому в Debian названию архитектуры i386, второе - amd64.</p>
+
+		<p>Поскольку я пользуюсь Lenny i386, то я скачал и распаковал первый Linux-архив:</p>
+
+		<pre class="console">$ wget <a href="http://downloads.sourceforge.net/ezquake/ezquake_linux-x86_1.9.2.tar.gz">http://downloads.sourceforge.net/ezquake/ezquake_linux-x86_1.9.2.tar.gz</a>
+$ tar xzvf ezquake_linux-x86_1.9.2.tar.gz
+$ mv ezquake_linux-x86_1.9.2 ezquake</pre>
+
+		<p>Теперь сделаем исполняемым файл ezquake-gl.gfx, чтобы впоследствии можно было запустить игру:</p>
+
+		<pre class="console">$ chmod +x ezquake/ezquake-gl.gfx</pre>
+
+		<p>Теперь нужно добавить к движку игры игровые ресурсы. Их я взял с имеющегося у меня компакт-диска с игрой для Windows. Это файлы pak0.pak и pak1.pak, которые нужно скопировать в подкаталог ezquake/id1. Файлы ресурсов должны обязательно состоять только из строчных букв, иначе движок их не найдёт.</p>
+
+		<p>Далее, на сайте проекта ezquake в разделе downloads упоминаются три проекта, посвящённые более качественной перерисовке текстур и моделей из Quake.</p>
+
+		<p>Скачаем оба архива с перерисованными текстурами: <a href="http://qrp.quakeonline.net/qrp-maptextures-2007-10-06r2-7files.zip">http://qrp.quakeonline.net/qrp-maptextures-2007-10-06r2-7files.zip</a> и <a href="http://facelift.quakedev.com/download/SKINSbmodels-48files-4-23-05.zip">http://facelift.quakedev.com/download/SKINSbmodels-48files-4-23-05.zip</a> и распакуем их туда, где они должны лежать в соответствии с информацией из readme-файлов в архивах.</p>
+
+		<pre class="console">$ wget <a href="http://qrp.quakeonline.net/qrp-maptextures-2007-10-06r2-7files.zip">http://qrp.quakeonline.net/qrp-maptextures-2007-10-06r2-7files.zip</a>
+$ unzip qrp-maptextures-2007-10-06r2-7files.zip -d ezquake/id1/
+$ wget <a href="http://facelift.quakedev.com/download/SKINSbmodels-48files-4-23-05.zip">http://facelift.quakedev.com/download/SKINSbmodels-48files-4-23-05.zip</a>
+$ mkdir ezquake/id1/textures
+$ unzip SKINSbmodels-48files-4-23-05.zip -d ezquake/id1/trextures</pre>
+
+		<p>В принципе игра готова к запуску, однако я обнаружил одну небольшую проблему - отсутствие звука. Я пробовал менять настройки звука в игре. Не смотря на то, что в движке заявлена поддержка звуковой подсистемы ALSA, игра не воспроизводила звук. Я попробовал поставить пакет-переходник alsa-oss, эмулирующий интерфейс OSS для тех программ, которые не умеют пользоваться интерфейсом ALSA и запустить игру с указанием переключиться на интерфейс OSS, но ничего не помогало. Звука либо не было вообще, либо звук был прерывисто-заикающийся через очень короткие интервалы времени (менее секунды).</p>
+
+		<p>Я решил поискать решение этой проблемы в интернете. Я нашёл тему на одном из форумов: <a href="http://www.quakeworld.nu/forum/viewtopic.php?id=1956">http://www.quakeworld.nu/forum/viewtopic.php?id=1956</a>, где посоветовали указать принудительное использование подсистемы OSS и частоты дискретизации звука в 48 килогерц. Я попробовал и мне помогло!</p>
+
+		<p>Правильно игру нужно запускать так:</p>
+
+		<pre class="console">$ ezquake/ezquake-gl.glx +set s_noalsa 1 +set s_device /dev/dsp +set s_khz 48 +set s_bits 16</pre>
+
+		<p>Можно сделать специальный скрипт, в котором указать команду запуска ezquake со всеми нужными параметрами.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Quake в Linux">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

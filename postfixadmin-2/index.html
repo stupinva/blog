@@ -1,0 +1,214 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="lighttpd,linux,debian,postfixadmin,php,wheezy,mysql" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2014-01-19 -->
+		<title>Установка и настройка Postfixadmin</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Установка и настройка Postfixadmin</h1>
+
+		<p>Ранее я уже описывал настройку почтовой системы, использующей Postfixadmin в качестве веб-интерфейса для её администрирования: <a href="../postfix-dovecot-postfixadmin/">Настройка почтовой системы на основе Postfix, Dovecot, PostfixAdmin</a>.</p>
+
+		<p>Тогда я просто скомпилировал свою заметку из различных рецептов, которые мне больше всего понравились. Сейчас я вижу в той заметке достаточное количество недостатков. Например, в той заметке настраивается SASL через плагин auxprop из Cyrrus, хотя Postfix может использовать SASL, встроенный в Dovecot. Для фильтрации спама по серым спискам был выбран Postgrey, просто потому что он был тогда на слуху. Фильтрация вирусов осуществляется с использованием SMTP-прокси, хотя есть более подходящий для этого способ - milter.</p>
+
+		<p>Начнём, как и в прошлый раз, с настройки Postfixadmin. Кроме Postfixadmin имеется множество других различных веб-интерфейсов для управления почтовой системой (одну я даже написал для себя сам), однако Postfixadmin наиболее популярен. Настройка начнётся с него, потому что остальные системы зависят от него, а он сам от них относительно независим.</p>
+
+		<h2>1. Немного о терминологии</h2>
+
+		<p>Имеется несколько устоявшихся аббревиатур для различных компонентов почтовой системы:</p>
+
+		<ul>
+			<li><b>MTA</b> - Mail Transfer Server - сервер передачи почты, занимается лишь отправкой и приёмом почты по протоколу SMTP. Примеры таких программ: Exim, Postfix, Sendmail, Qmail, Microsoft Exchange, MDaemon.</li>
+
+			<li><b>MUA</b> - Mail User Agent - агент пользователя почты. Это программа для чтения писем, их сбора с почтовых ящиков, для отправки писем. Эта программа взаимодействует непосредственно с пользователем. Примеры программ: графические Mozilla Thunderbird, ClawsMail, Evolution, Outlook, Outlook Express, веб-приложения SquirrelMail, RoundCube, консольные приложения mutt, gnus.</li>
+
+			<li><b>MDA</b> - Mail Delivery Agent - агент доставки почты. Занимается управлением почтовыми ящиками - кладёт в них новые письма, удаляет, перемещает, отдаёт их содержимое по запросу MUA. В общем и целом - это сервер, работающий по протоколу POP3 или IMAP. Примеры серверов: Cyrrus IMAP, Courier IMAP, Dovecot.</li>
+
+			<li><b>LDA</b> - Local Delivery Agent - агент локальной доставки. Небольшой компонент MTA или MDA, задача которого сводится к тому, чтобы положить в ящик пользователя почту, принятую MTA. Может работать по протоколу LMTP, являющимся упрощённым вариантом SMTP. Во время приёма письма от MTA может производить подсчёт использования квоты почтового ящика, может осуществлять фильтрацию почты, оценивая степень её похожести на спам или просто раскладывая письма в нужные каталоги почтового ящика, руководствуясь правилами, заданными пользователем.</li>
+		</ul>
+
+		<h2>2. Установка сервера MySQL</h2>
+
+		<p>Установим сервер MySQL:</p>
+
+		<pre class="console"># apt-get install mysql-server</pre>
+
+		<p>Подробнее останавливаться на настройке сервера MySQL не стану.</p>
+
+		<h2>3. Установка Postfixadmin</h2>
+
+		<p>Ставим пакет:</p>
+
+		<pre class="console"># apt-get install postfixadmin</pre>
+
+		<p>В процессе установки запустится мастер настройки базы данных:</p>
+
+		<img src="postfixadmin1.png" />
+
+		<img src="postfixadmin2.png" />
+
+		<img src="postfixadmin3.png" />
+
+		<img src="postfixadmin4.png" />
+
+		<img src="postfixadmin5.png" />
+
+		<p>Настройки подключения Postfixadmin к базе данных находятся в файле /etc/postfixadmin/dbconfig.inc.php, где их можно впоследствии изменить.</p>
+
+		<h2>4. Настройка веб-сервера</h2>
+
+		<p>Традиционно, я воспользуюсь Lighttpd. Установим веб-сервер, Postfixadmin и PHP для его работы:</p>
+
+		<pre class="console"># apt-get install lighttpd php5-cgi</pre>
+
+		<p>Скопируем имеющийся в пакете файл /etc/postfixadmin/lighttpd.conf в каталог /etc/lighttpd/conf-available/ под именем 30-postfixadmin.conf:</p>
+
+		<pre class="console"># cp /etc/postfixadmin/lighttpd.conf /etc/lighttpd/conf-available/30-postfixadmin.conf</pre>
+
+		<p>Я вписал в файл /etc/lighttpd/conf-available/30-postfixadmin.conf следующие настройки:</p>
+
+		<pre class="code">$HTTP["host"] == "mail.domain.tld" {
+  alias.url += (
+    "/admin" =&gt; "/usr/share/postfixadmin",
+  )
+}</pre>
+
+		<p>Теперь включим модули Lighttpd, необходимые для работы Postfixadmin:</p>
+
+		<pre class="console"># lighty-enable-mod fastcgi fastcgi-php postfixadmin
+# /etc/init.d/lighttpd force-reload</pre>
+
+		<h2>5. Веб-настройка Postfixadmin</h2>
+
+		<p>Когда веб-сервер настроен для обслуживания веб-интерфейса Postfixadmin, можно зайти на страницу setup.php и сгенерировать хэш пароля для дальнейшей настройки:</p>
+
+		<img src="postfixadmin-setup1.png" />
+
+		<p>Копируем хэш:</p>
+
+		<img src="postfixadmin-setup2.png" />
+
+		<p>Вставляем хэш в файл /etc/postfixadmin/config.inc.php. Затем вводим пароль и данные учётной записи суперадминистратора, которая будет создана:</p>
+
+		<img src="postfixadmin-setup3.png" />
+
+		<p>После того, как появится сообщение о добавлении администратора, можно войти под этой учётной записью в интерфейс администрирования:</p>
+
+		<img src="postfixadmin-setup4.png" />
+
+		<img src="postfixadmin-setup5.png" />
+
+		<h2>6. Тонкая настройка Postfixadmin</h2>
+
+		<p>Настройки Postfixadmin находятся в файле /etc/postfixadmin/config.inc.php. Ниже показаны полезные опции из этого файла с моими комментариями. Жирным шрифтом показаны опции, на которые следует обратить особое внимание. fetchmail и отсылку уведомлений при отсутствии адресата (vactions) я не настраивал, поэтому эти опции подробно не рассмотрены.</p>
+
+		<pre class="code">$CONF['configured'] = <b>true</b>;                    // Разрешает работу Postfixadmin
+$CONF['setup_password'] = <b>'changeme'</b>;          // Хэш пароля, используемого при настройке Postfixadmin через веб
+                                               // После настройки можно очистить
+$CONF['postfix_admin_url'] = <b>'/admin'</b>;         // База для URL интерфейса
+$CONF['default_language'] = <b>'ru'</b>;              // Язык интерфейса
+$CONF['database_prefix'] = '';                 // Префикс таблиц в базе данных
+$CONF['database_tables'] = array (             // Здесь можно выполнить тонкую настройку имён таблиц
+    'admin' =&gt; 'admin',
+    'alias' =&gt; 'alias',
+    'alias_domain' =&gt; 'alias_domain',
+    'config' =&gt; 'config',
+    'domain' =&gt; 'domain',
+    'domain_admins' =&gt; 'domain_admins',
+    'fetchmail' =&gt; 'fetchmail',
+    'log' =&gt; 'log',
+    'mailbox' =&gt; 'mailbox',
+    'vacation' =&gt; 'vacation',
+    'vacation_notification' =&gt; 'vacation_notification',
+    'quota' =&gt; 'quota',
+    'quota2' =&gt; 'quota2',
+);
+
+$CONF['admin_email'] = <b>'postmaster@domain.tld'</b>;   // Почтовый ящик,
+$CONF['smtp_server'] = <b>'mail.domain.tld'</b>;         // Полностью определённое доменное имя SMTP-сервера и
+$CONF['smtp_port'] = '25';                        // порт SMTP-сервера для отправки уведомлений о вновь созданных ящиках
+
+$CONF['encrypt'] = <b>'md5crypt'</b>;                    // Алгоритм хэширования, который будет использоваться для сохранения паролей
+                                                  // в базе данных
+                                                  // При указании cleartext пароль будет храниться в открытом виде
+$CONF['authlib_default_flavor'] = 'md5raw';       // При указании authlib здесь указывается алгоритм хэширования из authlib
+$CONF['dovecotpw'] = "/usr/sbin/dovecotpw"        // При указании dovecot:* здесь указывается путь к утилите dovecotpw
+
+$CONF['min_password_length'] = <b>9</b>;                 // Минимальное количество символов в пароле - 9
+$CONF['generate_password'] = <b>'YES'</b>;               // При заведении ящика сгенерировать пароль и показать его
+$CONF['show_password'] = <b>'NO'</b>;                    // Не показывать пароль после создания ящика
+
+$CONF['page_size'] = <b>'30'</b>;                        // Количество строк в таблице, отображаемой в веб-интерфейсе
+$CONF['default_aliases'] = array (                // Создавать для каждого нового домена указанные псевдонимы для пересылки писем
+<b>    'abuse' => 'admin@domain.tld',
+    'hostmaster' => 'admin@domain.tld',
+    'postmaster' => 'admin@domain.tld',
+    'webmaster' => 'admin@domain.tld',
+    'info' => 'admin@domain.tld'</b>
+);
+$CONF['domain_path'] = <b>'YES'</b>;                     // Указывает, что каталог ящика хранится в каталоге домена
+                                                  // YES - /var/mail/virtual/domain/user@domain, NO - /var/main/virtual/user@domain
+$CONF['domain_in_mailbox'] = <b>'NO'</b>;                // Указывает, что в каталоге с именем ящика не должно быть домена
+                                                  // YES - /var/mail/virtual/domain/user@domain, NO - /var/mail/virtual/domain/user
+$CONF['maildir_name_hook'] = 'NO';                // Здесь можно задать собственную функцию для генерирования пути к ящику
+
+$CONF['aliases'] = <b>'100'</b>;                         // Максимальное количество псевдонимов по умолчанию в одном домене
+$CONF['mailboxes'] = <b>'100'</b>;                       // максимальное количество почтовых ящиков по умолчанию в одном домене
+$CONF['maxquota'] = <b>'100'</b>;                        // Максимальный объём ящика по умолчанию (см. ниже множитель квоты)
+$CONF['quota'] = <b>'YES'</b>;                           // Использовать квоты почтовых ящиков
+$CONF['quota_multiplier'] = <b>'1048576'</b>;            // Множитель для размера квоты почтовых ящиков,
+                                                  // реальный объём квоты по умолчанию составит maxquota * quota_multiplier = 100 Мегабайт
+
+$CONF['transport'] = <b>'YES'</b>;                       // Использовать таблицу транспортов
+$CONF['transport_options'] = array (
+    <b>'dovecot'</b>,                                    // Для виртуальных почтовых ящиков
+    <b>'relay'</b>                                       // Транспорт для доменов, для которых почтовый сервер является резервным
+);
+$CONF['transport_default'] = <b>'dovecot'</b>;           // Транспорт по умолчанию
+
+$CONF['vacation'] = 'NO';                         // Не использовать механизм уведомлений (для использования нужно установить плагин)
+$CONF['vacation_domain'] = 'autoreply.domain.tld';// Домен для отсылки уведомлений, прописывать в DNS не обязательно
+$CONF['vacation_control'] ='YES';                 // Разрешить пользователям настраивать уведомления для собственных почтовых ящиков
+$CONF['vacation_control_admin'] = 'YES';          // Разрешить администраторам доменов настраивать уведомления почтовых ящиков
+
+$CONF['alias_control'] = <b>'YES'</b>;                   // Разрешить суперадминам редактировать пересылки
+$CONF['alias_control_admin'] = <b>'YES'</b>;             // Разрешить администраторам доменов редактировать пересылки
+$CONF['special_alias_control'] = <b>'NO'</b>;            // Разрешить администраторам доменов редактировать специальные пересылки
+                                                  // (см. выше default_aliases)
+$CONF['alias_goto_limit'] = '0';                  // Максимальное количество пересылок, отображаемых в одной строке (0 - без лимита)
+$CONF['alias_domain'] = 'NO';                     // Не "зеркалировать" пересылки и ящики в другой домен
+$CONF['backup'] = <b>'YES'</b>;                          // Показывать вкладку резервного копирования
+$CONF['sendmail'] = <b>'YES'</b>;                        // Показывать вкладку отправки почты
+$CONF['logging'] = <b>'YES'</b>;                         // Вести журнал редактирований
+$CONF['fetchmail'] = 'NO';                        // Не показывать вкладку получения почты с других серверов
+$CONF['fetchmail_extra_options'] = 'NO';          // Не разрешить пользователям задавать дополнительные опции fetchmail
+                                                  // (Разрешать опасно, т.к. пользователь сможет выполнить произвольную команду!)
+$CONF['show_header_text'] = 'NO';                 // Не показывать текст заголовка
+$CONF['header_text'] = ':: Postfix Admin ::';     // Текст заголовка
+$CONF['user_footer_link'] = "http://domain.tld";  // Ссылка, отображаемая в главном меню при входе под обычным пользователем
+$CONF['show_footer_text'] = 'YES';                // Показывать "подвал" на каждой странице
+$CONF['footer_text'] = 'Вернуться на domain.tld'; // Текст "подвала"
+$CONF['footer_link'] = 'http://domain.tld';       // Ссылка "подвала"
+$CONF['welcome_text'] = &lt;&lt;&lt;EOM                    // Текст письма, отправляемого новым пользователям
+  Добрый день!
+
+  Поздравляем вас с получением новой учётной записи!
+EOM;
+$CONF['emailcheck_resolve_domain'] = 'YES';       // При создании ящика или пересылки проверять наличие домена 
+$CONF['used_quotas'] = <b>'YES'</b>;                     // Показывать использование квот из словаря Dovecot в базе данных
+$CONF['new_quota_table'] = <b>'YES'</b>;                 // Использовать таблицу quota2 для отображения информации об использовании квот
+$CONF['theme_logo'] = 'images/logo-default.png';  // Путь к своему логотипу
+$CONF['theme_css'] = 'css/default.css';           // Путь к собственному файлу стилей</pre>
+
+		<p>На этом настройку Postfixadmin можно считать оконченой. Продолжение: <a href="../dovecot/">Установка и настройка Dovecot</a></p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Установка и настройка Postfixadmin">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

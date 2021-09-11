@@ -1,0 +1,119 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="squeeze,lvm,Эндрю Гамильтон,ubuntu,gpt,preseed,raid1,debian,linux,grub2,перевод,lvm2,raid" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-10-15 -->
+		<title>Эндрю Гамильтон. Совместное использование expert_recipe, mdraid, LVM, GPT и GRUB2 в Ubuntu Lucid и Debian Squeeze, 2012</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Эндрю Гамильтон. Совместное использование expert_recipe, mdraid, LVM, GPT и GRUB2 в Ubuntu Lucid и Debian Squeeze, 2012</h1>
+
+		<p>Перевод статьи: <a href="https://cptyesterday.wordpress.com/2012/07/20/get-expert_recipe-mdraid-lvm-gpt-and-grub2-playing-together-on-ubuntu-lucid-and-debian-squeeze/">Get expert_recipe, mdraid, LVM, GPT and grub2 Playing Together on Ubuntu Lucid and Debian Squeeze</a></p>
+
+		<p>Автор: Эндрю Гамильтон (Andrew Hamilton)</p>
+
+		<p>Жёсткие диски растут и растут. Теперь можно взять жёсткие диски на 3 терабайта и получить по огромному хранилищу на каждом сервере. Но тогда можно заметить, что текущие <a href="http://wiki.debian.org/DebianInstaller/Preseed">файлы автоматизации установки</a> не работают, завершаясь аварийно на попытке установить <a href="http://www.gnu.org/software/grub/">GRUB2</a>. Если нажать "Alt-F4", чтобы проверить журнал ошибок, то можно увидеть ошибки о том, что GRUB2 невозможно встроить в <a href="http://en.wikipedia.org/wiki/GUID_Partition_Table">диск GPT</a>.</p>
+
+		<p>Когда размер диска достигает 2 терабайт, <a href="http://wiki.debian.org/DebianInstaller">установщик Debian</a> и менеджер разделов <a href="http://packages.debian.org/squeeze/partman-partitioning">partman</a> по умолчанию используют разбивку разделов по схеме GPT. К несчастью старые версии partman неправильно настраивают GPT, если диски являются частью программного RAID-массива. К счастью, исправить это не так сложно, нужно только добавить несколько директив (или, возможно, поменять их, если некоторые из них уже используются в вашем файле автоматизации установки).</p>
+
+		<p>Что нам нужно - это добавить раздел, который не создают подобающим образом старые версии менеджера разделов partman. Этот раздел имеет тип bios_grub и должен иметь размер 1 мегабайт. Этот раздел позволяет GRUB2 найти место для размещения всего загрузчика и позволяет BIOS найти загрузочную информацию GRUB для загрузки загрузчика. Более подробную информацию о загрузочном разделе BIOS можно найти в Wikipedia – <a href="http://en.wikipedia.org/wiki/BIOS_Boot_partition">BIOS Boot Partition</a> (Загрузочный раздел BIOS).</p>
+
+		<p>Чтобы добавить раздел bios_grub в файл автоматизации установки при помощи менеджера разделов partman, мы добавим к нашему рецепту expert_recipe следующее:</p>
+
+		<pre class="code">1 1 1 free \
+            $iflabel{ gpt } \
+            method{ biosgrub } \
+        . \</pre>
+
+		<p>Эти настройки добавят раздел размером 1 мегабайт с высшим приоритетом. Если метка диска имеет значение "GPT", то раздел будет создан методом biosgrub.</p>
+
+		<p>Поскольку мы добавили к диску ещё один раздел, также нужно будет увеличить на единицу номера всех разделов, используемых в RAID-массивах. Например, если сначала в файле автоматизации установки использовались следующие настройки RAID:</p>
+
+		<pre class="code">d-i partman-auto-raid/recipe string \
+    1 2 0 ext3 /boot /dev/sda1#/dev/sdb1 \
+    . \
+    1 2 0 lvm - /dev/sda2#/dev/sdb2 \
+    .</pre>
+
+		<p>То теперь нам нужно отредактировать эту запись и увеличить номера разделов на единицу:</p>
+
+		<pre class="code">d-i partman-auto-raid/recipe string \
+    1 2 0 ext3 /boot /dev/sda2#/dev/sdb2 \
+    . \
+    1 2 0 lvm - /dev/sda3#/dev/sdb3 \
+    .</pre>
+
+		<p>Полностью настройки диска в новом файле автоматизации установки будут выглядеть следующим образом:</p>
+
+		<pre class="code">d-i partman-auto/disk string /dev/sda /dev/sdb
+d-i partman-auto/method string raid
+d-i partman-lvm/device_remove_lvm boolean true
+d-i partman-auto/purge_lvm_from_device boolean true
+d-i partman-md/device_remove_md boolean true
+d-i partman-md/confirm_nochanges boolean true
+d-i partman-lvm/confirm boolean true
+d-i partman-auto/choose_recipe select boot-root
+d-i partman-auto-lvm/new_vg_name string vg01
+d-i partman-auto-lvm/guided_size string 100%
+d-i partman-auto-raid/recipe string \
+    1 2 0 ext3 /boot /dev/sda2#/dev/sdb2 \
+    . \
+    1 2 0 lvm - /dev/sda3#/dev/sdb3 \
+    .
+d-i partman-auto/expert_recipe string \
+    boot-root :: \
+        1 1 1 free \
+            $iflabel{ gpt } \
+            method{ biosgrub } \
+        . \
+        256 10 256 raid \
+            $lvmignore{ } \
+            $primary{ } \
+            method{ raid } \
+        . \
+        1000 20 1000000 raid \
+            $lvmignore{ } \
+            $primary{ } \
+            method{ raid } \
+        . \
+        150% 30 150% swap \
+            $defaultignore{ } \
+            $lvmok{ } \
+            lv_name{ lv_swap } \
+            method{ swap } \
+            format{ } \
+        . \
+        20480 40 20480 ext4 \
+            $defaultignore{ } \
+            $lvmok{ } \
+            lv_name{ lv_root } \
+            method{ format } \
+            format{ } \
+            use_filesystem{ } \
+            filesystem{ ext4 } \
+            mountpoint{ / } \
+        . \
+            1 50 -1 ext4 \
+            $defaultignore{ } \
+            $lvmok{ } \
+            lv_name{ lv_dummy } \
+        .
+d-i mdadm/boot_degraded boolean true
+d-i partman-md/confirm boolean true
+d-i partman-partitioning/confirm_write_new_label boolean true
+d-i partman/choose_partition select Finish partitioning and write changes to disk
+d-i partman/confirm boolean true
+d-i partman-md/confirm_nooverwrite boolean true
+d-i partman/confirm_nooverwrite boolean true</pre>
+
+		<p>Ищете подробности об использовании expert_recipe в файлах автоматизации установки? Посмотрите другую статью в моём блоге, где описано больше подробностей - <a href="../preseed/">Заметки по использованию expert_recipe в файлах автоматизации установки Debian/Ubuntu</a>.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Эндрю Гамильтон. Совместное использование expert_recipe, mdraid, LVM, GPT и GRUB2 в Ubuntu Lucid и Debian Squeeze, 2012">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

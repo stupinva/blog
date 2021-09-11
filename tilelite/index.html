@@ -1,0 +1,195 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="liteserv,mod_proxy,flup,python,lighttpd,mod_fastcgi,fastcgi,wsgi,tilelite" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2012-10-14 -->
+		<title>Настройка тайлового сервера TileLite</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка тайлового сервера TileLite</h1>
+
+		<p>Ранее я уже описывал настройку системы для отрисовки тайлов OpenStreetMap на основе renderd, apache и mod_tile в своей заметке <a href="../mapnik-part4/">Установка renderd и mod_tile - системы отрисовки тайлов по запросу</a>.</p>
+
+		<p>Сейчас же я хочу рассмотреть ещё одни тайловый сервер, основанный на Mapnik - сервер TileLite. Но прежде чем я это сделаю, хочу сразу сказать о достоинствах и недостатках обеих систем.</p>
+
+		<p>Система из renderd, apache и mod_tile хороша тем, что она представляет собой законченное решение, так как включает в себя функции отрисовки тайлов, кэширования тайлов и веб-сервер для отдачи тайлов. Ещё одно преимущество этой связки заключается в том, что она способна обслуживать сразу несколько слоёв. Недостатков у неё два - она сравнительно сложна, громоздка и отсутствует в официальном репозитории Debian.</p>
+
+		<p>Система на основе TileLite сочетает в рамках одного процесса функции отрисовки тайлов, функцию кэширования и веб-сервер. Преимущество этой системы - простота её настройки и наличие в официальном репозитории Debian. Недостатки - система умеет обслуживать только один слой, при этом довольно требовательна к ресурсам и на моём компьютере работала не очень стабильно.</p>
+
+		<h2>1. Настройка в режиме самостоятельного веб-сервера</h2>
+
+		<p>Поставим пакет tilelite:</p>
+
+		<pre class="console"># apt-get install tilelite</pre>
+
+		<p>Создадим сценарий инициализации /etc/init.d/liteserv со следующим содержимым:</p>
+
+		<pre class="code"># Required-Stop:     $all
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: starts TileLite server
+# Description:       starts TileLite server using start-stop-daemon
+### END INIT INFO
+
+PATH=/sbin:/bin:/usr/sbin:/usr/bin
+NAME=liteserv
+PID=/var/run/liteserv.pid
+DAEMON=/usr/bin/liteserv
+DAEMON_OPTS="/etc/mapnik-osm-data/osm.xml --config /etc/liteserv.cfg"
+
+test -x $DAEMON || exit 0
+
+set -e
+
+case "$1" in
+  start)
+        echo "Starting $NAME: "
+        start-stop-daemon --start --make-pidfile --background --pidfile $PID --exec $DAEMON -- $DAEMON_OPTS
+        echo "done."
+        ;;
+  stop)
+        echo "Stopping $NAME: "
+        start-stop-daemon --stop --pidfile $PID --retry 5
+        rm -f $PID
+        echo "done."
+        ;;
+  restart)
+        echo "Stopping $NAME: "
+        start-stop-daemon --stop --pidfile $PID --retry 5
+        rm -f $PID
+        echo "done..."
+        sleep 1
+        echo "Starting $NAME: "
+        start-stop-daemon --start --make-pidfile --background --pidfile $PID --exec $DAEMON -- $DAEMON_OPTS
+        echo "done."
+        ;;
+  *)
+        echo "Usage: /etc/init.d/$NAME {start|stop|restart}" &gt;&amp;2
+        exit 1
+        ;;
+esac
+
+exit 0</pre>
+
+		<p>И добавим скрипт в автозапуск:</p>
+
+		<pre class="console"># update-rc.d liteserv defaults</pre>
+
+		<p>Теперь скопируем пример файла конфигурации в каталог /etc:</p>
+
+		<pre class="console"># cp cp /usr/share/doc/tilelite/examples/tilelite.cfg /etc/liteserv.cfg</pre>
+
+		<p>И поправим его до следующего состояния:</p>
+
+		<pre class="code">[tiles]
+size = 256
+buffer_size = 128
+format = png
+paletted = no
+max_zoom = 22
+debug = off
+watch_mapfile = off
+watch_interval = 2
+max_failures = 6
+
+[cache]
+caching = on
+cache_path = /var/lib/liteserv
+cache_force = off</pre>
+
+		<p>Создадим каталог для хранения кэша (почему-то он работает, только если указать соответствующую опцию командной строки):</p>
+
+		<pre class="console"># mkdir /var/lib/liteserv</pre>
+
+		<p>И запустим его:</p>
+
+		<pre class="console"># /etc/init.d/liteserv start</pre>
+
+		<p>Сервер будет ожидать подключений на локальном адресе 127.0.0.1, на TCP-порту 8000. Для изменения настроек можно указать соответствующие опции в сценарии init.d.</p>
+
+		<h2>2. Настройка Lighttpd для проксирования запросов к TileLite</h2>
+
+		<p>Можно настроить веб-сервер Lighttpd для проксирования запросов к TileLite:</p>
+
+		<pre class="code">server.modules   += ( "mod_proxy" )
+proxy.server = (
+  "/osm/" =&gt;
+  (
+    (
+      "host" =&gt; "127.0.0.1",
+      "port" =&gt; 8000
+    )
+  )
+)</pre>
+
+		<p>Этот фрагмент можно вписать прямо в файл /etc/lighttpd/lighttpd.conf, но в Debian правильнее будет включить модуль proxy и вписать настройки в его файл конфигурации /etc/lighttpd/conf-enabled/10-proxy.conf. Для включения модуля используется следующая команда:</p>
+
+		<pre class="console"># lighty-enable-mod proxy</pre>
+
+		<p>Можно поставить ещё пакет python-werkzeug и настроить количество одновременно работающих процессов TileLite в сценарии init.d. Хотя с такой настройкой TileLite у меня работал быстро, но работал он не долго - всего через несколько секунд он переставал отвечать на запросы.</p>
+
+		<h2>3. Настройка в режиме FastCGI для работы с Lighttpd</h2>
+
+		<p>Вместо этого я попробовал ещё один подход - запускать TileLite как сервер FastCGI. Для этого нужно поставить пакет python-flup:</p>
+
+		<pre class="console"># apt-get install python-flup</pre>
+
+		<p>Теперь создадим скрипт для запуска TileLite как FastCGI-процесса и настроим Lighttpd. Перед созданием скрипта запуска я создал каталог /etc/liteserv, в который перенёс настроенный ранее конфиг liteserv.cfg из каталога /etc. Воспользовавшись примером WSGI-скрипта из каталога /usr/share/doc/tilelite/examples/tiles_app.py и примерами настройки FastCGI на сайте сервера Lighttpd, я наваял следующий FastCGI-скрипт для TileLite, который разместил в файле /etc/liteserv/liteserv.py:</p>
+
+		<pre class="code">#!/usr/bin/python
+
+from tilelite import Server
+from flup.server.fcgi_fork import WSGIServer
+
+mapfile = '/etc/mapnik-osm-data/osm.xml'
+config = '/etc/liteserv/liteserv.cfg'
+
+application = Server(mapfile,config)
+WSGIServer(application, maxChildren=3).run()</pre>
+
+		<p>Две особенности этого скрипта - это использование flup.server.fcgi_fork вместо более обычного flup.server.fcgi и указание опции maxChildren=3. Они заставляют FastCGI-сервер работать в многопроцессном, а не в многопоточном режиме, при чём число одновременно работающих процессов не должно превышать 3. Эти настройки позволили мне достичь наибольшей стабильности в работе тайлового сервера на своём старом компьютере. Похоже, что моему компьютеру не хватает оперативной памяти, чтобы обрабатывать много запросов к базе данных сразу, а сам TileLite плохо работает в многопоточном режиме.</p>
+
+		<p>Теперь настроим Lighttpd. Для этого нужно включить модуль fastcgi:</p>
+
+		<pre class="console"># lighty-enable-mod fastcgi</pre>
+
+		<p>И прописать в файл /etc/lighttpd/conf-enabled/10-fastcgi.conf следующие настройки:</p>
+
+		<pre class="code">fastcgi.server = (
+  "/osm" =&gt;
+  (
+    (
+      "bin-path" =&gt; "/etc/liteserv/liteserv.py",
+      "socket" =&gt; "/tmp/liteserv.socket",
+      "max-procs" =&gt; 1,
+      "check-local" =&gt; "disable"
+    )
+  )
+)</pre>
+
+		<p>Очень важно не дописывать к строчке /osm символа косой черты в конце - от этого TileLite сходит с ума и не обрабатывает запросы должным образом.</p>
+
+		<p>Наконец, поскольку теперь TileLite будет запускаться Lighttpd, настроим права на доступ к каталогу /var/lib/liteserv:</p>
+
+		<pre class="console"># chmod www-data:www-data /var/lib/liteserv</pre>
+
+		<p>И перезапустим сервер, не забыв отключить настроенный до этого liteserv и настройку модуля proxy Lighttpd:</p>
+
+		<pre class="console"># /etc/init.d/liteserv stop
+# update-rd.d liteserv disable
+# lighty-disable-mod proxy
+# /etc/init.d/lighttpd restart</pre>
+
+		<p>В таком виде тайловый сервер в режиме FastCGI заработал более-менее стабильно.</p>
+
+		<p>Однако, поскольку этот тайловый сервер закидывает запросами PostgreSQL и не делает запросы повторно в случае ошибки, на моём компьютере TileLite работает довольно нестабильно. Поэтому я всё-же предпочёл продолжить использование renderd, apache и mod_tile.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка тайлового сервера TileLite">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

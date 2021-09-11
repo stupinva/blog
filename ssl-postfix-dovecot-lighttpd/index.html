@@ -1,0 +1,347 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="lighttpd,Linux,debian,dovecot,wheezy,postfix" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2014-02-09 -->
+		<title>Настройка SSL/TLS в Postfix, Dovecot, Lighttpd</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка SSL/TLS в Postfix, Dovecot, Lighttpd</h1>
+
+		<p>Настройка SSL и TLS уже была вскользь упомянута в предыдущих заметках <a href="../postfixadmin-2/">Установка и настройка Postfixadmin</a>, <a href="../dovecot/">Установка и настройка Dovecot</a> и <a href="../postfix/">Установка и настройка Postfix, OpenDKIM, ClamAV-Milter, Milter-Greylist</a>. В этой заметке я собираюсь раскрыть тему поподробнее. Учтите, что некоторые из описанных настроек я не тестировал, они приведены лишь для того, чтобы обозначить направление, в котором следует двигаться, если такие настройки понадобятся.</p>
+
+		<h1>1. Подготовка сертификатов SSL/TLS</h1>
+
+		<p>Сертификаты могут быть самоподписанными или подписанными удостоверяющим центром. Самоподписанные сертификаты обычно используются лишь для тестирования поддержки SSL/TLS в различных серверах и отладки настроек. На публичных серверах стоит использовать сертификаты, подписанные удостоверяющими центрами.</p>
+
+		<p>Услуги удостоверяющих центров, по моим меркам, обходятся довольно дорого, но некоторые удостоверяющие центры предоставляют и бесплатные ограниченные услуги для частных лиц. Мне известен только один такой удостоверяющий центр - StartSSL. Подробнее процедура получения такого сертификата описана, например, в статье <a href="http://habrahabr.ru/post/127643/">Получаем бесплатный SSL сертификат</a> или в заметке <a href="http://valera.ws/2012.03.11~free-valid-signed-ssl-certificate-with-sratssl/">Бесплатный валидный (подписанный) SSL-сертификат через StartSSL</a>. Перед получением сертификата нужно иметь настроенный почтовый сервер, чтобы иметь возможность подтвердить владение доменом.</p>
+
+		<h2>2. Создание CA-сертификата (для самоподписания)</h2>
+
+		<p>CA-сертификат - это сертификат центра сертификации (как бы тавтологично это ни звучало). Этим сертификатом подписываются все остальные сертификаты, используемые различными сервисами.</p>
+
+		<p>Воспользуемся скриптом, идущим в комплекте с пакетом openssl:</p>
+
+		<pre class="console"># /usr/lib/ssl/misc/CA.pl -newca</pre>
+
+		<p>Перед созданием сертификата удостоверяющего центра скрипт задаст вам несколько вопросов. Нужно приготовиться предоставить следующую информацию:</p>
+
+		<ul>
+			<li>Страна (Country)</li>
+
+			<li>Область (State or province)</li>
+
+			<li>Город (City or other municipal area)</li>
+
+			<li>Организация (Organization)</li>
+
+			<li>Подразделение (Organization unit)</li>
+
+			<li>Общепринятое имя (Common name)</li>
+
+			<li>Электронный адрес (Email address)</li>
+		</ul>
+
+		<p>В процессе создания сертификата также нужно будет указать секретную фразу, которая будет использоваться каждый раз при подписании или отзыве удостоверенных сертификатов.</p>
+
+		<p>В поле «общепринятое имя» в данном случае нужно вписать название организации (или торговую марку, под которой она работает) или имя владельца. В случае создания сертификата сервера нужно указать его DNS-имя.</p>
+
+		<p>В текущем каталоге будет создан подкаталог demoCA, в котором будут созданы необходимые файлы.</p>
+
+		<p>После этого я дополнительно отредактировал файл конфигурации OpenSSL /etc/ssl/openssl.conf, указав в нём полный путь к каталогу с сертификатами удостоверяющего центра (в двух местах) и настройки срока годности вновь создаваемых сертификатов:</p>
+
+		<pre class="code">dir = /etc/ssl/demoCA</pre>
+
+		<p>и</p>
+
+		<pre class="code">default_days = 3650</pre>
+
+		<h2>3. Создание сертификата сервера</h2>
+
+		<p>Хотя удостоверяющий центр может сгенерировать и сертификат сервера, его можно сгенерировать самостоятельно:</p>
+
+		<pre class="console"># openssl req -new -nodes -keyout domain1.net.pem -out domain1.net.pem -days 3650
+Generating a 2048 bit RSA private key
+...........................................................................................+++
+...........................................................................................................................................  ....................+++
+writing new private key to 'domain1.net.pem'
+-----
+You are about to be asked to enter information that will be incorporated
+into your certificate request.
+What you are about to enter is what is called a Distinguished Name or a DN.
+There are quite a few fields but you can leave some blank
+For some fields there will be a default value,
+If you enter '.', the field will be left blank.
+-----
+Country Name (2 letter code) [AU]:RU
+State or Province Name (full name) [Some-State]:Bashkortostan Republic
+Locality Name (eg, city) []:Ufa
+Organization Name (eg, company) [Internet Widgits Pty Ltd]:Vladimir Stupin
+Organizational Unit Name (eg, section) []:
+Common Name (e.g. server FQDN or YOUR name) []:domain1.net
+Email Address []:vladimir@stupin.su
+
+Please enter the following 'extra' attributes
+to be sent with your certificate request
+A challenge password []:
+An optional company name []:</pre>
+
+		<p>В этом случае при создании сертификата секретную фразу указывать не нужно, а в поле «Общеизвестное имя» нужно указать DNS-имя сервера.</p>
+
+		<p>В текущем каталоге будет создан файл domain1.net.pem с секретной частью сертификата.</p>
+
+		<h2>4. Подписание сертификата сервера</h2>
+
+		<h3>4.1. Подписание сертификата сервера (самоподписание)</h3>
+
+		<p>Для создания самоподписанного сертификата можно воспользоваться следующей командой:</p>
+
+		<pre class="console"># openssl ca -policy policy_anything -out domain1.net.pubilc.pem -infiles domain1.net.pem
+Using configuration from /usr/lib/ssl/openssl.cnf
+Enter pass phrase for /etc/ssl/ca/private/cakey.pem:
+Check that the request matches the signature
+Signature ok
+Certificate Details:
+        Serial Number: 14036232404122642274 (0xc2cab701208ea762)
+        Validity
+            Not Before: Feb  5 15:31:10 2014 GMT
+            Not After : Feb  3 15:31:10 2024 GMT
+        Subject:
+            countryName               = RU
+            stateOrProvinceName       = Bashkortostan Republic
+            localityName              = Ufa
+            organizationName          = Vladimir Stupin
+            commonName                = domain1.net
+            emailAddress              = vladimir@stupin.su
+        X509v3 extensions:
+            X509v3 Basic Constraints: 
+                CA:FALSE
+            Netscape Comment: 
+                OpenSSL Generated Certificate
+            X509v3 Subject Key Identifier: 
+                0B:DB:32:31:76:C8:F1:80:8E:2F:2E:70:8B:05:91:2A:91:69:AF:31
+            X509v3 Authority Key Identifier: 
+                keyid:B5:CB:D1:89:6A:E8:82:D2:D6:7C:A5:6C:13:88:EA:EE:D9:5F:8F:6E
+
+Certificate is to be certified until Feb  3 15:31:10 2024 GMT (3650 days)
+Sign the certificate? [y/n]:y
+
+
+1 out of 1 certificate requests certified, commit? [y/n]y
+Write out database with 1 new entries
+Data Base Updated
+
+# mv domain1.net.pem domain1.net.private.pem</pre>
+
+		<p>При подписании сертификата нужно будет указать секретную фразу из сертификата удостоверяющего центра (см. выше).</p>
+
+		<h3>4.2. Подписание сертификата сервера (внешнее подписание)</h3>
+
+		<p>В случае использования официального центра сертификации для подписания сертификата нужно следовать его инструкциям. Обычно для этого нужно скопировать из файла сертификата секцию CERTIFICATE REQUEST вместе с начальной и конечной строчками. Центр сертификации в ответ на запрос сгенерирует секцию CERTIFICATE, которую нужно вставить в private-файл после секции CERTIFICATE REQUEST.</p>
+
+		<p>После этого можно сгенерировать публичную часть сертификата:</p>
+
+		<pre class="console"># openssl x509 -in mail.stupin.su.pem -text &gt; mail.stupin.su.public.pem
+# mv domain1.net.pem domain1.net.private.pem</pre>
+
+		<h2>5. Подготовка сертификатов сервера к использованию</h2>
+
+		<p>Расположим сертификаты так, чтобы они автоматически подхватились Dovecot'ом и настроим права доступа.</p>
+
+		<p>Чтобы локальные пользователи системы не получили доступ на чтение к приватной части сертификата и не смогли подменить публичную часть сертификата, нужно соответствующим образом выставить права доступа к файлам:</p>
+
+		<pre class="console"># chown root:root /etc/ssl/domain1.net.public.pem
+# chmod u=rw,go=r /etc/ssl/domain1.net.public.pem
+
+# chown root:root /etc/ssl/domain1.net.private.pem
+# chmod u=rw,go= /etc/ssl/domain1.net.private.pem</pre>
+
+		<h2>6. Postfix</h2>
+
+		<p>Postfix может выступать в роли SMTP-клиента, когда доставляет почту на другой почтовый сервер, и может выступать в роли SMTP-сервера, когда получает почту от другого сервера.</p>
+
+		<h3>6.1. Настройка TLS в клиенте</h3>
+
+		<p>Настроим шифрование и аутентификацию почтового сервера получателя, когда наш сервер будет пытаться отправить письмо по защищённому протоколу SMTP.</p>
+
+		<p>Сконвертируем pem-сертификат нашего удостоверяющего центра в формат crt и поместим в каталог для сертификатов доверенных центров авторизации:</p>
+
+		<pre class="console"># apt-get install ca-certificates
+# mkdir /usr/share/ca-certificates/stupin.su
+# openssl x509 -in /etc/ssl/demoCA/cacert.pem -out /usr/share/ca-certificates/stupin.su/cacert.crt</pre>
+
+		<p>Теперь сгенерируем новый список сертификатов, которым будет доверять наша система:</p>
+
+		<pre class="console"># dpkg-reconfigure ca-certificates</pre>
+
+		<p>В открывшемся окне нужно ответить «спрашивать» и отметить в списке наш сертификат. После этого будет сформирован новый файл /etc/ca-certificates.conf (нужно проверить, что в списке есть наш сертификат и в начале строчки нет восклицательного знака). pem-сертификаты будут помещены в каталог /etc/ssl/certs.</p>
+
+		<p>Добавим в файл /etc/postfix/main.cf следующие настройки:</p>
+
+		<pre class="code"># Настройка SMTP-клиента, отправляющего почту
+smtp_tls_loglevel = 2
+smtp_tls_CApath = /etc/ssl/certs</pre>
+
+		<p>Осталось перезапустить сервер, чтобы настройки вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/postfix restart</pre>
+
+		<h3>6.2. Настройка TLS в сервере</h3>
+
+		<p>Настраиваем шифрование с использованием ранее подготовленных SSL-сертификатов. Для этого добавим в файл /etc/postfix/main.cf следующие настройки:</p>
+
+		<pre class="code"># Настройка SMTP-сервера, принимающего почту
+smtpd_use_tls = yes
+smtpd_tls_key_file = /etc/ssl/domain1.net.private.pem
+smtpd_tls_cert_file = /etc/ssl/domain1.net.public.pem
+smtpd_tls_CApath = /etc/ssl/certs
+smtpd_tls_loglevel = 2
+smtpd_tls_received_header = yes</pre>
+
+		<p>Осталось перезапустить сервер, чтобы настройки вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/postfix restart</pre>
+
+		<h3>6.3. Несколько сертификатов TLS на сервере</h3>
+
+		<p>Postfix не имеет поддержки расширения SNI, потому что в SMTP клиент не может указать, к серверу с каким доменным именем он подключался. Соответственно, пока клиент не может этого сообщить, SMTP-сервер не может выбрать правильный сертификат. Для обслуживания почты из других доменов придётся обойтись настройкой MX-записи, указывающей на доменное имя сервера, которое он сообщает в команде HELO/EHLO.</p>
+
+		<p>Postfix также не имеет явных настроек для работы с разными сертификатами на разных IP-адресах. Однако, можно запустить несколько экземпляров сервера smtpd с разными настройками прослушиваемого IP-адреса, имени сервера и используемых сертификатов. Для этого можно попытаться задать в файле /etc/postfix/master.cf следующие настройки:</p>
+
+		<pre class="code">192.168.0.1:smtp inet  n  -        n        -        -        smtpd
+  -o smtpd_tls_key_file=/etc/ssl/domain1.net.private.pem
+  -o smtpd_tls_cert_file=/etc/ssl/domain1.net.public.pem
+  -o myhostname=domain1.net
+  -o mydomain=domain1.net
+  -o myorigin=domain1.net
+
+172.16.0.1:smtp inet  n  -        n        -        -        smtpd
+  -o smtpd_tls_key_file=/etc/ssl/domain2.ru.private.pem
+  -o smtpd_tls_cert_file=/etc/ssl/domain2.ru.public.pem
+  -o myhostname=domain2.ru
+  -o mydomain=domain2.ru
+  -o myorigin=domain2.ru</pre>
+
+		<p>Или можно воспользоваться новой возможностью Postfix - создать несколько экземпляров сервера. Подробнее об этом можно почитать на странице http://www.postfix.org/MULTI_INSTANCE_README.html</p>
+
+		<h3>6.4. Оптимизация производительности</h3>
+
+		<p>Настройка менеджера TLS-сессий описана в заметке <a href="../postfix/">Установка и настройка Postfix, OpenDKIM, ClamAV-Milter, Milter-Greylist</a> в разделе «6. Оптимизация скорости работы Postfix».</p>
+
+		<h2>7. Dovecot</h2>
+
+		<p>При включении поддержки SSL нужно задать сертификат для использования по умолчанию. Включим поддержку SSL в файле /etc/dovecot/conf.d/10-ssl.conf:</p>
+
+		<pre class="code">ssl = yes
+ssl_cert = &lt;/etc/ssl/domain1.net.public.pem
+ssl_key = &lt;/etc/ssl/domain1.net.private.pem</pre>
+
+		<p>И перезапустить Dovecot, чтобы новые настройки вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/dovecot restart</pre>
+
+		<p>Dovecot может использовать как один сертификат, так и несколько. В случае использования нескольких сертификатов можно назначать отдельные сертификаты как на отдельные IP-адреса, на которых Dovecot будет ожидать подключения, так и на отдельные сервисы. Например, можно задать отдельные сертификаты для POP3 и для IMAP (хотя не ясно, какой в этом может быть смысл). Например, вот так:</p>
+
+		<pre class="code">local 192.168.0.1 {
+  protocol imap {
+    ssl_cert = &lt;/etc/ssl/dovecot/imap.domain1.net.public.pem
+    ssl_key  = &lt;/etc/ssl/dovecot/imap.domain1.net.private.pem
+  }
+
+  protocol pop3 {
+    ssl_cert = &lt;/etc/ssl/dovecot/pop.domain1.net.pubilc.pem
+    ssl_key  = &lt;/etc/ssl/dovecot/pop.domain1.net.private.pem
+  }
+}
+
+local 172.16.0.1 {
+    ssl_cert = &lt;/etc/ssl/dovecot/domain2.ru.public.pem
+    ssl_key  = &lt;/etc/ssl/dovecot/domain2.ru.private.pem
+}</pre>
+
+		<p>В примере выше указаны раздельные сертификаты для сервисов на первом IP-адресе и общий сертификат для сервисов на втором IP-адресе. Вместо IP-адресов можно указывать доменные имена, однако не впадайте в заблуждение - эти доменные имена не могут указывать на один и тот же IP-адрес. Перед использованием доменные имена решаются в IP-адреса, так что два домена, указывающих на один и тот же IP-адрес, породят две секции с одинаковым IP-адресом.</p>
+
+		<p>Использование раздельных сертификатов для отдельных IP-адресов и сервисов не избавляет от необходимости указывать сертификаты по умолчанию. Будьте внимательны!</p>
+
+		<p>Также Dovecot поддерживает расширение протокола SSL, которое называется Server Name Indication или, сокращённо, SNI. Если клиент поддерживает это расширение, то можно использовать разные сертификаты для разных доменных имён. Настройки, которые можно прописать при использовании SNI:</p>
+
+		<pre class="code">local_name domain1.net {
+  ssl_cert = &lt;/etc/ssl/domain1.net.pubilc.pem
+  ssl_key = &lt;/etc/ssl/domain1.net.private.pem
+}
+
+local_name domain2.ru {
+  ssl_cert = &lt;/etc/ssl/domain2.ru.public.pem
+  ssl_key = &lt;/etc/ssl/domain2.ru.private.pem
+}</pre>
+
+		<p>Более подробную информацию о настройке SSL в Dovecot можно найти на официальной wiki-странице: <a href="http://wiki2.dovecot.org/SSL/DovecotConfiguration">Dovecot SSL configuration</a>. SNI поддерживается не всеми клиентами. Одним из клиентов с подтверждённой поддержкой SNI является Thunderbird в Linux.</p>
+
+		<h2>8. Lighttpd</h2>
+
+		<p>Для настройки SSL в веб-сервере Lighttpd достаточно включить модуль ssl:</p>
+
+		<pre class="console"># lighty-enable-mod ssl</pre>
+
+		<p>B прописать используемый сертификат в файл /etc/lighttpd/conf-enabled/05-ssl.conf:</p>
+
+		<pre class="code">$SERVER["socket"] == "0.0.0.0:443" {
+  ssl.engine  = "enable"
+  ssl.pemfile = "/etc/ssl/vladimir.stupin.su.pem"
+
+  ssl.cipher-list = "ECDHE-RSA-AES256-SHA384:AES256-SHA256:RC4:HIGH:!MD5:!aNULL:!EDH:!AESGCM"
+  ssl.honor-cipher-order = "enable"
+}</pre>
+
+		<p>И перезапустить веб-сервер, чтобы его новые настройки вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/lighttpd restart</pre>
+
+		<p>Как видно, в настройках проверяется совпадение с прослушиваемым IP-адресом и TCP-портом 443. Очевидно, что таким образом можно задать несколько SSL-сертификатов, каждый из которых будет использоваться при обращении клиента к определённому IP-адресу веб-сервера. Например, вот так:</p>
+
+		<pre class="code">$SERVER["socket"] == "192.168.0.1:443" {
+  ssl.engine  = "enable"
+  ssl.pemfile = "/etc/ssl/domain1.net.pem"
+
+  ssl.cipher-list = "ECDHE-RSA-AES256-SHA384:AES256-SHA256:RC4:HIGH:!MD5:!aNULL:!EDH:!AESGCM"
+  ssl.honor-cipher-order = "enable"
+}
+
+$SERVER["socket"] == "172.16.0.1:443" {
+  ssl.engine  = "enable"
+  ssl.pemfile = "/etc/ssl/domain2.ru.pem"
+
+  ssl.cipher-list = "ECDHE-RSA-AES256-SHA384:AES256-SHA256:RC4:HIGH:!MD5:!aNULL:!EDH:!AESGCM"
+  ssl.honor-cipher-order = "enable"
+}</pre>
+
+		<p>Однако, таким образом можно задать только один сертификат для одного IP-адреса. Если же на одном IP-адресе обслуживается несколько доменов, то можно либо прописать в этот сертификат доменные имена всех необходимых сайтов, либо воспользоваться поддержкой SNI.</p>
+
+		<p>Веб-сервер Lighttpd поддерживает SNI начиная с версии 1.4.24, в случае если установлен OpenSSL версии 0.9.8f или выше. Для задания отдельных сертификатов для отдельных доменов можно воспользоваться условными секциями, меняя внутри них используемый сертификат:</p>
+
+		<pre class="code">$HTTP["host"] == "domain1.net" {
+  ssl.pemfile = "/etc/ssl/domain1.net.pem"
+}
+
+$HTTP["host"] == "domain2.ru" {
+  ssl.pemfile = "/etc/ssl/domain2.ru.pem"
+}</pre>
+		<p>Для того, чтобы принудительно использовать SSL на определённых сайтах, можно вписать в файл /etc/lighttpd/conf-enabled/05-ssl.conf следующую условную секцию:</p>
+
+		<pre class="code">$HTTP["host"] =~ "^domain(1\.net|2\.ru)$" {
+  url.redirect = (".*" =&gt; "https://%0$0")
+}</pre>
+
+		<p>Стоит отметить, что сайты должны быть готовы к подобной переадресации. Например, во всех внутренних ссылках на сайте стоит убрать спецификацию протокола http. Все внутренние ссылки сайта должны быть либо относительными, либо начинаться с двух косых черт.</p>
+
+		<p>Продолжение следует...</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка SSL/TLS в Postfix, Dovecot, Lighttpd">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

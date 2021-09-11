@@ -1,0 +1,155 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="pppd,gprs,debian,linux" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2009-04-27 -->
+		<title>Настройка GPRS (Sony Ericsson K530i) в Linux (Debian)</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка GPRS (Sony Ericsson K530i) в Linux (Debian)</h1>
+
+		<p>Собственно, писать тут особо нечего. Есть описания вариантов настройки различных телефонов. Есть и превосходная статья, которая описывает полностью все аспекты настройки GPRS-подключения в Linux.</p>
+
+		<p>Вот эти источники, которыми воспользовался я:</p>
+
+		<ol>
+			<li><a href="http://maldiva.ru/?p=86">Настройка GPRS-internet для Sony Ericsson. FAQ</a></li>
+
+			<li><a href="http://maldiva.ru/?p=147">Настройка GPRS-internet для новых телефонов Sony Ericsson, платформа А200. FAQ</a></li>
+
+			<li><a href="http://ru.wikibooks.org/wiki/Подключение_GPRS/EDGE_в_GNU/Linux">Подключение GPRS/EDGE в GNU/Linux</a></li>
+		</ol>
+
+		<p>Теперь я кратко пробегусь по процессу настройки, чтобы его не забыть. Я не собираюсь использовать его в качестве основного подключения, только в качестве аварийного (надеюсь, что воспользоваться не придётся).</p>
+
+		<ol>
+			<li>
+				<p>Во-первых, настроим сам телефон.</p>
+
+				<ol>
+					<li>Заходим в меню: Параметры &rarr; Связь &rarr; USB Интернет &rarr; Уч. зап. данн. USB &rarr; Новая уч. запись &rarr; Данные PS</li>
+
+					<li>В ответ на запрос "Имя:" вводим имя подключения: "Мегафон".</li>
+
+					<li>
+						<p>Далее в трёх текстовых полях экрана "Нов. уч. запись PS" вводим:</p>
+
+						<ol>
+							<li>"Точка доступа" - вводим "internet",</li>
+
+							<li>"Имя пользоват." - вводим "gdata",</li>
+
+							<li>"Пароль" - вводим "gdata".</li>
+						</ol>
+					</li>
+
+					<li>После создания записи выделим её и нажмём кнопку "Выбрать".</li>
+
+					<li>
+						<p>Заходим в меню: Параметры &rarr; Связь &rarr; Передача данных &rarr; Уч.записи данных &rarr; выбираем "Мегафон" и жмём кнопку "Измен." Проверим параметры:</p>
+
+						<ol>
+							<li>"Точка доступа" - должно быть "internet",</li>
+
+							<li>"Имя пользоват." - должно быть "gdata",</li>
+
+							<li>"Пароль" - должно быть "gdata",</li>
+
+							<li>"Запрос пароля" - должно быть "Отключено",</li>
+
+							<li>"Разреш. вызовы" - должно быть "Автоматически",</li>
+
+							<li>"Адрес IP" - должно быть "...",</li>
+
+							<li>"Адрес DNS" - должно быть "...",</li>
+
+							<li>"Аутентификация" - отмечаем галочкой только вариант "Нет",</li>
+
+							<li>"Сжатие данных" - должно быть "Отключено",</li>
+
+							<li>"Сжатие заголов." - должно быть "Отключено".</li>
+						</ol>
+					</li>
+
+					<li>Заходим в меню: Параметры &rarr; Связь &rarr; Передача данных &rarr; Парам. Интернет &rarr; выбираем "Мегафон".</li>
+
+					<li>Заходим в меню: Параметры &rarr; Связь &rarr; Передача данных &rarr; Параметры Java &rarr; выбираем "Мегафон".</li>
+
+					<li>Заходим в меню: Параметры &rarr; Связь &rarr; Передача данных &rarr; Пар.поток.воспр. &rarr; выбираем "Мегафон".</li>
+				</ol>
+			</li>
+
+			<li>
+				<p>Во-вторых настроим компьютер.</p>
+
+				<ol>
+					<li>
+						<p>Установим пакет resolvconf:</p>
+
+						<pre class="console"># aptitude install resolvconf</pre>
+					</li>
+
+					<li>
+						<p>Настроим опции демона pppd для подключения точка-точка через модем /etc/ppp/peers/megafon:</p>
+
+						<pre class="code">/dev/ttyACM0 115200
+# отключаем сжатие данных
+nobsdcomp
+nodeflate
+novj
+novjccomp
+nopcomp
+noaccomp
+nodeflate
+# команда для установки соединения
+connect '/usr/sbin/chat -v -f /etc/chatscripts/megafon'
+noauth
+# автоматическое получение сетевых настроек
+noipdefault
+usepeerdns
+defaultroute</pre>
+
+						<p>ttyACM0 соответствует имени файла устройства - телефона.</p>
+					</li>
+
+					<li>
+						<p>Настроим chat-сценарий /etc/chatscripts/megafon:</p>
+
+						<pre class="code">TIMEOUT         5
+ECHO            ON
+ABORT           '\nBUSY\r'
+ABORT           '\nERROR\r'
+ABORT           '\nNO ANSWER\r'
+ABORT           '\nNO CARRIER\r'
+ABORT           '\nNO DIALTONE\r'
+ABORT           '\nRINGING\r\n\r\nRINGING\r'
+''              \rAT
+TIMEOUT         12
+OK              ATE1
+OK              'AT+cgdcont=1,"IP","internet"'
+OK              ATD*99#
+CONNECT         ''</pre>
+					</li>
+
+					<li>
+						<p>Теперь, по желанию, можно прописать автоматическое подключение при загрузке системы в файле /etc/network/interfaces:</p>
+
+						<pre class="code">auto megafon
+iface megafon inet ppp
+  provider megafon</pre>
+
+						<p>Для подключения соединения можно ввести команду pon megafon от пользователя root, для отключения - poff megafon.</p>
+					</li>
+				</ol>
+			</li>
+		</ol>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка GPRS (Sony Ericsson K530i) в Linux (Debian)">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

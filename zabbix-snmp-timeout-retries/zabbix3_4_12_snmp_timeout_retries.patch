@@ -1,0 +1,149 @@
+Index: zabbix-3.4.12-1+buster/include/cfg.h
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/include/cfg.h
++++ zabbix-3.4.12-1+buster/include/cfg.h
+@@ -46,6 +46,8 @@ extern char	*CONFIG_LOG_FILE;
+ extern int	CONFIG_LOG_FILE_SIZE;
+ extern int	CONFIG_ALLOW_ROOT;
+ extern int	CONFIG_TIMEOUT;
++extern int	CONFIG_SNMP_TIMEOUT;
++extern int	CONFIG_SNMP_RETRIES;
+ 
+ struct cfg_line
+ {
+Index: zabbix-3.4.12-1+buster/src/libs/zbxconf/cfg.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxconf/cfg.c
++++ zabbix-3.4.12-1+buster/src/libs/zbxconf/cfg.c
+@@ -31,6 +31,8 @@ char	*CONFIG_LOG_FILE	= NULL;
+ int	CONFIG_LOG_FILE_SIZE	= 1;
+ int	CONFIG_ALLOW_ROOT	= 0;
+ int	CONFIG_TIMEOUT		= 3;
++int	CONFIG_SNMP_TIMEOUT	= 1;
++int	CONFIG_SNMP_RETRIES	= 3;
+ 
+ static int	__parse_cfg_file(const char *cfg_file, struct cfg_line *cfg, int level, int optional, int strict);
+ 
+Index: zabbix-3.4.12-1+buster/src/libs/zbxdbcache/dbconfig.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/libs/zbxdbcache/dbconfig.c
++++ zabbix-3.4.12-1+buster/src/libs/zbxdbcache/dbconfig.c
+@@ -448,7 +448,7 @@ static void	DCincrease_disable_until(con
+ 		case ITEM_TYPE_SNMPv2c:
+ 		case ITEM_TYPE_SNMPv3:
+ 			if (0 != host->snmp_errors_from)
+-				host->snmp_disable_until = now + CONFIG_TIMEOUT;
++				host->snmp_disable_until = now + CONFIG_SNMP_TIMEOUT;
+ 			break;
+ 		case ITEM_TYPE_IPMI:
+ 			if (0 != host->ipmi_errors_from)
+Index: zabbix-3.4.12-1+buster/src/zabbix_server/server.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/zabbix_server/server.c
++++ zabbix-3.4.12-1+buster/src/zabbix_server/server.c
+@@ -602,6 +602,10 @@ static void	zbx_load_config(ZBX_TASK_EX
+ 			PARM_OPT,	0,			0},
+ 		{"Timeout",			&CONFIG_TIMEOUT,			TYPE_INT,
+ 			PARM_OPT,	1,			30},
++		{"SNMPTimeout",			&CONFIG_SNMP_TIMEOUT,			TYPE_INT,
++			PARM_OPT,	1,			30},
++		{"SNMPRetries",			&CONFIG_SNMP_RETRIES,			TYPE_INT,
++			PARM_OPT,	1,			10},
+ 		{"TrapperTimeout",		&CONFIG_TRAPPER_TIMEOUT,		TYPE_INT,
+ 			PARM_OPT,	1,			300},
+ 		{"UnreachablePeriod",		&CONFIG_UNREACHABLE_PERIOD,		TYPE_INT,
+Index: zabbix-3.4.12-1+buster/src/zabbix_proxy/proxy.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/zabbix_proxy/proxy.c
++++ zabbix-3.4.12-1+buster/src/zabbix_proxy/proxy.c
+@@ -623,6 +623,10 @@ static void	zbx_load_config(ZBX_TASK_EX
+ 			PARM_OPT,	0,			0},
+ 		{"Timeout",			&CONFIG_TIMEOUT,			TYPE_INT,
+ 			PARM_OPT,	1,			30},
++		{"SNMPTimeout",			&CONFIG_SNMP_TIMEOUT,			TYPE_INT,
++			PARM_OPT,	1,			30},
++		{"SNMPRetries",			&CONFIG_SNMP_RETRIES,			TYPE_INT,
++			PARM_OPT,	1,			10},
+ 		{"TrapperTimeout",		&CONFIG_TRAPPER_TIMEOUT,		TYPE_INT,
+ 			PARM_OPT,	1,			300},
+ 		{"UnreachablePeriod",		&CONFIG_UNREACHABLE_PERIOD,		TYPE_INT,
+Index: zabbix-3.4.12-1+buster/src/zabbix_server/poller/checks_snmp.h
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/zabbix_server/poller/checks_snmp.h
++++ zabbix-3.4.12-1+buster/src/zabbix_server/poller/checks_snmp.h
+@@ -26,7 +26,8 @@
+ #include "sysinfo.h"
+ 
+ extern char	*CONFIG_SOURCE_IP;
+-extern int	CONFIG_TIMEOUT;
++extern int	CONFIG_SNMP_TIMEOUT;
++extern int	CONFIG_SNMP_RETRIES;
+ 
+ #ifdef HAVE_NETSNMP
+ void	zbx_init_snmp(void);
+Index: zabbix-3.4.12-1+buster/src/zabbix_server/poller/checks_snmp.c
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/src/zabbix_server/poller/checks_snmp.c
++++ zabbix-3.4.12-1+buster/src/zabbix_server/poller/checks_snmp.c
+@@ -456,8 +456,10 @@ static struct snmp_session	*zbx_snmp_ope
+ 			break;
+ 	}
+ 
+-	session.timeout = CONFIG_TIMEOUT * 1000 * 1000;	/* timeout of one attempt in microseconds */
+-							/* (net-snmp default = 1 second) */
++	session.timeout = CONFIG_SNMP_TIMEOUT * 1000 * 1000;	/* timeout of one attempt in microseconds */
++								/* (net-snmp default = 1 second) */
++	session.retries = CONFIG_SNMP_RETRIES - 1;		/* number of retries after failed attempt */
++								/* (net-snmp default = 5) */
+ 
+ #ifdef HAVE_IPV6
+ 	if (SUCCEED != get_address_family(item->interface.addr, &family, error, max_error_len))
+@@ -1095,7 +1097,7 @@ static int	zbx_snmp_walk(struct snmp_ses
+ 			pdu->max_repetitions = max_vars;
+ 		}
+ 
+-		ss->retries = (0 == bulk || (1 == max_vars && 0 == level) ? 1 : 0);
++		ss->retries = (0 == bulk || (1 == max_vars && 0 == level) ? 1 : 0) * (CONFIG_SNMP_RETRIES - 1);
+ 
+ 		/* communicate with agent */
+ 		status = snmp_synch_response(ss, pdu, &response);
+@@ -1304,7 +1306,7 @@ static int	zbx_snmp_get_values(struct sn
+ 		goto out;
+ 	}
+ 
+-	ss->retries = (1 == mapping_num && 0 == level ? 1 : 0);
++	ss->retries = (1 == mapping_num && 0 == level ? 1 : 0) * (CONFIG_SNMP_RETRIES - 1);
+ retry:
+ 	status = snmp_synch_response(ss, pdu, &response);
+ 
+Index: zabbix-3.4.12-1+buster/conf/zabbix_server.conf
+===================================================================
+--- zabbix-3.4.12-1+buster.orig/conf/zabbix_server.conf
++++ zabbix-3.4.12-1+buster/conf/zabbix_server.conf
+@@ -439,6 +439,26 @@ DBUser=zabbix
+ 
+ Timeout=4
+ 
++### Option: SNMPTimeout
++#	Specifies how long we wait for SNMP device (in seconds).
++#
++# Mandatory: no
++# Range: 1-30
++# Default:
++# SNMPTimeout=1
++
++SNMPTimeout=1
++
++### Option: SNMPRetries
++#	Specifies how many times to trying request for SNMP device
++#
++# Mandatory: no
++# Range: 1-10
++# Default:
++# SNMPRetries=3
++
++SNMPRetries=3
++
+ ### Option: TrapperTimeout
+ #	Specifies how many seconds trapper may spend processing new data.
+ #

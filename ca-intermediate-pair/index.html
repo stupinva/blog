@@ -1,0 +1,129 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="перевод,ssl,openssl,Джэми Нгуен" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2016-12-18 -->
+		<title>Джэми Нгуен. Создание промежуточной пары, 2015</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Джэми Нгуен. Создание промежуточной пары, 2015</h1>
+
+		<p>Перевод статьи: <a href="https://jamielinux.com/docs/openssl-certificate-authority/create-the-intermediate-pair.html">Create the intermediate pair</a></p>
+
+		<p>Автор: Джэми Нгуен (Jamie Nguyen)</p>
+
+		<p>Промежуточный удостоверяющий центр (CA) может подписывать сертификаты от имени корневого удостоверяющего центра. Корневой удостоверяющий центр подписывает промежуточный сертификат, формируя цепочку доверия.</p>
+
+		<p>Цель использования промежуточного удостоверяющего центра - повысить безопасность. Корневой ключ может храниться вне компьютеров и использоваться настолько редко, насколько это возможно. Если промежуточный ключ был скомпрометирован, корневой удостоверяющий центр может отозвать промежуточный сертификат и создать новую промежуточную криптографическую пару.</p>
+
+		<h2><a name="prepare-dir">1. Подготовка каталога</a></h2>
+
+		<p>Файлы корневого удостоверяющего центра хранятся в /root/ca. Выберем другой каталог (/root/ca/intermediate) для хранения файлов промежуточного удостоверяющего центра.</p>
+
+		<pre class="console"># mkdir /root/ca/intermediate</pre>
+
+		<p>Создадим такую же структуру каталогов, которая используется файлами корневого удостоверяющего центра. Удобно также создать каталог csr для хранения запросов на подпись сертификатов.</p>
+
+		<pre class="console"># cd /root/ca/intermediate
+# mkdir certs crl csr newcerts private
+# chmod 700 private
+# touch index.txt
+# echo 1000 &gt; serial</pre>
+
+		<p>Добавим файл crlnumber в дерево каталогов промежуточного удостоверяющего центра. crlnumber используется для отслеживания <a href="../crl/">списков отозванных сертификатов</a>.</p>
+
+		<pre class="console"># echo 1000 &gt; /root/ca/intermediate/crlnumber</pre>
+
+		<p>Скопируем файл конфигурации промежуточного удостоверяющего центра из <a href="../ca-configs/#config-intermediate">Приложения Б</a> в /root/ca/intermediate/openssl.cnf. По сравнению с файлом конфигурации корневого удостоверяющего центра изменилось пять опций:</p>
+
+		<pre class="code">[CA_default]
+dir         = /root/ca/intermediate
+private_key = $dir/private/intermediate.key.pem
+certificate = $dir/certs/intermediate.cert.pem
+crl         = $dir/crl/intermediate.crl.pem
+policy      = policy_loose</pre>
+
+		<h2><a name="create-intermediate-key">2. Создание промежуточного ключа</a></h2>
+
+		<p>Создадим промежуточный ключ (intermediate.key.pem). Зашифруем промежуточный ключ 256-битным алгоритмом шифрования AES с использованием стойкого пароля.</p>
+
+		<pre class="console"># cd /root/ca
+# openssl genrsa -aes256 \
+  -out intermediate/private/intermediate.key.pem 4096
+Enter pass phrase for intermediate.key.pem: secretpassword             # Введите ключевую фразу для intermediate.key.pem: секретныйпароль
+Verifying - Enter pass phrase for intermediate.key.pem: secretpassword # Подтверждение - Введите ключевую фразу для intermediate.key.pem: секретныйпароль
+# chmod 400 intermediate/private/intermediate.key.pem</pre>
+
+		<h2><a name="create-intermediate-certificate">3. Создание промежуточного сертификата</a></h2>
+
+		<p>Используйте промежуточный ключ для создания запроса на подпись сертификата (CSR). Детали в целом совпадают со случаем для корневого удостоверяющего центра. Однако, поле общего имени - Common Name, должно быть другим.</p>
+
+		<p><b>Предупреждение!</b> Удостоверьтесь, что вы указали файл конфигурации промежуточного удостоверяющего центра (intermediate/openssl.cnf).</p>
+
+		<pre class="console"># cd /root/ca
+# openssl req -config intermediate/openssl.cnf -new -sha256 \
+  -key intermediate/private/intermediate.key.pem \
+  -out intermediate/csr/intermediate.csr.pem
+Enter pass phrase for intermediate.key.pem: secretpassword               # Введите ключевую фразу для intermediate.key.pem: секретныйпароль
+You are about to be asked to enter information that will be incorporated # У вас будет запрошена информация, которая будет вставлена
+into your certificate request.                                           # в ваш запрос сертификата.
+-----
+Country Name (2 letter code) [XX]:GB                                     # Название страны (двухбуквенный код) [XX]:GB
+State or Province Name []:England                                        # Название штата или провинции []:Англия
+Locality Name []:                                                        # Название местности []:
+Organization Name []:Alice Ltd                                           # Название организации []:ООО Алиса
+Organizational Unit Name []:Alice Ltd Certificate Authority              # Название подразделения []:Удостоверяющий центр ООО Алиса
+Common Name []:Alice Ltd Intermediate CA                                 # Общее имя []:Промежуточный удостоверяющий центр ООО Алиса
+Email Address []:                                                        # Адрес электронной почты []:</pre>
+
+		<p>Для создания промежуточного сертификата используйте корневой удостоверяющий центр с расширением v3_intermediate_ca, чтобы подписать запрос на подпись сертификата промежуточного удостоверяющего центра. Промежуточный сертификат должен быть действительным на более короткий период, чем корневой сертификат. Десять лет - вполне подходящее значение.</p>
+
+		<p><b>Предупреждение!</b> В этот раз укажите файл конфигурации корневого удостоверяющего центра (/root/ca/openssl.cnf).</p>
+
+		<pre class="console"># cd /root/ca
+# openssl ca -config openssl.cnf -extensions v3_intermediate_ca \
+  -days 3650 -notext -md sha256 \
+  -in intermediate/csr/intermediate.csr.pem \
+  -out intermediate/certs/intermediate.cert.pem
+Enter pass phrase for ca.key.pem: secretpassword # Введите ключевую фразу для ca.key.pem: секретныйпароль
+Sign the certificate? [y/n]: y                   # Подписать сертификат? [д/н]: д
+# chmod 444 intermediate/certs/intermediate.cert.pem</pre>
+
+		<p>В файле index.txt инструмент ca (удостоверяющие центры) из OpenSSL размещает базу данных сертификатов. Не удаляйте этот файл и не редактируйте его вручную. Теперь он должен содержать строку, указывающую на промежуточный сертификат.</p>
+
+		<pre class="code">V 250408122707Z 1000 unknown ... /CN=Alice Ltd Intermediate CA # V 250408122707Z 1000 неизвестно ... /CN=Промежуточный удостоверяющий центр ООО Алиса</pre>
+
+		<h2><a name="check-intermediate-certificate">4. Проверка промежуточного сертификата</a></h2>
+
+		<p>Как и в случае корневого сертификата, проверим, что данные промежуточного сертификата верны.</p>
+
+		<pre class="console"># openssl x509 -noout -text \
+  -in intermediate/certs/intermediate.cert.pem</pre>
+
+		<p>Проверим промежуточный сертификат корневым сертификатом. OK обозначает, что цепочка доверия не повреждена.</p>
+
+		<pre class="console"># openssl verify -CAfile certs/ca.cert.pem \
+  intermediate/certs/intermediate.cert.pem
+intermediate.cert.pem: OK</pre>
+
+		<h2><a name="create-chain">5. Создание файла цепочки сертификатов</a></h2>
+
+		<p>Когда приложение (например, веб-браузер) пытается проверить сертификат, подписанный промежуточным удостоверяющим центром, оно также должно проверить, что промежуточный сертификат подписан корневым сертификатом. Чтобы скомпоновать полную цепочку доверия, создадим цепочку сертификата удостоверяющего центра для передачи приложению.</p>
+
+		<p>Чтобы создать цепочку сертификата удостоверяющего центра, соединим вместе последовательно промежуточный и корневой сертификат. Этот файл в дальнейшем будет использоваться для проверки сертификатов, подписанных промежуточным удостоверяющим центром.</p>
+
+		<pre class="console"># cat intermediate/certs/intermediate.cert.pem \
+  certs/ca.cert.pem &gt; intermediate/certs/ca-chain.cert.pem
+# chmod 444 intermediate/certs/ca-chain.cert.pem</pre>
+
+		<p><b>Замечание.</b> Файл цепочки сертификатов должен включать корневой сертификат, поскольку приложение клиента ещё не знает о нём. Возможно лучшее решение, если вы администрируете локальную сеть - установить корневой сертификат каждому клиенту, который будет подключаться. В этом случае файл цепочки должен содержать только промежуточный сертификат.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Джэми Нгуен. Создание промежуточной пары, 2015">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

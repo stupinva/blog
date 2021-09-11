@@ -1,0 +1,58 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="redmine,jessie,troubleshooting,linux,debian" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2015-07-19 -->
+		<title>Чиним Redmine после обновления Debian до Jessie</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Чиним Redmine после обновления Debian до Jessie</h1>
+
+		<p>После обновления Debian с Wheezy до Jessie перестал работать Redmine, настроенный по заметке <a href="../redmine/">Установка Redmine в Debian Wheezy</a>.</p>
+
+		<p>Во-первых, поскольку в дистрибутиве Jessie вместо плагинов uwsgi_rack_ruby18 и uwsgi_rack_ruby191 имеется только плагин uwsgi_rack_ruby21, использовать теперь нужно именно его.</p>
+
+		<p>Во-вторых, в каталоге, на который указывала опция rails, появился файл config.ru, поэтому uwsgi предлагает воспользоваться опцией rack, которой и нужно указать этот файл. Однако, одной этой опции rack недостаточно для правильной работы, нужно ещё указать опцию chdir, указав в ней путь к каталогу, где находится приложение.</p>
+
+		<p>Опция post-buffering теперь не обязательна, поэтому её можно убрать.</p>
+
+		<p>В результате получился такой вот файл /etc/uwsgi/apps-available/redmine.ini:</p>
+
+		<pre class="code">[uwsgi]
+
+procname = uwsgi-redmine
+procname-master = uwsgi-redmine-master
+  
+plugin = uwsgi_rack_ruby21
+env = RAILS_RELATIVE_URL_ROOT=/redmine
+env = RAILS_ENV=production
+chdir = /usr/share/redmine
+rack = /usr/share/config.ru
+processes = 2</pre>
+
+		<p>Это всё было довольно быстро исправлено, но этого оказалось не достаточно. Осталась ещё одна проблема, которая заключалась в том, что redmine наотрез отказывался принимать во внимание переменную окружения RAILS_RELATIVE_URL_ROOT, которая позволяла получить доступ к приложению не через корневой каталог сервера, а поместить его в подкаталог. В данном случае этим каталогом являлся каталог /redmine/.</p>
+
+		<p>Вмешиваться в код приложения не хотелось, поэтому я искал другой способ исправить ситуацию. Чего я только не пробовал... В конце концов приспособил комментарий <a href="https://github.com/rails/rails/issues/8941#issuecomment-101714674">habermann24 commented on 13 May</a> и создал файл /etc/redmine/config.ru со следующим содержимым:</p>
+
+		<pre class="code">require ::File.expand_path('/usr/share/redmine/config/environment', __FILE__)
+map ENV['RAILS_RELATIVE_URL_ROOT'] || '/' do
+  run RedmineApp::Application
+end</pre>
+
+		<p>Этот файл я указал в конфигурации /etc/uwsgi/apps-available/redmine.ini, заменив значение опции rack:</p>
+
+		<pre class="code">rack = /etc/redmine/config.ru</pre>
+
+		<p>После добавления такого костыля и перезапуска uwsgi, всё заработало как положено.</p>
+
+		<p>К сожалению, подобные недоработки в Debian стали встречаться чаще. Может быть качество объективно падает, а может быть я чаще стал пользоваться всякими маргинальными программами и поэтому подобные недоработки просто стали мне чаще попадаться.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Чиним Redmine после обновления Debian до Jessie">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

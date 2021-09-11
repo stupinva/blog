@@ -1,0 +1,65 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="bash,utf-8,freebsd,vim-lite" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2012-10-28 -->
+		<title>Удобная FreeBSD</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Удобная FreeBSD</h1>
+
+		<p>Я привык к Linux, однако на работе приходится пользоваться FreeBSD. Чтобы работать в ней стало более-менее удобно, мне нужна поддержка UTF-8, привычные vim-lite вместо классического vi и bash вместо sh или csh.</p>
+
+		<p>Отредактируем файл /etc/login.conf, чтобы описание класса russian приняло следующий вид:</p>
+
+		<pre class="code">russian|Russian Users Accounts:\
+:charset=UTF-8:\
+:lang=ru_RU.UTF-8:\
+:tc=default:</pre>
+
+		<p>Перекомпилируем файл:</p>
+
+		<pre class="console"># cap_mkdb /etc/login.conf</pre>
+
+		<p>И назначим себе класс russian:</p>
+
+		<pre class="console"># pw usermod -n mylogin -L russian</pre>
+
+		<p>Теперь поставим bash и vim-lite из портов:</p>
+
+		<pre class="console"># cd /usr/ports/shells/bash
+# make install
+# cd /usr/ports/editors/vim-lite
+# make install</pre>
+
+		<p>Убедимся, что bash появился в списке доступных оболочек в файле /etc/shells, и при необходимости добавим туда строчку с полным путём к выполняемому файлу bash:</p>
+
+		<pre class="code">/usr/local/bin/bash</pre>
+
+		<p>Теперь выберем себе оболочку с помощью команды chsh (change shell), прописав полный путь к bash в соответствующей строчке:</p>
+
+		<pre class="console">$ chsh</pre>
+
+		<p>Осталось настроить вызов vim по команде vi. Для этого в файле ~/.profile пропишем псевдоним:</p>
+
+		<pre class="code">alias vi='vim'</pre>
+
+		<p>Заодно выставим переменную PAGER в значение less (less позволяет листать обратно):</p>
+
+		<pre class="code">PAGER=less</pre>
+
+		<p>Теперь при подключении по ssh мы получаем консоль, работающую в UTF-8, привычный bash с удобным автодополнением, поддержку UTF-8 в редакторе, вызываемом по команде vi (родной vi из FreeBSD не умеет работать с UTF-8, редактор ee - тоже) и поддержку визуального режима редактирования в нём.</p>
+
+		<p>Для настройки UTF-8 в системной консоли FreeBSD можно воспользоваться заметкой <a href="http://dadv.livejournal.com/162099.html">UTF-8 в консоли FreeBSD</a>.</p>
+
+		<p>Другие полезные настройки описаны здесь <a href="http://paix.org.ua/freebsd/ru_utf8.html">Русификация FreeBSD (UTF-8)</a>.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Удобная FreeBSD">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

@@ -1,0 +1,244 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="stretch,git,gogs,nginx,debian,linux,golang" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2019-07-28 -->
+		<title>Установка и настройка Gogs</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Установка и настройка Gogs</h1>
+
+		<p>Gogs - это веб-интерфейс для работы с репозиториями git. Приложение написано на языке программирования Go, не требовательно к системным ресурсам и поэтому хорошо подходит для организации репозиториев исходных текстов небольших команд разработчиков.</p>
+
+		<h2>1. Сборка приложения</h2>
+
+		<p>Устанавливаем утилиту git и компилятор языка Go из репозиториев:</p>
+
+		<pre class="console"># apt-get install git golang-go</pre>
+
+		<p>Создадим каталог для сборки приложения и перейдём в него:</p>
+
+		<pre class="console">$ mkdir gogs
+$ cd gogs</pre>
+
+		<p>Скачиваем и собираем приложение в только что созданном каталоге. При сборке указываем тег, предписывающий включить поддержку SQLite3:</p>
+
+		<pre class="console">$ env GOPATH=/home/stupin/gogs/ go get github.com/gogs/gogs
+$ cd src/github.com/gogs/gogs
+$ env GOPATH=/home/stupin/gogs/ go build -tags sqlite</pre>
+
+		<h2>2. Установка и настройка запуска приложения</h2>
+
+		<p>Создаём пользователя gogs, от имени которого будет работать приложение:</p>
+
+		<pre class="console"># useradd -c 'Gogs' -r -M -d /opt/gogs gogs</pre>
+
+		<p>Создаём каталог приложения gogs и копируем в него только то, что необходимо для работы приложения:</p>
+
+		<pre class="console"># cd /opt
+# mkdir gogs
+# cd gogs
+# cp -R /home/stupin/gogs/src/github.com/gogs/gogs/gogs /home/stupin/gogs/src/github.com/gogs/gogs/public /home/stupin/gogs/src/github.com/gogs/gogs/templates .</pre>
+
+		<p>Создаём каталог для файла конфигурации:</p>
+
+		<pre class="console"># mkdir -p custom/conf/</pre>
+
+		<p>Создаём файл /opt/gogs/custom/conf/app.ini с настройками приложения:</p>
+
+		<pre class="code">[server]
+DOMAIN = stupin.su
+HTTP_ADDR = 127.0.0.1
+HTTP_PORT = 3000
+ROOT_URL = https://stupin.su/git/
+DISABLE_SSH = false
+SSH_PORT = 22
+OFFLINE_MODE = false</pre>
+
+		<p>Чтобы настройки приложения в дальнейшем можно было поменять в процессе первоначальной настройки через веб-интерфейс, дадим пользователю gogs доступ к файлу конфигурации:</p>
+
+		<pre class="console"># chown gogs:gogs /opt/gogs/custom/conf/app.ini</pre>
+
+		<p>Создаём service-файл /etc/systemd/system/gogs.ini для запуска/остановки приложения через systemd:</p>
+
+		<pre class="code">[Unit]
+Description=Gogs (Go Git Service)
+After=syslog.target
+After=network.target
+;After=postgresql.service
+After=nginx.service
+
+[Service]
+Type=simple
+User=gogs
+Group=gogs
+WorkingDirectory=/opt/gogs
+ExecStart=/opt/gogs/gogs web
+Restart=always
+Environment=USER=gogs HOME=/opt/gogs
+
+[Install]
+WantedBy=multi-user.target</pre>
+
+		<p>Добавляем сервис в автозапуск при загрузке операционной системы:</p>
+
+		<pre class="console"># systemctl enable gogs.service</pre>
+
+		<p>И запускаем его прямо сейчас:</p>
+
+		<pre class="console"># systemctl start gogs.service</pre>
+
+		<h2>3. Настройка проксирования через nginx</h2>
+
+		<p>Если приложение планируется запускать на выделенном домене, то для настройки проксирования внешних запросов с https на локальный адрес http при помощи nginx в общем случае нужно создать следующую конфигурацию в файле /etc/nginx/sites-enabled/gogs:</p>
+
+		<pre class="code">server {
+    listen 80;
+    server_name example.com;
+    return 302 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name example.com;
+
+    ssl_certificate /path/to/certificate.crt;
+    ssl_certificate_key /path/to/certificate_key.key;
+
+    location / {
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_pass http://localhost:3000;
+  }
+}</pre>
+
+		<p>И подключить её командой:</p>
+
+		<pre class="console"># sudo ln -s /etc/nginx/sites-available/gogs /etc/nginx/sites-enabled/gogs</pre>
+
+		<p>Я же разместил приложение на одном домене с другими приложениями, в отдельном каталоге. Для настройки впишем в файл /etc/nginx/sites-enabled/root настройки проксирования запросов с адреса https://stupin.su/git/ на адрес http://127.0.0.1/git/:</p>
+
+		<pre class="code"># Gogs
+  location /git/ {
+    proxy_redirect off;
+    proxy_bind 127.0.0.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_pass http://127.0.0.1:3000/;
+  }</pre>
+
+		<h2>4. Настройка приложения</h2>
+
+		<p>Осталось зайти в приложение и завершить его настройку. Я создал электронный почтовый ящик gogs@stupin.su и использовал следующие настройки:</p>
+
+		<pre class="code">Настройки базы данных
+  Тип базы данных: SQLite3
+  Путь: data/gogs.db
+
+Общие параметры Gogs
+  Имя приложения: Gogs
+  Путь корня репозитория: /opt/gogs/gogs-repositories
+  Пользователь: gogs
+  Домен: stupin.su
+  SSH порт: 22
+  Использовать встроенный SSH сервер: Нет
+  Порт HTTP: 3000
+  URL приложения: https://stupin.su/git/
+  Путь к журналу: /opt/gogs/log
+  Включите режим консоли: Нет
+
+Расширенные настройки
+  Настройки службы электронной почты:
+    Узел SMTP: mail.stupin.su:587
+    Из: gogs@stupin.su
+    Электронная почта отправителя: gogs@stupin.su
+    Пароль отправителя: mailbox_password
+    Включить подтверждение регистрации: Да
+    Разрешить почтовые уведомления: Да
+  Сервер и другие настройки служб
+    Включение офлайн режима: Нет
+    Отключить службу Gravatar: Да
+    Включить поиск внешних Аватаров: Нет
+    Отключить самостоятельную регистрацию: Да
+    Включить капчу: Нет
+    Разрешить требовать авторизацию для просмотра страниц: Нет
+  Настройки учётной записи администратора
+    Имя пользователя: stupin
+    Пароль:
+    Подтвердить пароль:
+    Электронная почта администратора: vladimir@stupin.su</pre>
+
+		<p>После сохранения этих настроек файл /opt/gogs/custom/conf/app.ini принял следующий вид:</p>
+
+		<pre class="code">APP_NAME = Gogs
+RUN_USER = gogs
+RUN_MODE = prod
+
+[server]
+DOMAIN           = stupin.su
+HTTP_ADDR        = 127.0.0.1
+HTTP_PORT        = 3000
+ROOT_URL         = https://stupin.su/git/
+DISABLE_SSH      = false
+SSH_PORT         = 22
+OFFLINE_MODE     = false
+START_SSH_SERVER = false
+
+[database]
+DB_TYPE  = sqlite3
+HOST     = 127.0.0.1:3306
+NAME     = gogs
+USER     = root
+PASSWD   = 
+SSL_MODE = disable
+PATH     = data/gogs.db
+
+[repository]
+ROOT = /opt/gogs/gogs-repositories
+
+[mailer]
+ENABLED = true
+HOST    = mail.stupin.su:587
+FROM    = gogs@stupin.su
+USER    = gogs@stupin.su
+PASSWD  = mailbox_password
+
+[service]
+REGISTER_EMAIL_CONFIRM = true
+ENABLE_NOTIFY_MAIL     = true
+DISABLE_REGISTRATION   = true
+ENABLE_CAPTCHA         = false
+REQUIRE_SIGNIN_VIEW    = false
+
+[picture]
+DISABLE_GRAVATAR        = true
+ENABLE_FEDERATED_AVATAR = false
+
+[session]
+PROVIDER = file
+
+[log]
+MODE      = file
+LEVEL     = Info
+ROOT_PATH = /opt/gogs/log
+
+[security]
+INSTALL_LOCK = true
+SECRET_KEY   = secret_key</pre>
+
+		<p>Теперь для пущей безопасности, чтобы никто не подсмотрел в файле пароль почтового ящика mailbox_password и ключ secret_key, которым шифруются данные сеансов пользователей, поменяем права доступа к файлу конфигурации:</p>
+
+		<pre class="console"># chmod ug=r,o= /opt/gogs/custom/conf/app.ini</pre>
+
+		<p>Пример страницы обзора репозиториев:</p>
+
+		<img src="gogs.png" />
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Установка и настройка Gogs">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

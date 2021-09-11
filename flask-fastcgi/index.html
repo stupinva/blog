@@ -1,0 +1,195 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="flup,python,lighttpd,apache,nginx,fastcgi,перевод,flask" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-06-30 -->
+		<title>Армин Роначер. Настройка приложения Flask в режиме FastCGI, 2012</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Армин Роначер. Настройка приложения Flask в режиме FastCGI, 2012</h1>
+
+		<p>Перевод статьи: <a href="http://flask.pocoo.org/docs/deploying/fastcgi/">FastCGI</a></p>
+
+		<p>Автор: Армин Роначер (Armin Ronacher)</p>
+
+		<p>FastCGI - это один из вариантов развёртывания приложения на серверах <a href="http://nginx.org/">nginx</a>, <a href="http://www.lighttpd.net/">lighttpd</a> и <a href="http://www.cherokee-project.com/">cherokee</a>; за описанием других опций обратитесь к разделам <a href="http://flask.pocoo.org/docs/deploying/uwsgi/">uWSGI</a> и <a href="http://flask.pocoo.org/docs/deploying/wsgi-standalone/">Самостоятельные контейнеры WSGI</a>. Для использования приложения WSGI с любым из этих серверов необходимо сначала настроить сервер FastCGI. Наиболее популярен <a href="http://trac.saddi.com/flup">flup</a>, который будет использоваться в этом руководстве. Убедитесь в том, что установили его, прежде чем продолжить чтение.</p>
+
+		<h2>1. Предварительная проверка</h2>
+
+		<p>Удостоверьтесь, что вызовы app.run() в файле приложения находятся внутри блока if __name__ == '__main__': или вынесены в отдельный файл. Просто убедитесь в отсутствии подобных вызовов, потому что если вы решили воспользоваться FastCGI для запуска приложения, то запускать локальный сервер WSGI не нужно.</p>
+
+		<h2>2. Создание файла .fcgi</h2>
+
+		<p>Для начала нужно создать файл сервера FastCGI. Давайте назовём его yourapplication.fcgi:</p>
+
+		<pre class="code">#!/usr/bin/python
+from flup.server.fcgi import WSGIServer
+from yourapplication import app
+if __name__ == '__main__':
+    WSGIServer(app).run()</pre>
+
+		<p>Этого достаточно для работы Apache, однако nginx и старые версии lighttpd требуют явного указания сокетов для связи с сервером FastCGI. Для этого нужно передать путь к сокет-файлу в WSGIServer:</p>
+
+		<pre class="code">WSGIServer(application, bindAddress='/path/to/fcgi.sock').run()</pre>
+
+		<p>Этот путь должен быть точно таким же, какой был указан в настройках сервера.</p>
+
+		<p>Сохраните файл yourapplication.fcgi где-нибудь, где вы сможете потом найти его. Неплохо положить его в /var/www/yourapplication или в какое-то другое подходящее место.</p>
+
+		<p>Убедитесь, что у этого файла установлен флаг выполнения, чтобы сервер мог его выполнить:</p>
+
+		<pre class="code"># chmod +x /var/www/yourapplication/yourapplication.fcgi</pre>
+
+		<h2>3. Настройка Apache</h2>
+
+		<p>Приведённый выше пример достаточно хорош для того, чтобы использовать его при развёртывании с Apache, однако файл .fcgi будет встречаться в URL приложения, например: example.com/yourapplication.fcgi/news/. Есть несколько способов настройки приложения для того, чтобы убрать yourapplication.fcgi из URL. Предпочтительный способ - это использование директивы ScriptAlias:</p>
+
+		<pre class="code">&lt;VirtualHost *&gt;
+  ServerName example.com
+  ScriptAlias / /path/to/yourapplication.fcgi/
+&lt;/VirtualHost&gt;</pre>
+
+		<p>Если задать ScriptAlias нельзя, например на веб-узле, настроенном для нескольких пользователей, то можно воспользоваться промежуточным приложением WSGI для удаления yourapplication.fcgi из URL. Настройте .htaccess:</p>
+
+		<pre class="code">&lt;IfModule mod_fcgid.c&gt;
+  AddHandler fcgid-script .fcgi
+  &lt;Files ~ (\.fcgi)&gt;
+    SetHandler fcgid-script
+    Options +FollowSymLinks +ExecCGI
+  &lt;/Files&gt;
+&lt;/IfModule&gt;
+
+&lt;IfModule mod_rewrite.c&gt;
+  Options +FollowSymlinks
+  RewriteEngine On
+  RewriteBase /
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteRule ^(.*)$ yourapplication.fcgi/$1 [QSA,L]
+&lt;/IfModule&gt;</pre>
+
+		<p>Теперь настроим yourapplication.fcgi:</p>
+
+		<pre class="code">#!/usr/bin/python
+#: не обязательный путь к каталогу с локальными пакетами python
+import sys
+
+sys.path.insert(0, '&lt;локальный_путь&gt;/lib/python2.6/site-packages')
+
+from flup.server.fcgi import WSGIServer
+from yourapplication import app
+
+class ScriptNameStripper(object):
+    def __init__(self, app):
+        self.app = app
+
+    def __call__(self, environ, start_response):
+        environ['SCRIPT_NAME'] = ''
+        return self.app(environ, start_response)
+
+app = ScriptNameStripper(app)
+
+if __name__ == '__main__':
+    WSGIServer(app).run()</pre>
+
+		<h2>4. Настройка lighttpd</h2>
+
+		<p>Базовая настройка FastCGI для lighttpd выглядит следующим образом:</p>
+
+		<pre class="code">fastcgi.server = ("/yourapplication.fcgi" =&gt;
+  ((
+    "socket" =&gt; "/tmp/yourapplication-fcgi.sock",
+    "bin-path" =&gt; "/var/www/yourapplication/yourapplication.fcgi",
+    "check-local" =&gt; "disable",
+    "max-procs" =&gt; 1
+  ))
+)
+
+alias.url = (
+  "/static/" =&gt; "/path/to/your/static"
+)
+
+url.rewrite-once = (
+  "^(/static($|/.*))$" =&gt; "$1",
+  "^(/.*)$" =&gt; "/yourapplication.fcgi$1"</pre>
+
+		<p>Не забудьте включить модули FastCGI, alias и rewrite. Эта настройка закрепит приложение за /yourapplication. Если нужно, чтобы приложение работало в корне URL, понадобится обойти недоработку lighttpd при помощи промежуточного приложения LighttpdCGIRootFix.</p>
+
+		<p>Убедитесь, что применяете его лишь в том случае, если подключили приложение к корню URL. А также, обратитесь к документации Lighttpd за более подробной информацией о <a href="http://redmine.lighttpd.net/wiki/lighttpd/Docs:ModFastCGI">FastCGI и Python</a> (отметим, что явная передача сокет-файла в run() больше не требуется).</p>
+
+		<h2>5. Настройка nginx</h2>
+
+		<p>Установка приложений FastCGI в nginx немного отличается, потому что по умолчанию программе не передаются параметры FastCGI.</p>
+
+		<p>Базовая конфигурация FastCGI nginx для flask выглядит следующим образом:</p>
+
+		<pre class="code">location = /yourapplication { rewrite ^ /yourapplication/ last; }
+location /yourapplication { try_files $uri @yourapplication; }
+location @yourapplication {
+  include fastcgi_params;
+  fastcgi_split_path_info ^(/yourapplication)(.*)$;
+  fastcgi_param PATH_INFO $fastcgi_path_info;
+  fastcgi_param SCRIPT_NAME $fastcgi_script_name;
+  fastcgi_pass unix:/tmp/yourapplication-fcgi.sock;
+}</pre>
+
+		<p>Эта конфигурация привязывает приложение к /yourapplication. Привязать приложение к корню URL несколько проще, потому что не нужно думать о том, какие значения использовать в PATH_INFO и SCRIPT_NAME:</p>
+
+		<pre class="code">location / { try_files $uri @yourapplication; }
+location @yourapplication {
+  include fastcgi_params;
+  fastcgi_param PATH_INFO $fastcgi_script_name;
+  fastcgi_param SCRIPT_NAME "";
+  fastcgi_pass unix:/tmp/yourapplication-fcgi.sock;
+}</pre>
+
+		<h2>6. Запуск процессов FastCGI</h2>
+
+		<p>Поскольку Nginx и другие серверы не загружают приложения FastCGI, это нужно сделать самостоятельно. <a href="http://supervisord.org/configuration.html#fcgi-program-x-section-settings">Процессами FastCGI может управлять программа Supervisor.</a> Можно поискать другие диспетчеры процессов FastCGI или написать сценарий для запуска файла .fcgi во время загрузки, например, с помощью сценария SysV init.d. В качестве временного решения может подойти запуск сценария .fcgi из программы GNU screen. Обратитесь к странице руководства screen за более подробной информацией, однако стоит заметить, что после перезагрузки системы запуск придётся повторять вручную:</p>
+
+		<pre class="console">$ screen
+$ /var/www/yourapplication/yourapplication.fcgi</pre>
+
+		<h2>7. Отладка</h2>
+
+		<p>На большинстве веб-серверов становится всё труднее отлаживать приложения FastCGI. Довольно часто единственное, о чём сообщают журналы сервера, - это о неожиданном окончании заголовков. Для отладки приложения единственное подходящее средство диагностики - это переключиться на нужного пользователя и запустить приложение вручную.</p>
+
+		<p>В следующем примере предполагается, что приложение называется application.fcgi, а веб-сервер работает от имени пользователя www-data:</p>
+
+		<pre class="console">$ su www-data
+$ cd /var/www/yourapplication
+$ python application.fcgi
+Traceback (most recent call last):
+File "yourapplication.fcgi", line 4, in &lt;module&gt;
+ImportError: No module named yourapplication</pre>
+
+		<p>В данном случае ошибка вызвана тем, что yourapplication не найден в путях поиска python. Обычно это происходит по одной из следующих причин:</p>
+		<ul><li>Указаны относительные пути, которые не работают относительно текущего каталога.</li>
+			<li>Выполнение программы зависит от переменных окружения, которые не заданы для веб-сервера.</li>
+			<li>Используется интерпретатор python другой версии.</li>
+		</ul>
+
+		<h2>8. Примечания переводчика</h2>
+
+		<p>В случае настройки Lighttpd не нужно писать никаких сценариев SysV init.d, потому что:</p>
+
+		<ol>
+			<li>Lighttpd может сам управлять FastCGI-процессами на локальном компьютере, самостоятельно порождая необходимое их количество (с учётом настроенного лимита),</li>
+
+			<li>в рамках проекта Lighttpd разрабатывается собственный диспетчер процессов FastCGI - spawn-fcgi, который не настолько продвинут, чтобы регулировать количество необходимых процессов, но по крайней мере указанное количество процессов запустить и поддерживать сможет.</li>
+		</ol>
+
+		<p>Обычно spawn-fcgi применяется в тех случаях, когда приложение FastCGI работает на отдельном от веб-сервера компьютере или нужно запустить приложение от имени другого пользователя, например, для изоляции друг от друга приложений разных пользователей, работающих на одном сервере. Например, так: <a href="../fastcgi-php/">Настройка FastCGI и PHP с индивидуальными правами пользователей</a>.</p>
+
+		<p>И, наконец, никто не мешает использовать spawn-fcgi совместно с nginx.</p>
+
+		<p><a href="https://flask-russian-docs.readthedocs.org/ru/latest/deploying/fastcgi.html">Этот</a> и другие переводы можно найти на <a href="https://flask-russian-docs.readthedocs.org/">сайте проекта перевода документации по Flask</a>. Автор проекта - Виталий Кузьмин aka ferm32.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Армин Роначер. Настройка приложения Flask в режиме FastCGI, 2012">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

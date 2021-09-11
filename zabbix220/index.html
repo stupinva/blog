@@ -1,0 +1,418 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="patch,zabbix,lighttpd,linux,debian,php,wheezy,troubleshooting,mysql,snmp" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2013-12-15 -->
+		<title>Установка и настройка Zabbix 2.2.0 в Debian Wheezy</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Установка и настройка Zabbix 2.2.0 в Debian Wheezy</h1>
+
+		<p>Недавно вышел новый релиз Zabbix 2.2, в котором, по словам разработчиков, была существенна увеличена производительность, в 2-5 раз. Достигнуто это было, видимо, за счёт удаления столбцов lastvalue и prevvalue из таблицы items.</p>
+
+		<p>Кроме того, в настройках сервера теперь нельзя выключить Housekeeper - процессы Zabbix, удаляющие из базы данных устаревшие значения. Теперь эта настройка перенесена в веб-интерфейс, где можно выключить Housekeeper лишь для определённых видов данных, а не целиком. Это полезно, если настроено <a href="https://www.zabbix.com/wiki/non-english/ru/partitioning_in_mysql">секционирование</a> лишь части таблиц. При этом часть таблиц по-прежнему будут очищаться Housekeeper'ом, а часть будет очищаться настроенной в планировщике задач MySQL хранимой процедурой, которая будет удалять устаревшие секции таблиц.</p>
+
+		<p>Долгожданной возможностью стал просмотр исторических данных для узлов, снятых с наблюдения. Ранее, чтобы посмотреть историю наблюдений, приходилось временно включать наблюдение за узлом. Если узел был демонтирован, это могло привести к заведомо ложной сработке триггеров.</p>
+
+		<p>Другим важным для меня изменением стало изменение настроек опроса по SNMP. Раньше использовались настройки опроса по умолчанию, из библиотеки SNMP. По умолчанию таймаут опроса составлял 1 секунду, а в случае неудачи делалось до 5 дополнительных попыток опроса. В Zabbix 2.2 для опроса по SNMP используется значение настройки Timeout, заданное в файле конфигурации и делается только одна попытка опроса.</p>
+
+		<p>Это может стать большой проблемой, если используются скрипты внешнего опроса, время работы которых составляет десятки секунд. Чтобы скрипты работали, приходится устанавливать большое значение таймаута, но это же значение таймаута будет использоваться и в опросе SNMP. В результате либо не работают скрипты внешнего опроса, либо сервер не справляется с темпом опроса оборудования по SNMP, ожидая ответа от выключенного оборудования десятки секунд.</p>
+
+		<p>В случае небольшой инсталляции может помочь увеличение количества процессов для опроса - процессов Poller. В случае большой инсталляции количество процессов придётся увеличить настолько, что может потребоваться слишком много оперативной памяти, которая используется процессами Poller и потоками MySQL, обслуживающими подключение к базе данных от каждого Poller'а.</p>
+
+		<p>Кардинальное решение заключается в том, чтобы исправить исходные тексты Zabbix, благо это оказалось совсем не сложно.</p>
+
+		<h2>1. Исправление исходников и сборка deb-пакетов</h2>
+
+		<p>Добавим официальные репозитории с файлами для сборки пакетов в файл /etc/apt/sources.list:</p>
+
+		<pre class="code">deb-src http://repo.zabbix.com/zabbix/2.2/debian wheezy main</pre>
+
+		<p>Установим ключ репозитория Zabbix и обновим список доступных пакетов:</p>
+
+		<pre class="console"># wget http://repo.zabbix.com/zabbix-official-repo.key -O - | apt-key add -
+# apt-get update</pre>
+
+		<p>Установим необходимые для сборки пакетов Zabbix зависимости и скачаем файлы для сборки пакетов:</p>
+
+		<pre class="console"># apt-get build-dep zabbix
+# apt-get source zabbix</pre>
+
+		<p>Ставим дополнительную сборочную зависимость, которую разработчики забыли прописать в файлы для сборки пакетов и пакет devscripts, из которого нам пригодится утилита dch:</p>
+
+		<pre class="console"># apt-get install unixodbc-dev</pre>
+
+		<p>Переходим в каталоги zabbix-2.2.0, скачиваем и накладываем заплатку:</p>
+
+		<pre class="console"># cd zabbix-2.2.0
+# wget <a href="zabbix220_snmp_timeout_retries.patch">http://stupin.su/blog/zabbix220/zabbix220_snmp_timeout_retries.patch</a>
+# patch -Np0 &lt; zabbix220_snmp_timeout_retries.patch</pre>
+
+		<p>Текст самой заплатки:</p>
+
+		<pre class="code">diff -Naur src/zabbix_proxy/proxy.c new/zabbix_proxy/proxy.c
+--- src/zabbix_proxy/proxy.c    2013-11-12 13:16:44.000000000 +0600
++++ new/zabbix_proxy/proxy.c    2013-12-07 13:29:39.283703310 +0600
+@@ -42,6 +42,7 @@
+ #include "housekeeper/housekeeper.h"
+ #include "../zabbix_server/pinger/pinger.h"
+ #include "../zabbix_server/poller/poller.h"
++#include "../zabbix_server/poller/checks_snmp.h"
+ #include "../zabbix_server/poller/checks_ipmi.h"
+ #include "../zabbix_server/trapper/trapper.h"
+ #include "../zabbix_server/snmptrapper/snmptrapper.h"
+@@ -407,6 +408,10 @@
+ #endif
+                {"Timeout",                     &amp;CONFIG_TIMEOUT,                        TYPE_INT,
+                        PARM_OPT,       1,                      30},
++               {"SNMPTimeout",                 &amp;CONFIG_SNMP_TIMEOUT,                   TYPE_INT,
++                       PARM_OPT,       1,                      30},
++               {"SNMPRetries",                 &amp;CONFIG_SNMP_RETRIES,                   TYPE_INT,
++                       PARM_OPT,       1,                      10},
+                {"TrapperTimeout",              &amp;CONFIG_TRAPPER_TIMEOUT,                TYPE_INT,
+                        PARM_OPT,       1,                      300},
+                {"UnreachablePeriod",           &amp;CONFIG_UNREACHABLE_PERIOD,             TYPE_INT,
+diff -Naur src/zabbix_server/poller/checks_snmp.c new/zabbix_server/poller/checks_snmp.c
+--- src/zabbix_server/poller/checks_snmp.c      2013-11-12 13:16:49.000000000 +0600
++++ new/zabbix_server/poller/checks_snmp.c      2013-12-07 12:50:31.062073112 +0600
+@@ -33,6 +33,9 @@
+ }
+ zbx_snmp_index_t;
+ 
++int CONFIG_SNMP_TIMEOUT;
++int CONFIG_SNMP_RETRIES;
++
+ static zbx_snmp_index_t        *snmpidx = NULL;
+ static int             snmpidx_count = 0, snmpidx_alloc = 16;
+ 
+@@ -268,10 +271,10 @@
+                        break;
+        }
+ 
+-       session.retries = 0;                            /* number of retries after failed attempt */
+-                                                       /* (net-snmp default = 5) */
+-       session.timeout = CONFIG_TIMEOUT * 1000 * 1000; /* timeout of one attempt in microseconds */
+-                                                       /* (net-snmp default = 1 second) */
++       session.retries = CONFIG_SNMP_RETRIES - 1;              /* number of retries after failed attempt */
++                                                               /* (net-snmp default = 5) */
++       session.timeout = CONFIG_SNMP_TIMEOUT * 1000 * 1000;    /* timeout of one attempt in microseconds */
++                                                               /* (net-snmp default = 1 second) */
+ 
+ #ifdef HAVE_IPV6
+        if (SUCCEED != get_address_family(item-&gt;interface.addr, &amp;family, err, MAX_STRING_LEN))
+diff -Naur src/zabbix_server/poller/checks_snmp.h new/zabbix_server/poller/checks_snmp.h
+--- src/zabbix_server/poller/checks_snmp.h      2013-11-12 13:16:48.000000000 +0600
++++ new/zabbix_server/poller/checks_snmp.h      2013-12-07 12:50:31.062073112 +0600
+@@ -26,7 +26,8 @@
+ #include "sysinfo.h"
+ 
+ extern char    *CONFIG_SOURCE_IP;
+-extern int     CONFIG_TIMEOUT;
++extern int     CONFIG_SNMP_TIMEOUT;
++extern int     CONFIG_SNMP_RETRIES;
+ 
+ int    get_value_snmp(DC_ITEM *item, AGENT_RESULT *value);
+ 
+diff -Naur src/zabbix_server/server.c new/zabbix_server/server.c
+--- src/zabbix_server/server.c  2013-11-12 13:17:04.000000000 +0600
++++ new/zabbix_server/server.c  2013-12-07 13:29:22.605760996 +0600
+@@ -43,6 +43,7 @@
+ #include "housekeeper/housekeeper.h"
+ #include "pinger/pinger.h"
+ #include "poller/poller.h"
++#include "poller/checks_snmp.h"
+ #include "poller/checks_ipmi.h"
+ #include "timer/timer.h"
+ #include "trapper/trapper.h"
+@@ -360,6 +361,10 @@
+ #endif
+                {"Timeout",                     &amp;CONFIG_TIMEOUT,                        TYPE_INT,
+                        PARM_OPT,       1,                      30},
++               {"SNMPTimeout",                 &amp;CONFIG_SNMP_TIMEOUT,                   TYPE_INT,
++                       PARM_OPT,       1,                      30},
++               {"SNMPRetries",                 &amp;CONFIG_SNMP_RETRIES,                   TYPE_INT,
++                       PARM_OPT,       1,                      10},
+                {"TrapperTimeout",              &amp;CONFIG_TRAPPER_TIMEOUT,                TYPE_INT,
+                        PARM_OPT,       1,                      300},
+                {"UnreachablePeriod",           &amp;CONFIG_UNREACHABLE_PERIOD,             TYPE_INT,</pre>
+
+		<p>Если всё прошло успешно, то можно внести комментарии к изменениям. Запускаем команду для редактирования журнала изменений:</p>
+
+		<pre class="console"># dch -i</pre>
+
+		<p>И приводим последнюю запись к подобному виду:</p>
+
+		<pre class="code">zabbix (1:2.2.0-2+stupin) UNRELEASED; urgency=low
+
+  * Non-maintainer upload.
+  * Added parameters SNMPTimeout and SNMPRetries to config of Zabbix-server
+    and Zabbix-proxy
+
+ -- Vladimir Stupin &lt;vladimir@stupin.su&gt;  Sat, 07 Dec 2013 13:08:13 +0600</pre>
+
+		<p>Теперь можно собрать deb-пакеты:</p>
+
+		<pre class="console"># dpkg-buildpackage -us -uc -b -rfakeroot</pre>
+
+		<p>В каталоге выше появятся собранные пакеты, которые можно установить при помощи dpkg.</p>
+
+		<h2>2. Установка Zabbix</h2>
+
+		<p>Установим необходимые для работы Zabbix пакеты:</p>
+
+		<pre class="console"># apt-get install lighttpd php5-cgi snmp-mibs-downloader mysql-server mysql-client</pre>
+
+		<p>После этого можно установить сам сервер Zabbix, веб-интерфейс, агент и утилиты. Если вы собирали пакеты самостоятельно, можете воспользоваться dpkg. Можно также воспользоваться моим репозиторием, в который я выложил собранные пакеты. Для этого нужно вписать в файл /etc/apt/sources.list строку:</p>
+
+		<pre class="code">deb http://deb.stupin.su/ wheezy main</pre>
+
+		<p>И обновить список пакетов:</p>
+
+		<pre class="code"># apt-get update</pre>
+
+		<p>Ставим Zabbix из пакетов:</p>
+
+		<pre class="console"># dpkg -i zabbix-server-mysql_2.2.0-2+stupin_amd64.deb zabbix-agent_2.2.0-2+stupin_amd64.deb zabbix-frontend-php_2.2.0-2+stupin_all.deb zabbix-get_2.2.0-2+stupin_amd64.deb zabbix-sender_2.2.0-2+stupin_amd64.deb</pre>
+
+		<p>Или из репозитория:</p>
+
+		<pre class="console"># apt-get install zabbix-server-mysql zabbix-agent zabbix-frontend-php zabbix-get zabbix-sender</pre>
+
+		<p>Zabbix-агент позволит наблюдать за самим компьютером, на котором мы устанавливаем Zabbix.</p>
+
+		<p>Утилита zabbix-get может пригодиться для отладки пользовательских параметров Zabbix-агента: скриптов, которые вызываются Zabbix-агентом при запросе этого параметра. Скрипт должен выводить результат на стандартный вывод, а Zabbix-агент вернёт выведенное значение Zabbix-серверу или утилите zabbix-get.</p>
+
+		<p>Утилита zabbix-sender может пригодиться для скриптов, запускаемых из планировщика задач. Эти скрипты могут отправлять результаты измерений на Zabbix-сервер при помощи утилиты zabbix-sender.</p>
+
+		<h2>3. Настройка базы данных</h2>
+
+		<p>В процессе установки Zabbix-сервера будет выведено предложение настроить базу данных. Если вы ставите Zabbix в первый раз, то можно согласиться с предложением и настроить новую базу. Если же у вас имеется база данных, стоит ответить на предложение отрицательно и настроить подключение к базе данных вручную, в файле /etc/zabbix/zabbix_server.conf. Диалог настройки выглядит следующим образом:</p>
+
+		<img src="zabbix-server-mysql1.png" />
+
+		<img src="zabbix-server-mysql2.png" />
+
+		<img src="zabbix-server-mysql3.png" />
+
+		<img src="zabbix-server-mysql4.png" />
+
+		<p>Можно те же самые действия проделать и вручную. Подключаемся консольным клиентом к СУБД и создаём базу данных для Zabbix:</p>
+
+		<pre class="console">$ mysql -uroot -p
+&gt; CREATE DATABASE zabbix DEFAULT CHARACTER SET UTF8 COLLATE UTF8_GENERAL_CI;</pre>
+
+		<p>Создаём пользователя, от имени которого Zabbix будет подключаться к MySQL:</p>
+
+		<pre class="console">&gt; INSERT INTO user(host, user, password) VALUES('localhost', 'zabbix', PASSWORD('zabbix_password'));
+&gt; FLUSH PRIVILEGES;</pre>
+
+		<p>Даём пользователю zabbix полный доступ к базе данных zabbix:</p>
+
+		<pre class="console">&gt; GRANT ALL ON zabbix.* TO 'zabbix'@'localhost';
+&gt; FLUSH PRIVILEGES;</pre>
+
+		<p>Подключаемся к свежесозданной БД, создаём структуру БД и наполняем её данными:</p>
+
+		<pre class="console">&gt; USE zabbix;
+&gt; SOURCE /usr/share/zabbix-server-mysq/schema.sql
+&gt; SOURCE /usr/share/zabbix-server-mysq/data.sql
+&gt; SOURCE /usr/share/zabbix-server-mysq/images.sql</pre>
+
+		<p>Задаём пароль администратора системы мониторинга и выходим из MySQL:</p>
+
+		<pre class="console">&gt; UPDATE users SET passwd=MD5('zabbix_admin_password') WHERE alias='admin';
+&gt; QUIT</pre>
+
+		<h2>4. Настройка SNMP</h2>
+
+		<p>Удобно при опросе оборудования по SNMP в качестве OID'ов указывать не их числовое значение, а текстовое представление, взятое из соответствующего MIB-файла. Никто не запрещает использовать и другие MIB-файлы, но обычно мне бывает достаточно одного лишь IF-MIB'а. Файл IF-MIB скачивается в процессе установки пакета snmp-mibs-downloader, осталось лишь прописать его использование в файл конфигурации /etc/snmp/snmp.conf, вписав в него следующую строчку:</p>
+
+		<pre class="code">mibs +IF-MIB</pre>
+
+		<h2>5. Настройка сервера Zabbix</h2>
+
+		<p>Настроим Zabbix-сервер, чтобы он мог подключаться к БД. Если вы воспользовались средствами автоматической настройки базы данных, этот шаг можно пропустить.</p>
+
+		<p>Отредактируем файл конфигурации /etc/zabbix/zabbix_server.conf, установив значения соответствующих опций. В случае если Zabbix-сервер и сервер MySQL находятся на одном компьютере, желательно использовать Unix-сокет:</p>
+
+		<pre class="code">DBHost=localhost
+DBSocket=/var/run/mysqld/mysqld.sock
+DBName=zabbix
+DBUser=zabbix
+DBPassword=zabbix_password</pre>
+
+		<p>Другие полезные настройки, на которые следует обратить внимание:</p>
+
+		<pre class="code">ListenIP=127.0.0.1 
+
+StartPollers=5
+StartPollersUnreachable=1
+StartPingers=1
+Timeout=3
+
+SNMPTimeout=1
+SNMPRetries=3</pre>
+
+		<p>Назначение настроек:</p>
+
+		<ul>
+			<li><b>ListenIP</b> указывает IP-адрес, на котором Zabbix-сервер будет принимать подключения от веб-интерфейса и утилиты zabbix-sender. Может оказаться проще оставить эту настройку закомментированной, ограничив допустимые адреса клиентов при помощи пакетного фильтра.</li>
+
+			<li><b>StartPollers</b> задаёт количество процессов, занимающихся SNMP-проверками, проверками при помощи скриптов внешнего опроса и т.п. Если в меню веб-интерфейса "Администрирование" - "Очередь" не наблюдается отставания в опросе, то всё можно оставить как есть.</li>
+
+			<li><b>StartPollersUnreachable</b> задаёт количество процессов, занимающихся опросом не отвечающего оборудования. Обычно стоит сделать запас на случай крупных аварий, когда неотвечающего оборудования становится очень много.</li>
+
+			<li><b>StartPingers</b> - количество процессов, занимающихся опросом по ICMP. Для опроса используется утилита fping, для которой во временном каталоге формируются списки IP-адресов. Если опрашиваемых по ICMP узлов очень много, стоит увеличить эту настройку. Возможно также поможет использование в качестве временного каталога раздела tmpfs, т.к. при этом временные файлы будут создаваться в памяти. А может быть это и не поможет, потому что дисковый кэш на практике может нивелировать накладные расходы по записи и чтению этих файлов.</li>
+
+			<li><b>Timeout</b> - тот самый период ожидания ответа, значение которого в моём случае не подходило для опроса по SNMP. Для того, чтобы скрипты внешнего опроса успевали отрабатывать, я обычно задаю значение 30 секунд.</li>
+
+			<li><b>SNMPTimeout</b> и <b>SNMPRetries</b> - настройки, добавленные путём правки исходных текстов Zabbix. Задают период ожидания ответа по SNMP и количество попыток. Поскольку протокол SNMP работает поверх протокола UDP, который не гарантирует доставку, всё-же стоит делать несколько попыток опроса, а не прекращать опрос сразу после первой же неудачи. Я задал 1 секунду и 3 попытки соответственно. Считаю это оптимальными настройками.</li>
+		</ul>
+
+		<p>По мере роста количества наблюдаемых узлов и элементов данных может потребоваться увеличивать размеры кэшей и выставить в /etc/sysctl.conf настройку, ограничивающую максимальной размер одного сегмента разделяемой памяти, увеличивая её по мере необходимости:</p>
+
+		<pre class="code">kernel.shmmax = 268435456</pre>
+
+		<p>Изменить эту настройку в процессе работы системы можно запустив команду вида:</p>
+
+		<pre class="console"># sysctl kernel.shmmax=268435456</pre>
+
+		<h2>6. Настройка веб-сервера</h2>
+
+		<p>Настроим Lighttpd для обслуживания веб-интерфейса Zabbix. Для этого создадим файл /etc/lighttpd/conf-available/20-zabbix.conf со следующим содержимым:</p>
+
+		<pre class="code">alias.url += (
+  "/zabbix/" =&gt; "/usr/share/zabbix/"
+)
+
+$HTTP["url"] =~ "^/zabbix/conf/" {
+  url.access-deny = ("")
+}
+
+$HTTP["url"] =~ "^/zabbix/api/" {
+  url.access-deny = ("")
+}
+
+$HTTP["url"] =~ "^/zabbix/include/" {
+  url.access-deny = ("")
+}
+
+$HTTP["url"] =~ "^/zabbix/include/classes/" {
+  url.access-deny = ("")
+}</pre>
+
+		<p>Если хочется, чтобы веб-интерфейс Zabbix был доступен по адресу с собственным доменным именем, этот файл может выглядеть следующим образом:</p>
+
+		<pre class="code">$HTTP["host"] == "zabbix.domain.tld" {
+
+  alias.url += (
+    "/" =&gt; "/usr/share/zabbix/"
+  )
+
+  $HTTP["url"] =~ "^/conf/" {
+    url.access-deny = ("")
+  }
+
+  $HTTP["url"] =~ "^/api/" {
+    url.access-deny = ("")
+  }
+
+  $HTTP["url"] =~ "^/include/" {
+    url.access-deny = ("")
+  }
+
+  $HTTP["url"] =~ "^/include/classes/" {
+    url.access-deny = ("")
+  }
+}</pre>
+
+		<p>Затем откорректируем настройки PHP, так чтобы он удовлетворял требованиям веб-интерфейса Zabbix. Для этого создадим файл /etc/php5/mods-available/zabbix.ini и пропишем в него следующие настройки:</p>
+
+		<pre class="code">max_execution_time=300
+memory_limit=128M
+post_max_size=16M
+upload_max_filesize=2M
+max_input_time=300
+date.timezone=Asia/Yekaterinburg</pre>
+
+		<p>Включим использование этого файла при обработке CGI-сценариев PHP:</p>
+
+		<pre class="console"># cd /etc/php5/cgi/
+# ln -s ../mods-available/zabbix.ini conf.d/30-zabbix.ini</pre>
+
+		<p>Осталось включить поддержку PHP в режиме FastCGI в веб-сервере, а также включить веб-интерфейс Zabbix и попросить веб-сервер применить новые настройки:</p>
+
+		<pre class="console"># lighty-enable-mod fastcgi-php
+# lighty-enable-mod zabbix
+# /etc/init.d/lighttpd force-reload</pre>
+
+		<h2>7. Настройка веб-интерфейса</h2>
+
+		<p>Зайдём в веб-интерфейс Zabbix и проследуем по страницам мастера настроки веб-интерфейса:</p>
+
+		<img src="zabbix-frontend-php1.png" />
+
+		<img src="zabbix-frontend-php2.png" />
+
+		<img src="zabbix-frontend-php3.png" />
+
+		<img src="zabbix-frontend-php4.png" />
+
+		<img src="zabbix-frontend-php5.png" />
+
+		<img src="zabbix-frontend-php6.png" />
+
+		<p>Вместо использования мастера можно просто создать вручную файл conf/zabbix.conf.php со следующим содержанием:</p>
+
+		<pre class="code">&lt;?php
+// Zabbix GUI configuration file
+global $DB;
+
+$DB['TYPE']     = 'MYSQL';
+$DB['SERVER']   = 'localhost';
+$DB['PORT']     = '0';
+$DB['DATABASE'] = 'zabbix';
+$DB['USER']     = 'zabbix';
+$DB['PASSWORD'] = 'zabbix_db_password';
+
+// SCHEMA is relevant only for IBM_DB2 database
+$DB['SCHEMA'] = '';
+
+$ZBX_SERVER      = 'localhost';
+$ZBX_SERVER_PORT = '10051';
+$ZBX_SERVER_NAME = '';
+
+$IMAGE_FORMAT_DEFAULT = IMAGE_FORMAT_PNG;
+?&gt;</pre>
+
+		<h2>8. Настройка клиента точного времени</h2>
+
+		<p>Настраивать точное время полезно всегда. В случае системы мониторинга это особенно полезно, поскольку происходящие в системе события и исторические данные имеют привязку ко времени. Для синхронизации системного времени я использую демон OpenNTPd, разработанный в рамках проекта OpenBSD. Он не перегружен функционалом и легко настраивается. Установим пакет openntpd:</p>
+
+		<pre class="console"># apt-get install openntpd</pre>
+
+		<p>И пропишем в файл конфигурации /etc/openntpd/ntpd.conf опцию servers, которая использует в качестве серверов все IP-адреса, возвращаемые по доменному имени:</p>
+
+		<pre class="code">servers ntp.ufanet.ru</pre>
+
+		<h2>9. Настройка почтового релея</h2>
+
+		<p>Для отправки уведомлений системы мониторинга на почту можно воспользоваться Postfix, настроив его в режиме простейшего почтового релея. Для этого можно воспользоваться одной из моих прошлых заметок: <a href="../postfix-simpliest-relay/">Простейший почтовый релей на основе Postfix</a></p>
+
+		<h2>10. Заключение</h2>
+
+		<p>Здесь рассмотрена лишь установка системы мониторинга. Её настройка - отдельная большая тема. Чтобы получить начальное представление об устройстве системы, рекомендую обратиться к статье: <a href="http://www.sergeysl.ru/freebsd-zabbix/">FreeBSD: Установка и начальная настройка системы мониторинга Zabbix</a>. Более подробное описание можно найти на официальной вики-странице проекта: <a href="https://www.zabbix.com/documentation/ru/2.2/manual/introduction">Руководство по Zabbix 2.2</a>.</p>
+
+		<h2>11. Дополнение от 11 июня 2014 года.</h2>
+
+		<p>В патче были две грубейшие ошибки в настройках таймаутов и количества повторов SNMP, которые долгое время оставались незамеченными. Исправил патч.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Установка и настройка Zabbix 2.2.0 в Debian Wheezy">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

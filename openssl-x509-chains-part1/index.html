@@ -1,0 +1,344 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="перевод,Дитер Клюнтер,ssl,openssl" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2016-11-27 -->
+		<title>Дитер Клюнтер. Как создавать и администрировать цепочки сертификатов X.509, часть I, 2013</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Дитер Клюнтер. Как создавать и администрировать цепочки сертификатов X.509, часть I, 2013</h1>
+
+		<p>Перевод статьи: <a href="https://sys4.de/en/blog/2013/08/20/how-create-and-administer-x509-certificate-chains-part-i/">How to create and administer X.509 Certificate chains, Part I</a></p>
+
+		<p>Автор: Дитер Клюнтер (Dieter Klünter)</p>
+
+		<p>Сертификаты X.509 широко используются для обеспечения безопасной передачи данных и проверки целостности. Первая часть описывает создание частного удостоверяющего центра и сертификатов узла, а вторая часть имеет дело с администрированием сертификатов. Третья часть позволит вам создать собственные инструменты администрирования на основе Bash и Perl. Приведённые ниже примеры основаны на OpenSSL. В этой части мы опишем шаги, необходимые для генерации:</p>
+
+		<ul>
+			<li>корневого ключа для подписания,</li>
+
+			<li>частного удостоверяющего центра,</li>
+
+			<li>ключа узла и частного подписанного сертификата,</li>
+
+			<li>ключа пользователя и частного подписанного сертификата.</li>
+		</ul>
+
+		<p>Если у вас имеется доступ к доверенному общедоступному удостоверяющему центру, вы можете пропустить шаги инструкции по созданию своего собственного удостоверяющего центра и перейти к инструкции по созданию сертификата узла или пользователя.</p>
+
+		<h2>1. Создание удостоверяющего центра</h2>
+
+		<p>Для подписания сертификатов нужно сначала обзавестись корневым ключом для подписания.</p>
+
+		<p><b>Важно!</b> Этот корневой ключ нужно оберегать</p>
+
+		<p>Сначала приготовим файл с паролем:</p>
+
+		<pre class="console">$ touch myPassfile
+$ chmod 0600 myPassfile
+$ echo 'secret' &gt; myPassfile</pre>
+
+		<p>Теперь создадим корневой ключ для подписания:</p>
+
+		<pre class="console">$ openssl genrsa \
+  -des3 \
+  -passout file:myPassfile \
+  -out privateRoot.key \
+  2048</pre>
+
+		<p>Эта команда создаст ключ для подписания с именем privateRoot.key размером 2048 бит, защищённый паролем. На странице руководства genrsa(1) можно найти дополнительную информацию о доступных параметрах.</p>
+
+		<p>Перед созданием удостоверяющего центра и цепочки сертификатов нужно предпринять ряд шагов, которые облегчат дальнейшие действия.</p>
+
+		<ul>
+			<li>Файл конфигурации с параметрами для инициирования удостоверяющего центра, <b>myCA.conf</b></li>
+
+			<li>Файл конфигурации с параметрами для инициирования сертификата узла, <b>host.conf</b></li>
+
+			<li>Файл конфигурации с дополнительными параметрами X.509 для инициирования удостоверяющего центра, <b>myCA.ext</b></li>
+
+			<li>Файл конфигурации с дополнительными параметрами X.509 для инициирования сертификата узла, <b>host.ext</b></li>
+
+			<li>Последовательный файл для административных нужд, myCA.serial</li>
+		</ul>
+
+		<p>Для создания последовательного файла просто выполните следующие команды:</p>
+
+		<pre class="console">$ touch myCA.serial
+$ chmod 0644 myCA.serial
+$ echo '00' &gt; myCA.serial</pre>
+
+		<p>Теперь подготовим необходимые файлы конфигурации для инициации удостоверяющего центра.</p>
+
+		<p>myCA.conf:</p>
+
+		<pre class="code">[req]
+default_bits                   = 2048
+distinguished_name             = req_DN
+string_mask                    = nombstr
+
+[req_DN]
+countryName                    = "1. Название страны (двухбуквенный код)"
+countryName_default            = DE
+countryName_min                = 2
+countryName_max                = 2
+stateOrProvinceName            = "2. Название штата или провинции (полное название)"
+#stateOrProvinceName_default =
+localityName                   = "3. Название местности (например, город)"
+localityName_default           = Гамбург
+0.organizationName             = "4. Название организации (например, компания)"
+0.organizationName_default     = Моя организация
+organizationalUnitName         = "5. Название подразделения (например, отдел)"
+organizationalUnitName_default = Центр сертификации
+commonName                     = "6. Простое имя (например, название центра сертификации)"
+commonName_max                 = 64
+commonName_default             = Мой собственный центр сертификации
+emailAddress                   = "7. Адрес электронной почты (например, имя@полное_доменное_имя)"
+emailAddress_max               = 40
+emailAddress_default           = admin@example.com</pre>
+
+		<p>myCA.ext:</p>
+
+		<pre class="code">extensions            = x509v3
+
+[x509v3]
+basicConstraints      = CA:true,pathlen:0
+crlDistributionPoints = URI:http://example.com/ca/myca.crl
+nsCertType            = sslCA,emailCA,objCA
+nsCaPolicyUrl         = "http://example.com/ca/policy.html"
+nsCaRevocationUrl     = "http://example.com/ca/myca.crl"
+nsComment             = "Мой собственный центр сертификации"</pre>
+
+		<p>Для облегчения администрирования любой удостоверяющий центр должен предоставлять информацию о точках распространения, политике URL и URL списка отозванных сертификатов.</p>
+
+		<p>Чтобы создать запрос на сертификат, нужно предоставить некоторую информацию удостоверяющему центру, для чего надо создать myCA.conf. В этом файле конфигурации задаются значения по умолчанию, что позволяет изменять значения в соответствии с требованиями. Создадим запрос на подпись сертификата (Certificate Signing Request) на основе предоставленной информации:</p>
+
+		<pre class="console">$ openssl req \
+  -config myCA.conf \
+  -new \
+  -key privateRoot.key \
+  -passin file:myPassfile \
+  -out myPrivateCA.csr</pre>
+
+		<p>Для подписания этого запроса на сертификат приготовим файл конфигурации с дополнительными параметрами удостоверяющего центра myCA.ext, как это было описано выше.</p>
+
+		<pre class="console">$ openssl x509 \
+  -days 3650 \
+  -extfile myCA.ext \
+  -signkey privateRoot.key \
+  -CAserial myCA.serial \
+  -passin file:myPassfile \
+  -in myPrivateCA.csr \
+  -req \
+  -out myPrivateCA.crt</pre>
+
+		<p>Теперь у нас есть удостоверяющий центр в формате PEM, который можно использовать для подписания сертификатов узлов и пользователей.</p>
+
+		<h2>2. Создание сертификата узла</h2>
+
+		<p>Веб-сервер, SMTP-сервер, IMAP-сервер, LDAP-сервер и многие другие требуют безопасный транспортный слой (Transport Layer Security), проверку целостности клиентских приложений и служебных узлов. Чтобы включить это требование, сертификат узла должен быть соответствующим образом подписан удостоверяющим центром. В этой главе описано создание:</p>
+
+		<ul>
+			<li>приватного ключа узла</li>
+
+			<li>сертификата узла</li>
+
+			<li>файла конфигурации host.conf</li>
+
+			<li>файл конфигурации host.ext</li>
+		</ul>
+
+		<p>Сначала приготовим файл host.conf.</p>
+
+		<p>host.conf:</p>
+
+		<pre class="code">[req]
+default_bits                   = 2048
+distinguished_name             = req_DN
+string_mask                    = nombstr
+
+[req_DN]
+countryName                    = "1. Название страны (двухбуквенный код)"
+countryName_default            = DE
+countryName_min                = 2
+countryName_max                = 2
+stateOrProvinceName            = "2. Название штата или провинции (полное название)"
+#stateOrProvinceName_default =
+localityName                   = "3. Название местности (например, город)"
+localityName_default           = Гамбург
+0.organizationName             = "4. Название организации (например, компания)"
+0.organizationName_default     = Моя организация
+organizationalUnitName         = "5. Название подразделения (например, отдел)"
+organizationalUnitName_default = Мой сервер
+commonName                     = "6. Простое имя (например, название центра сертификации)"
+commonName_max                 = 64
+commonName_default             = host.example.com
+emailAddress                   = "7. Адрес электронной почты (например, имя@полное_доменное_имя)"
+emailAddress_max               = 40
+emailAddress_default           = admin@example.com</pre>
+
+		<p>host.ext:</p>
+
+		<pre class="code">extensions       = x509v3
+
+[x509v3]
+nsCertType       = server
+keyUsage         = digitalSignature,nonRepudiation,keyEncipherment
+extendedKeyUsage = msSGC,nsSGC,serverAuth
+subjectAltName   = DNS:ldap.example.com</pre>
+
+		<p>Атрибут типа commonName принимает в качестве значения полное имя узла. Атрибут типа subjectAltName позволяет указать несколько псевдонимов узлов, разделённых запятыми.</p>
+
+		<p>Сначала создадим приватный ключ узла:</p>
+
+		<pre class="console">$ touch hostPassfile
+$ chmod 0600 hostPassfile
+$ echo 'secret' &gt; hostPassfile
+$ openssl genrsa \
+  -des3 \
+  -passout file:hostPassfile \
+  -out myHost.key \
+  2048</pre>
+
+		<p><b>Совет.</b> Если вы не хотите использовать ключ узла, защищённый паролем, воспользуйтесь такой командой:</p>
+
+		<pre class="console">$ openssl genrsa -out myHost.key 2048</pre>
+
+		<p>Следующая команда создаст запрос на подпись сертификата:</p>
+
+		<pre class="console">$ openssl req \
+  -config host.conf \
+  -new \
+  -key myHost.key \
+  -passin file:hostPassfile \
+  -out MyHost.csr</pre>
+
+		<p>И наконец, можно подписать сертификат узла:</p>
+
+		<pre class="console">$ openssl x509 \
+  -days 1825 \
+  -extfile host.ext \
+  -CA myPrivateCA.crt \
+  -CAkey privateRoot.key
+  -passin file:myPassfile \
+  -CAserial myCA.serial \
+  -in MyHost.csr \
+  -req \
+  -out myHost.crt</pre>
+
+		<p>Теперь у нас есть сертификат узла, ключ сертификата узла и удостоверяющий центр. Далее мы подготовим сертификат пользователя.</p>
+
+		<h2>3. Создание сертификата пользователя</h2>
+
+		<p>Обычно сертификаты пользователя используются для аутентификации и подписания электронных писем. Как и в прошлый раз, для создания ключа пользователя и сертификата пользователя нужны те же шаги. Дополнительно в файл pkcs12 можно поместить полную цепочку сертификатов. Как и в случае сертификатов узлов, нужны несколько подготовительных шагов:</p>
+
+		<ul>
+			<li>файл user.conf</li>
+
+			<li>файл user.ext</li>
+
+			<li>ключ пользователя</li>
+
+			<li>сертификат пользователя</li>
+		</ul>
+
+		<p>Сначала создадим файл user.conf.</p>
+
+		<p>user.conf:</p>
+
+		<pre class="code">[req]
+default_bits                   = 2048
+distinguished_name             = req_DN
+string_mask                    = nombstr
+
+[req_DN]
+countryName                    = "1. Название страны (двухбуквенный код)"
+countryName_default            = DE
+countryName_min                = 2
+countryName_max                = 2
+stateOrProvinceName            = "2. Название штата или провинции (полное название)"
+#stateOrProvinceName_default =
+localityName                   = "3. Название местности (например, город)"
+localityName_default           = Гамбург
+0.organizationName             = "4. Название организации (например, компания)"
+0.organizationName_default     = Моя организация
+organizationalUnitName         = "5. Название подразделения (например, отдел)"
+organizationalUnitName_default = Люди
+commonName                     = "6. Простое название (например, название центра сертификации)"
+commonName_max                 = 64
+commonName_default             = Пол Смит
+emailAddress                   = "7. Адрес электронной почты (например, имя@полное_доменное_имя)"
+emailAddress_max               = 40
+emailAddress_default           = paul@example.com</pre>
+
+		<p>Этот набор данных создаст сертификат с выделенным именем:</p>
+
+		<pre class="code">dn: cn=Пол Смит,ou=Люди,o=Моя организация,c=DE</pre>
+
+		<p>user.ext:</p>
+
+		<pre class="code">extensions = x509v3
+
+[x509v3]
+nsCertType = client,email,objsign
+keyUsage   = digitalSignature,nonRepudiation,keyEncipherment,dataEncipherment</pre>
+
+		<p>Сначала создадим файл с приватным паролем и с приватным ключом:</p>
+
+		<pre class="console">$ touch userPassfile
+$ chmod 0600 userPassfile
+$ echo 'secret' &gt; userPassfile
+$ openssl genrsa \
+  -des3 \
+  -passout file:userPassfile \
+  -out myUser.key \
+  2048</pre>
+
+		<p>Далее создадим запрос на подписание сертификата пользователя:</p>
+
+		<pre class="console">$ openssl req \
+  -config user.conf \
+  -new \
+  -key myUser.key \
+  -passin file:userPassfile \
+  -out MyUser.csr</pre>
+
+		<p>И наконец, подпишем сертификат пользователя:</p>
+
+		<pre class="console">$ openssl x509 \
+  -days 1825 \
+  -extfile user.ext \
+  -CA myPrivateCA.crt \
+  -CAkey privateRoot.key
+  -passin file:myPassfile \
+  -CAserial myCA.serial \
+  -in MyUser.csr \
+  -req \
+  -out myUser.crt</pre>
+
+		<p>Теперь у нас есть правильная цепочка сертификатов, которая позволит нам создать архив pkcs12:</p>
+
+		<pre class="console">$ openssl pkcs12 \
+  -export \
+  -in myUser.crt \
+  -inkey myUser.key \
+  -passin file:userPassfile \
+  -CAfile myPrivateCA.crt \
+  -name MyUsercertificate \
+  -out myUser.pkcs12</pre>
+
+		<p>В части II будет рассмотрено администрирование сертификатов, обслуживание серийного файла и файла индекса.</p>
+
+		<h2>4. Примечание переводчика</h2>
+	       
+		<p>Вторая часть пока не опубликована автором, поэтому пока не будет и её перевода. Зато я нашёл другое более подробное руководство по администрированию собственного удостоверяющего центра на основе OpenSSL. Перевод этого руководства будет опубликован в дальнейших заметках этого блога. Следите за обновлениями.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Дитер Клюнтер. Как создавать и администрировать цепочки сертификатов X.509, часть I, 2013">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

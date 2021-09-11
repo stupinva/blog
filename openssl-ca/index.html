@@ -1,0 +1,113 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="перевод,ssl,openssl,Джэми Нгуен" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2016-12-04 -->
+		<title>Джэми Нгуен. Удостоверяющий центр OpenSSL, 2015</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Джэми Нгуен. Удостоверяющий центр OpenSSL, 2015</h1>
+
+		<p>Перевод статьи: <a href="https://jamielinux.com/docs/openssl-certificate-authority/index.html">OpenSSL Certificate Authority</a></p>
+
+		<p>Автор: Джэми Нгуен (Jamie Nguyen)</p>
+
+		<p>В этом руководстве рассматривается работа с вашим собственным удостоверяющим центром (CA - Certificate Authority) при помощи инструментов командной строки OpenSSL. С его помощью можно решать такие задачи как выпуск сертификатов серверов для защиты веб-сайта в локальной сети или выпуск сертификатов клиентов для их аутентификации на сервере.</p>
+
+		<h2>Оглавление</h2>
+
+		<ul>
+			<li>
+				<p><a href="../ca-root-pair/">Создание корневой пары</a></p>
+
+				<ul>
+					<li><a href="../ca-root-pair/#prepare-dir">Подготовка каталога</a></li>
+
+					<li><a href="../ca-root-pair/#prepare-confing">Подготовка файла конфигурации</a></li>
+
+					<li><a href="../ca-root-pair/#create-root-key">Создание корневого ключа</a></li>
+
+					<li><a href="../ca-root-pair/#create-root-certificate">Создание корневого сертификата</a></li>
+
+					<li><a href="../ca-root-pair/#check-root-certificate">Проверка корневого сертификата</a></li>
+				</ul>
+			</li>
+
+			<li>
+				<p><a href="../ca-intermediate-pair/">Создание промежуточной пары</a></p>
+
+				<ul>
+					<li><a href="../ca-intermediate-pair/#prepare-dir">Подготовка каталога</a></li>
+
+					<li><a href="../ca-intermediate-pair/#create-intermediate-key">Создание промежуточного ключа</a></li>
+
+					<li><a href="../ca-intermediate-pair/#create-intermediate-certificate">Создание промежуточного сертификата</a></li>
+
+					<li><a href="../ca-intermediate-pair/#check-intermediate-certificate">Проверка промежуточного сертификата</a></li>
+
+					<li><a href="../ca-intermediate-pair/#create-chain">Создание файла цепочки сертификатов</a></li>
+				</ul>
+			</li>
+
+			<li>
+				<p><a href="../ca-signing-certs/">Подписание сертификатов сервера и клиента</a></p>
+
+				<ul>
+					<li><a href="../ca-signing-certs/#create-key">Создание ключа</a></li>
+
+					<li><a href="../ca-signing-certs/#create-certificate">Создание сертификата</a></li>
+
+					<li><a href="../ca-signing-certs/#check-certificate">Проверка сертификата</a></li>
+
+					<li><a href="../ca-signing-certs/#deploy-certificate">Установка сертификата</a></li>
+				</ul>
+			</li>
+
+			<li>
+				<p><a href="../crl/">Списки отозванных сертификатов - CRL</a></p>
+
+				<ul>
+					<li><a href="../crl/#prepare-config">Подготовка файла конфигурации</a></li>
+
+					<li><a href="../crl/#create-crl">Создание CRL</a></li>
+
+					<li><a href="../crl/#revoke-certificate">Отзыв сертификата</a></li>
+
+					<li><a href="../crl/#crl-server">Использование CRL сервером</a></li>
+
+					<li><a href="../crl/#crl-client">Использование CRL клиентом</a></li>
+				</ul>
+			</li>
+
+			<li>
+				<p><a href="../ocsp/">Протокол интерактивного статуса сертификата - OCSP</a></p>
+
+				<ul>
+					<li><a href="../ocsp/#prepare-config">Подготовка файла конфигурации</a></li>
+
+					<li><a href="../ocsp/#create-ocsp-pair">Создание пары OCSP</a></li>
+
+					<li><a href="../ocsp/#revoke-certificate">Отзыв сертификата</a></li>
+				</ul>
+			</li>
+
+			<li>
+				<p><a href="../ca-configs/">Приложения</a></p>
+
+				<ul>
+					<li><a href="../ca-configs/#config-root">Файл конфигурации корневого удостоверяющего центра</a></li>
+
+					<li><a href="../ca-configs/#config-intermediate">Файл конфигурации промежуточного удостоверяющего центра</a></li>
+				</ul>
+			</li>
+		</ul>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Джэми Нгуен. Удостоверяющий центр OpenSSL, 2015">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

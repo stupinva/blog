@@ -1,0 +1,106 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="stretch,chromium,debian,linux,firefox,flashplayer,iceweasel" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2018-09-09 -->
+		<title>Flash-плеер в Debian Stretch</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Flash-плеер в Debian Stretch</h1>
+
+		<p>Чуть больше года назад я уже писал заметку <a href="../flash-1/">Flash-плагин для Chromium и Iceweasel/Firefox в Debian</a>, в которой чинил флеш-плеер в Debian Jessie. Я пропустил тот момент, когда из репозитория Debian исчезли пакеты со скриптами для установки и обновления флеш-плеера. В моей системе, обновлённой до Stretch, всё ещё присутствовали эти пакеты и поэтому я продолжал считать, что они всё ещё есть в репозиториях. Однако, в свежеустановленной системе Debian Stretch эти пакеты установить из репозиториев не удалось. И если решить проблему с установкой флеш-плеера для Firefox удалось довольно быстро, то над аналогичным решением для Chromium пришлось поломать голову. Результатом своих изысков и спешу поделиться.</p>
+
+		<h2>1. Flash-плагин NPAPI в Iceweasel</h2>
+
+		<p>В Debian Stretch браузер Iceweasel более ничем не отличается от браузера Firefox, т.к. <a href="https://www.opennet.ru/opennews/art.shtml?num=43894">Debian и Mozilla договорились об использовании бренда Firefox вместо Iceweasel</a>. Если в вашей системе всё ещё установлен Iceweasel, можете установить вместо него Firefox, а Iceweasel удалить.</p>
+
+		<h2>2. Flash-плагин NPAPI в Firefox</h2>
+
+		<p>Если браузер ещё не установлен в системе, сделать это можно такой командой:</p>
+
+		<pre class="console"># apt-get install firefox-esr firefox-esr-l10n-ru</pre>
+
+		<p>Скачиваем с официального сайта Adobe файл flash_player_npapi_linux.x86_64.tar.gz Для этого заходим на официальную страницу <a href="https://www.adobe.com/">Adobe</a>, переходим по ссылке внизу <a href="https://get.adobe.com/ru/flashplayer/">Adobe Flash Player</a>, переходим по ссылке <a href="https://get.adobe.com/ru/flashplayer/otherversions/">Нужен проигрыватель Flash Player для другого компьютера?</a>, в выпадающем списке «Шаг 1» вместо «Выберите операционную систему» выбираем «Linux (64-бит)», в выпадающем списке «Шаг 2» вместо «Выберите версию» выбираем «FP 30.0 for Linux 64-bit (tar.gz) - NPAPI» и жмём на кнопку «Загрузить».</p>
+
+		<p>Далее по пользователем root перейдём в каталог /usr/lib и создадим каталог для разделяемой библиотеки Flash-плеера:</p>
+
+		<pre class="console"># cd /usr/lib
+# mkdir flashplugin-nonfree
+# cd flashplugin-nonfree</pre>
+
+		<p>Извлечём разделяемую библиотеку из скачанного архива:</p>
+
+		<pre class="console"># tar xzvf /home/stupin/Downloads/flash_player_npapi_linux.x86_64.tar.gz libflashplayer.so</pre>
+
+		<p>Поменяем владельца библиотеки и права доступа к ней:</p>
+
+		<pre class="console"># chown root:root libflashplayer.so 
+# chmod u=rw,go=r libflashplayer.so</pre>
+
+		<p>Добавим разделяемую библиотеку в список альтернативных версий флеш-плагина для браузеров семейства Mozilla:</p>
+
+		<pre class="console"># update-alternatives --quiet --install /usr/lib/mozilla/plugins/flash-mozilla.so flash-mozilla.so /usr/lib/flashplugin-nonfree/libflashplayer.so 50</pre>
+
+		<p>И выберем эту альтернативу в качестве текущей используемой:</p>
+
+		<pre class="console"># update-alternatives --set flash-mozilla.so /usr/lib/flashplugin-nonfree/libflashplayer.so</pre>
+
+		<h2>3. Flash-плагин PPAPI в Chromium</h2>
+
+		<p>Если браузер ещё не установлен в системе, сделать это можно такой командой:</p>
+
+		<pre class="console"># apt-get install chromium chromium-l10n</pre>
+
+		<p>Скачиваем с официального сайта Adobe файл flash_player_npapi_linux.x86_64.tar.gz Для этого заходим на официальную страницу <a href="https://www.adobe.com/">Adobe</a>, переходим по ссылке внизу <a href="https://get.adobe.com/ru/flashplayer/">Adobe Flash Player</a>, переходим по ссылке <a href="https://get.adobe.com/ru/flashplayer/otherversions/">Нужен проигрыватель Flash Player для другого компьютера?</a>, в выпадающем списке «Шаг 1» вместо «Выберите операционную систему» выбираем «Linux (64-бит)», в выпадающем списке «Шаг 2» вместо «Выберите версию» выбираем «FP 30.0 for Linux 64-bit (tar.gz) - PPAPI» и жмём на кнопку «Загрузить».</p>
+
+		<p>Далее по пользователем root перейдём в каталог /usr/lib и создадим каталог для разделяемой библиотеки Flash-плеера:</p>
+
+		<pre class="console"># cd /usr/lib
+# mkdir pepperflashplugin-nonfree
+# cd pepperflashplugin-nonfree</pre>
+
+		<p>Извлечём разделяемую библиотеку из скачанного архива:</p>
+
+		<pre class="console"># tar xzvf /home/stupin/Downloads/flash_player_ppapi_linux.x86_64.tar.gz libpepflashplayer.so</pre>
+
+		<p>Поменяем владельца библиотеки и права доступа к ней:</p>
+
+		<pre class="console"># chown root:root libpepflashplayer.so 
+# chmod u=rw,go=r libpepflashplayer.so</pre>
+
+		<p>Извлечём файл manifest.json, чтобы посмотреть версию скачанного плагина:</p>
+
+		<pre class="console"># tar xzvf /home/stupin/Downloads/flash_player_ppapi_linux.x86_64.tar.gz manifest.json</pre>
+
+		<p>Смотрим версию скачанного плагина и удаляем этот файл - он нам больше не понадобится:</p>
+
+		<pre class="console"># grep version manifest.json 
+  "version": "30.0.0.154",</pre>
+
+		<p>Открываем файл /etc/chromium.d/default-flags и вписываем вниз файла опции, которые указывают путь к плагину и его версию:</p>
+
+		<pre class="code">export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --ppapi-flash-path=/usr/lib/pepperflashplugin-nonfree/libpepflashplayer.so --ppapi-flash-version=30.0.0.154"</pre>
+
+		<p>Версию указывать необходимо, т.к. в противном случае определяется версия 11.x и некоторые флеш-приложения отказываются работать, требуя обновить флеш-плеер.</p>
+
+		<p>Теперь нужно завершить браузер, завершить текущий сеанс (выйти из графической оболочки). Это тоже необходимо сделать, т.к. в противном случае изменения из отредактированного файла не будут применены к текущему сеансу и настроенные в этом файле переменные окружения в текущем сеансе сохранят свои прежние значения.</p>
+
+		<p>После повторного входа можно запустить браузер и перейти по ссылке <a href="chrome://version/">chrome://version/</a> или <a href="chrome://flash/">chrome://flash/</a> и убедиться, что в строчке Flash или Flash plugin соответственно фигурируют установленные версия плагина и путь к нему.</p>
+
+		<h2>4. Использованные материалы</h2>
+
+		<ul>
+			<li><a href="https://unix.stackexchange.com/questions/391467/how-to-install-flash-on-debian-stretch/391472#391472">How to install Flash on Debian Stretch?</a></li>
+
+			<li><a href="https://www.altlinux.org/PepperFlash_%D0%B2_Chromium">PepperFlash в Chromium</a></li>
+		</ul>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Flash-плеер в Debian Stretch">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

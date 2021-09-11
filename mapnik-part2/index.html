@@ -1,0 +1,106 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="osm2pgsql,postgresql,mapnik,postgis" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2012-07-29 -->
+		<title>Настройка базы данных для генератора тайлов Mapnik</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Настройка базы данных для генератора тайлов Mapnik</h1>
+
+		<p>Продолжение серии заметок, посвящённых настройке тайлового сервера. Смотрите также предыдущую заметку <a href="../mapnik-part1/">Подготовка карт для генератора тайлов Mapnik</a>.</p>
+
+		<h2>1. Введение</h2>
+
+		<p>Эта заметка посвящена настройке базы данных для генератора тайлов <a href="http://mapnik.org/">Mapnik</a>. Генератор тайлов - это программа, которая на основе векторного описания карты и файла описания стилей формирует квадратные растровые картинки с изображением карты.</p>
+
+		<p>Генератор тайлов можно использовать в сочетании с различными JavaScript-библиотеками, позволяющими прямо в веб-браузере просматривать карту. Проект <a href="http://www.openstreetmap.org/">OpenStreetMap</a>, в котором используется генератор тайлов Mapnik, пользуется JavaScript-бибилиотекой <a href="http://openlayers.org/">OpenLayers</a>. Забегая вперёд хочу сказать, что мой выбор остановился на JavaScript-библиотеке Киевского программиста Владимира Агафонкина <a href="http://leaflet.cloudmade.com/">LeafLet</a>, которая хотя и уступает библиотеке OpenLayers по возможностям, зато проще в использовании и имеет более качественную документацию.</p>
+
+		<p>Вообще, о начинке проекта OpenStreetMap могу сказать следующее. Видно что проект динамично развивается и не имеет какой-либо генеральной линии развития. Основные компоненты проекта написаны на самых разных языках: C++ и Python (Mapnik), Java (JOSM и Osmosis), JavaScript (OpenLayers, но тут уж без альтернатив), Ruby On Rails (веб-сайт OpenStreetMap). Одно время сайт OpenStreetMap хранил свои данные в MySQL, в то время как вся географическая информация хранилась в PostgreSQL. Однако, разработчики сайта всё-таки перешли полностью на PostgreSQL, отказавшись от MySQL.</p>
+
+		<p>Из-за такого буйства технологий и энергичности развития бывает довольно трудно подобрать согласованные версии программ, которые бы хорошо работали друг с другом, а документация часто оказывается либо не полной, либо просто устаревшей. Есть много побочных и альтернативных проектов, которые тоже частично устарели, а частично потеряли совместимость с современными версиями программ.</p>
+
+		<p>Для облегчения настройки я советую взять Debian 7.0 Wheezy, хотя и на Debian 6.0 Squeeze настройка тоже возможна, но она сопряжена с бОльшими усилиями (подключение сторонних репозиториев, пересборка пакетов и т.п.). Всё дальнейшее описание делается применительно именно к Debian 7.0 Wheezy.</p>
+
+		<h2>2. Установка СУБД</h2>
+
+		<p>Установим пакеты, необходимые нам на этом этапе:</p>
+
+		<pre class="console"># apt-get install postgresql postgresql-contrib postgresql-9.1-postgis osm2pgsql</pre>
+
+		<p>Настраиваем авторизацию по паролю в файле /etc/postgresql/9.1/main/pg_hba.conf, заменив первую строчку на вторую:</p>
+
+		<pre class="code">local all all peer</pre>
+
+		<pre class="code">local all all password</pre>
+
+		<p>Теперь выполним тюнинг ядра Linux для увеличения скорости работы PostgreSQL:</p>
+
+		<pre class="console"># sysctl kernel.shmmax=268435456</pre>
+
+		<p>И пропишем такую же настройку в файле /etc/sysctl.conf:</p>
+
+		<pre class="code">kernel.shmmax=268435456</pre>
+
+		<p>После тюнинга ядра можно произвести тюнинг самого сервера PostgreSQL. Для этого в файле /etc/postgresql/9.1/main/postgresql.conf изменим следующие строчки:</p>
+
+		<pre class="code">shared_buffers = 128MB
+checkpoint_segments = 20
+maintenance_work_mem = 256MB
+autovacuum = off</pre>
+
+		<p>Перезапустим сервер PostgreSQL, чтобы новые настройки вступили в силу:</p>
+
+		<pre class="console"># /etc/init.d/postgresql restart</pre>
+
+		<h2>3. Создание базы данных для Mapnik.</h2>
+
+		<p>Теперь создадим пользователя, базу данных, установим в неё расширения, необходимые для работы Mapnik. Войдём под администратором PostgreSQL:</p>
+
+		<pre class="console"># su - postgres</pre>
+
+		<p>Создадим пользователя:</p>
+
+		<pre class="console">$ createuser -PRDS osm</pre>
+
+		<p>Создадим базу данных, принадлежащую только что созданному пользователю:</p>
+
+		<pre class="console">$ createdb -E UTF8 -O osm osm</pre>
+
+		<p>Установим в базу данных расширение для индексирования геометрических объектов, находящееся в пакете postgresql-contrib:</p>
+
+		<pre class="console">$ psql -d osm -c "CREATE EXTENSION btree_gist;"</pre>
+
+		<p>Установим в базу данных расширение PostGIS, необходимое для осуществления различных операций над геометрическими объектами. Расширение находится в пакете postgresql-9.1-postgis. Подробнее почитать о функциях, добавляемых PostGIS в PostgreSQL, можно на официальном сайте проекта: <a href="http://postgis.refractions.net/documentation/manual-1.5/">PostGIS 1.5.4 Manual</a>.</p>
+
+		<pre class="console">$ psql -d osm -f /usr/share/postgresql/9.1/contrib/postgis-1.5/postgis.sql</pre>
+
+		<p>Делаем пользователя osm владельцем таблиц geometry_columns и spatial_ref_sys, чтобы osm2pgsql мог импортировать карты от имени пользователя osm:</p>
+
+		<pre class="console">$ psql -d osm -c "ALTER TABLE geometry_columns OWNER TO osm; ALTER TABLE spatial_ref_sys OWNER TO osm;"</pre>
+
+		<p>Теперь нужно установить описания проекций. Самому Mapnik'у нужна лишь одна проекция - 900913, проекция Меркатора. Установить её можно с помощью следующей команды:</p>
+
+		<pre class="console">$ psql -d osm -f /usr/share/doc/osm2pgsql/examples/900913.sql</pre>
+
+		<p>Я же установил все доступные проекции, так как в дальнейшем я с помощью SQL-запросов извлекал геометрическую информацию в проекции 4326 WGS84 (обычные широта и долгота), преобразовывая проекцию объектов с помощью функции PostGIS ST_Transform.</p>
+
+		<pre class="console">$ psql -d osm -f /usr/share/postgresql/9.1/contrib/postgis-1.5/spatial_ref_sys.sql</pre>
+
+		<p>На этом настройка базы данных завершается, можно выйти из сеанса пользователя postgres, открытого командой su.</p>
+
+		<h2>4. Заливка данных в базу данных Mapnik</h2>
+
+		<p>Осталось залить карты в базу данных. Для этого можно воспользоваться утилитой из одноимённого пакета osm2pgsql:</p>
+
+		<pre class="console">$ osm2pgsql -U osm -d osm -W /home/stupin/Downloads/RU-BA_TA_ORE.pbf</pre>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Настройка базы данных для генератора тайлов Mapnik">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

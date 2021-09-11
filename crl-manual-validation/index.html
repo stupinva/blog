@@ -1,0 +1,145 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="перевод,crl,ssl,Реми ван Элст,openssl" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2016-10-30 -->
+		<title>Реми ван Элст. OpenSSL: Ручная проверка сертификата по CRL, 2015</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Реми ван Элст. OpenSSL: Ручная проверка сертификата по CRL, 2015</h1>
+
+		<p>Перевод статьи: <a href="https://raymii.org/s/articles/OpenSSL_manually_verify_a_certificate_against_a_CRL.html">OpenSSL: Manually verify a certificate against a CRL</a></p>
+
+		<p>Автор: Реми ван Элст (Remy van Elst)</p>
+
+		<p>В этой статье будет показано, как можно вручную проверить сертификат по CRL. CRL означает Certificate Revocation List - список отозванных сертификатов - и является одним из способов проверки статуса сертификата. Этот способ является альтернативой для OCSP - Online Certificate Status Protocol - протокола интерактивного статуса сертификата.</p>
+
+		<p>Больше о CRL можно прочитать на <a href="https://en.wikipedia.org/wiki/Revocation_list">Википедии</a>.</p>
+
+		<p>Если нужно проверить сертификат по OCSP, обратитесь к <a href="../ocsp-manual-validation/">другой моей статье</a>.</p>
+
+		<p>Воспользуемся OpenSSL. Я использую такую версию:</p>
+
+		<pre class="console">$ openssl version
+OpenSSL 1.0.2 22 Jan 2015</pre>
+
+		<h2>1. Получение сертификата с CRL</h2>
+
+		<p>Для начала нужно получить сертификат проверяемого веб-сайта. Возьмём в качестве примера Википедию. Получить сертификат можно при помощи следующей команды:</p>
+
+		<pre class="console">openssl s_client -connect wikipedia.org:443 2&gt;&amp;1 &lt; /dev/null | sed -n '/-----BEGIN/,/-----END/p'</pre>
+
+		<p>Сохраним вывод в файл, например, wikipedia.pem:</p>
+
+		<pre class="console">openssl s_client -connect wikipedia.org:443 2&gt;&amp;1 &lt; /dev/null | sed -n '/-----BEGIN/,/-----END/p' &gt; wikipedia.pem</pre>
+
+		<p>Теперь проверим, есть ли у этого сертификата URI CRL:</p>
+
+		<pre class="console">openssl x509 -noout -text -in wikipedia.pem | grep -A 4 'X509v3 CRL Distribution Points'
+X509v3 CRL Distribution Points: # Точки распространения X509v3 CRL
+    Full Name:                                                                           # Полное имя
+      URI:http://crl.globalsign.com/gs/gsorganizationvalsha2g2.crl</pre>
+
+		<p>Если ничего не выведено, значит у сертификата нет URI CRL. Его нельзя проверить по CRL.</p>
+
+		<p>Скачиваем CRL:</p>
+
+		<pre class="console">wget -O crl.der http://crl.globalsign.com/gs/gsorganizationvalsha2g2.crl</pre>
+
+		<p>CRL имеет двоичный формат <b>DER</b>. Команде OpenSSL нужен файл в формате PEM (base64-кодированный DER), поэтому преобразуем его:</p>
+
+		<pre class="console">openssl crl -inform DER -in crl.der -outform PEM -out crl.pem</pre>
+
+		<h2>2. Получение цепочки сертификатов</h2>
+
+		<p>Кроме проверяемого сертификата нужна цепочка сертификатов. Поэтому нужно получить цепочку сертификатов для проверяемого домена - <b>wikipedia.org</b>. Воспользовавшись опцией <b>-showcerts</b> команды <b>openssl s_client</b>, можно увидеть все сертификаты, принадлежащие цепочке:</p>
+
+		<pre class="console">openssl s_client -connect wikipedia.org:443 -showcerts 2&gt;&amp;1 &lt; /dev/null</pre>
+
+		<p>Будет выведено много текста, но нас интересует в нём следующее:</p>
+
+		<pre class="console">1 s:/C=US/O=DigiCert Inc/OU=www.digicert.com/CN=DigiCert High Assurance CA-3
+i:/C=US/O=DigiCert Inc/OU=www.digicert.com/CN=DigiCert High Assurance EV Root CA
+-----BEGIN CERTIFICATE-----
+MIIGWDCCBUCgAwIBAgIQCl8RTQNbF5EX0u/UA4w/OzANBgkqhkiG9w0BAQUFADBs
+MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3
+d3cuZGlnaWNlcnQuY29tMSswKQYDVQQDEyJEaWdpQ2VydCBIaWdoIEFzc3VyYW5j
+ZSBFViBSb290IENBMB4XDTA4MDQwMjEyMDAwMFoXDTIyMDQwMzAwMDAwMFowZjEL
+MAkGA1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3
+LmRpZ2ljZXJ0LmNvbTElMCMGA1UEAxMcRGlnaUNlcnQgSGlnaCBBc3N1cmFuY2Ug
+Q0EtMzCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAL9hCikQH17+NDdR
+CPge+yLtYb4LDXBMUGMmdRW5QYiXtvCgFbsIYOBC6AUpEIc2iihlqO8xB3RtNpcv
+KEZmBMcqeSZ6mdWOw21PoF6tvD2Rwll7XjZswFPPAAgyPhBkWBATaccM7pxCUQD5
+BUTuJM56H+2MEb0SqPMV9Bx6MWkBG6fmXcCabH4JnudSREoQOiPkm7YDr6ictFuf
+1EutkozOtREqqjcYjbTCuNhcBoz4/yO9NV7UfD5+gw6RlgWYw7If48hl66l7XaAs
+zPw82W3tzPpLQ4zJ1LilYRyyQLYoEt+5+F/+07LJ7z20Hkt8HEyZNp496+ynaF4d
+32duXvsCAwEAAaOCAvowggL2MA4GA1UdDwEB/wQEAwIBhjCCAcYGA1UdIASCAb0w
+ggG5MIIBtQYLYIZIAYb9bAEDAAIwggGkMDoGCCsGAQUFBwIBFi5odHRwOi8vd3d3
+LmRpZ2ljZXJ0LmNvbS9zc2wtY3BzLXJlcG9zaXRvcnkuaHRtMIIBZAYIKwYBBQUH
+AgIwggFWHoIBUgBBAG4AeQAgAHUAcwBlACAAbwBmACAAdABoAGkAcwAgAEMAZQBy
+AHQAaQBmAGkAYwBhAHQAZQAgAGMAbwBuAHMAdABpAHQAdQB0AGUAcwAgAGEAYwBj
+AGUAcAB0AGEAbgBjAGUAIABvAGYAIAB0AGgAZQAgAEQAaQBnAGkAQwBlAHIAdAAg
+AEMAUAAvAEMAUABTACAAYQBuAGQAIAB0AGgAZQAgAFIAZQBsAHkAaQBuAGcAIABQ
+AGEAcgB0AHkAIABBAGcAcgBlAGUAbQBlAG4AdAAgAHcAaABpAGMAaAAgAGwAaQBt
+AGkAdAAgAGwAaQBhAGIAaQBsAGkAdAB5ACAAYQBuAGQAIABhAHIAZQAgAGkAbgBj
+AG8AcgBwAG8AcgBhAHQAZQBkACAAaABlAHIAZQBpAG4AIABiAHkAIAByAGUAZgBl
+AHIAZQBuAGMAZQAuMBIGA1UdEwEB/wQIMAYBAf8CAQAwNAYIKwYBBQUHAQEEKDAm
+MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wgY8GA1UdHwSB
+hzCBhDBAoD6gPIY6aHR0cDovL2NybDMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0SGln
+aEFzc3VyYW5jZUVWUm9vdENBLmNybDBAoD6gPIY6aHR0cDovL2NybDQuZGlnaWNl
+cnQuY29tL0RpZ2lDZXJ0SGlnaEFzc3VyYW5jZUVWUm9vdENBLmNybDAfBgNVHSME
+GDAWgBSxPsNpA/i/RwHUmCYaCALvY2QrwzAdBgNVHQ4EFgQUUOpzidsp+xCPnuUB
+INTeeZlIg/cwDQYJKoZIhvcNAQEFBQADggEBAB7ipUiebNtTOA/vphoqrOIDQ+2a
+vD6OdRvw/S4iWawTwGHi5/rpmc2HCXVUKL9GYNy+USyS8xuRfDEIcOI3ucFbqL2j
+CwD7GhX9A61YasXHJJlIR0YxHpLvtF9ONMeQvzHB+LGEhtCcAarfilYGzjrpDq6X
+dF3XcZpCdF/ejUN83ulV7WkAywXgemFhM9EZTfkI7qA5xSU1tyvED7Ld8aW3DiTE
+JiiNeXf1L/BXunwH1OH8zVowV36GEEfdMR/X/KLCvzB8XSSq6PmuX2p0ws5rs0bY
+Ib4p1I5eFdZCSucyb6Sxa1GDWL4/bcf72gMhy2oWGU4K8K2Eyl2Us1p292E=
+-----END CERTIFICATE-----</pre>
+
+		<p>Как можно увидеть, это номер 1. Номер 0 - это сертификат Википедии, который у нас уже есть. Если у проверяемого сайта в цепочке имеется больше сертификатов, они все будут отображены. Сохраним все сертификаты в том порядке, в котором их вывел OpenSSL (первый, который непосредственно выпустил сертификат проверяемого сервера, затем тот, который выпустил этот сертификат и так далее с корневым или самым корневым в конце файла) в файл с именем <b>chain.pem</b>.</p>
+
+		<p>Можно использовать следующую команду для сохранения всех сертификатов, выведенных командой OpenSSL, в файл с именем <b>chain.pem</b>. Обратитесь к этой статье за более подробной информацией.</p>
+
+		<pre class="console">OLDIFS=$IFS; \
+IFS=':' certificates=$(openssl s_client -connect wikipedia.org:443 -showcerts -tlsextdebug -tls1 2&gt;&amp;1 &lt; /dev/null \
+                         | sed -n '/-----BEGIN/,/-----END/ {/-----BEGIN/ s/^/:/; p}'); \
+for certificate in ${certificates#:}; do \
+  echo $certificate | tee -a chain.pem ; \
+done; \
+IFS=$OLDIFS</pre>
+
+		<h2>3. Объединение CRL и цепочки</h2>
+
+		<p>Команде openssl для проверки нужны цепочка сертификатов и CRL в формате PEM, соединённые вместе. Можно пропустить CRL, но тогда проверка по CRL не будет выполнена, произойдёт проверка только сертификата по цепочке.</p>
+
+		<pre class="console">cat chain.pem crl.pem &gt; crl_chain.pem</pre>
+
+		<h2>4. Проверка OpenSSL</h2>
+
+		<p>Теперь у нас есть все данные, необходимые для проверки сертификата.</p>
+
+		<pre class="console">$ openssl verify -crl_check -CAfile crl_chain.pem wikipedia.pem
+wikipedia.pem: OK</pre>
+
+		<p>Результат показывает, что сертификат действительный.</p>
+
+		<h2>5. Отозванный сертификат</h2>
+
+		<p>Если имеется отозванный сертификат, его так же можете проверить способом, описанным выше. Ответ будет выглядеть следующим образом:</p>
+
+		<pre class="console">$ openssl verify -crl_check -CAfile crl_chain.pem revoked-test.pem
+revoked-test.pem: OU = Domain Control Validated, OU = PositiveSSL, CN = xs4all.nl
+error 23 at 0 depth lookup:certificate revoked                                    # ошибка 23 на 0 глубине поиска: сертификат отозван</pre>
+
+		<p>Имея сертификат и цепочку, эти проверки можно выполнить странице Verisign для проверки отозванных сертификатов: <a href="https://test-sspev.verisign.com:2443/test-SSPEV-revoked-verisign.html.">https://test-sspev.verisign.com:2443/test-SSPEV-revoked-verisign.html</a>.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Реми ван Элст. OpenSSL: Ручная проверка сертификата по CRL, 2015">Написать автору перевода</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

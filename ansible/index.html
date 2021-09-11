@@ -1,0 +1,248 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="stretch,debian,linux,ansible" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2019-09-15 -->
+		<title>Управление конфигурациями с помощью Asnible</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Управление конфигурациями с помощью Asnible</h1>
+
+		<h2>1. Настройка управляющей машины</h2>
+
+		<p>На управляющей машине устанавливаем ansible:</p>
+
+		<pre class="console"># apt-get install ansible</pre>
+
+		<p>В домашнем каталоге создаём каталог, в котором будем хранить все файлы для настройки удалённых компьютеров. Если нужно работать над проектом совместно с другими системными администраторами и отслеживать изменения, сделанные ими, то лучше сразу же создать в этом каталоге git-репозиторий:</p>
+
+		<pre class="console">$ mkdir playbooks
+$ git init</pre>
+
+		<p>Создадим файл конфигурации ansible.cfg и пропишем в него следующие настройки:</p>
+
+		<pre class="code">[defaults]
+inventory = hosts
+remote_user = ansible
+private_key_file = .ssh/id_rsa</pre>
+
+		<p>Сразу же сгенерируем ssh-ключ, который будем устанавливать на удалённые системы для их настройки при помощи ansible:</p>
+
+		<pre class="console">$ mkdir .ssh
+$ ssh-keygen -f .ssh/id_rsa
+$ chmod go= -R .ssh</pre>
+
+		<p>Каталог .ssh помещать в git-репозиторий не стоит.</p>
+
+		<p>Создадим файл hosts, в котором будем отмечать узлы, управляемые при помощи ansible. Например, файл с одним-единственным узлом с именем mon может выглядеть следующим образом:</p>
+
+		<pre class="code">mon ansible_host=169.254.252.2</pre>
+
+		<h2>2. Настройка управляемой машины</h2>
+
+		<p>На управляемой машине после настройки сети и установки OpenSSH-сервера необходимо установить несколько пакетов, которые будут использоваться ansible:</p>
+
+		<pre class="console"># apt-get install python2.7-minimal python2.7-stdlib python-minimal</pre>
+
+		<p>Также установим sudo, чтобы при удалённой настройке можно было выполнять действия от имени пользователя root:</p>
+
+		<pre class="console"># apt-get install sudo</pre>
+
+		<p>Добавим учётную запись специально для удалённой настройки:</p>
+
+		<pre class="console"># useradd -c 'Ansible account' -m ansible</pre>
+
+		<p>Сразу же дадим возможность этой учётной записи использовать sudo для работы с правами пользователя root:</p>
+
+		<pre class="console"># visudo</pre>
+
+		<p>Добавляем строчки:</p>
+
+		<pre class="code">Defaults:ansible !requiretty
+ansible ALL=(root:ALL) NOPASSWD:ALL</pre>
+
+		<p>Скопируем на удалённую машину SSH-ключ:</p>
+
+		<pre class="console">$ ssh-copy-id -i .ssh/id_rsa.pub ansible@169.254.252.2</pre>
+
+		<h2>3. Первый сценарий</h2>
+
+		<p>Для первого сценария возьмём простейшую задачу - настройки файла /etc/resolv.conf на удалённом компьютере.</p>
+
+		<p>Создадим на управляющей машине в каталоге проекта файл сценария resolvconf.yml со следующим содержимым:</p>
+
+		<pre class="code">---
+- name: Configure resolv.conf
+  hosts: mon
+  become: True
+  tasks:
+    - name: copy /etc/resolv.conf
+      template:
+        src: templates/resolv.conf
+        dest: /etc/resolv.conf
+        owner: root
+        group: root
+        mode: 0644</pre>
+
+		<p>Создадим каталог templates для шаблонов файлов конфигурации:</p>
+
+		<pre class="console">$ mkdir templates</pre>
+
+		<p>Создадим шаблон конфигурации templates/resolv.conf для файла /etc/resolv.conf управляемого компьютера:</p>
+
+		<pre class="code">{% if resolvconf.domain %}
+domain {{ resolvconf.domain }}
+{% endif %}
+{% for ip in resolvconf.nameservers %}
+nameserver {{ ip }}
+{% endfor %}</pre>
+
+		<p>Значения переменных хранятся в так называемом реестре ansible. Он представляет собой файл в формате YML и может находиться либо в каталоге host_vars, либо в каталоге group_vars. В каталоге host_vars хранятся настройки, специфичные для каждого отдельного управляемого узла. Внутри этого каталога создаётся фай, имя которого совпадает с указанным в файле hosts. В каталоге group_vars хранятся настройки, общие для определённой группы узлов. Внутри этого каталога создаётся файл, имя которого совпадает с именем группы, указанным в файле hosts.</p>
+
+		<p>Создадим каталог host_vars с переменными узлов:</p>
+
+		<pre class="console">$ mkdir host_vars</pre>
+
+		<p>И внутри каталога создадим файл mon со следующим содержимым:</p>
+
+		<pre class="code">resolvconf:
+  domain: stupin.su
+  nameservers:
+    - 169.254.252.1</pre>
+
+		<p>Осталось выполнить наш первый простейший сценарий. Для этого воспользуемся командой ansible-playbook:</p>
+
+		<pre class="console">$ ansible-playbook resolvconf.yml</pre>
+
+		<h2>4. Переключение на непривилегированного пользователя</h2>
+
+		<p>В прошлом сценарии имелась опция, которая заставляла выполнять действия от имени пользователя root:</p>
+
+		<pre class="code">become: True</pre>
+
+		<p>В случае, если нужно выполнять действия от имени другого, непривилегированного пользователя, можно столкнуться с проблемами. Например, администратором баз данных PostgresSQL является системный пользователь postgres. Создать нового пользователя или базу данных можно только от его имени. Поэтому, задача такого вида:</p>
+
+		<pre class="code">- name: createuser -P &lt;login&gt;
+  postgresql_user:
+    name: "{{ item.login }}"
+    password: "{{ item.password }}"
+  with_items: "{{ postgresql_databases }}"
+  when: postgresql_databases</pre>
+
+		<p>Завершится такой ошибкой:</p>
+
+		<pre class="code">unable to connect to database: ВАЖНО:  пользователь "postgres" не прошёл проверку подлинности (Peer)</pre>
+
+		<p>Однако и простого указания опций переключения на пользователя postgres оказывается недостаточно:</p>
+
+		<pre class="code">- name: createuser -P &lt;login&gt;
+  become: True
+  become_user: postgres
+  postgresql_user:
+    name: "{{ item.login }}"
+    password: "{{ item.password }}"
+  with_items: "{{ postgresql_databases }}"
+  when: postgresql_databases</pre>
+
+		<p>В этом случае попытка выполнить задачу завершается следующей ошибкой (отформатировано для наглядности):</p>
+
+		<pre class="code">Failed to set permissions on the temporary files
+Ansible needs to create when becoming an unprivileged user (rc: 1, err:
+  chown: изменение владельца '/tmp/ansible-tmp-1549203485.91-25063771984034/': Операция не позволена
+  chown: изменение владельца '/tmp/ansible-tmp-1549203485.91-25063771984034/postgresql_user.py': Операция не позволена
+).
+For information on working around this, see https://docs.ansible.com/ansible/become.html#becoming-an-unprivileged-user</pre>
+
+		<p>После доработки в соответствии с материалами по ссылке, указанной в тексте ошибки, задача приобретает следующий вид:</p>
+
+		<pre class="code">- name: createuser -P &lt;login&gt;
+  become: yes
+  become_user: postgres
+  vars:
+    ansible_ssh_pipelining: true
+  postgresql_user:
+    name: "{{ item.login }}"
+    password: "{{ item.password }}"
+  with_items: "{{ postgresql_databases }}"
+  when: postgresql_databases</pre>
+
+		<p>Но и этого оказывается недостаточно, т.к. возникает следующая ошибка:</p>
+
+		<pre class="code">failed: [mon] (item={u'login': u'zabbix', u'password': u'xxxxxxxxxxxxxxxx', u'name': u'zabbix'}) =&gt; {
+    "failed": true, 
+    "item": {
+        "login": "zabbix", 
+        "name": "zabbix", 
+        "password": "xxxxxxxxxxxxxxxx"
+    }, 
+    "module_stderr": "sudo: a password is required\n", 
+    "module_stdout": ""
+}
+
+MSG:
+
+MODULE FAILURE</pre>
+
+		<p>Как видно, ansible пытается переключиться на указанного пользователя при помощи sudo. Но, когда я настраивал sudo для ansible, то указал разрешение переключаться без указания пароля только на пользователя root:</p>
+
+		<pre class="code">ansible ALL=(root:ALL) NOPASSWD:ALL</pre>
+
+		<p>Чтобы разрешить пользователю ansible переключаться ещё и на пользователя postgres, нужно добавить через команду visudo ещё одно разрешение:</p>
+
+		<pre class="code">ansible ALL=(postgres:ALL) NOPASSWD:ALL</pre>
+
+		<p>После этого задача выполняется успешно.</p>
+
+		<h2>5. Немедленный перезапуск сервиса при изменениях</h2>
+
+		<p>Иногда отложенный перезапуск сервиса может таить в себе проблемы. Например, если в конфигурации сервиса изменился прослушиваемый им порт, новые настройки не вступят в силу, пока не будет достигнут конец сценария. В то же время, действия, выполняемые до вызова отложенного перезапуска сервиса, могут использовать новый порт для подключения к сервису, не зная, что сервис ещё не был перезапущен и его новые настройки ещё не вступили в силу.</p>
+
+		<p>Именно так получилось у меня при подготовке роли, настраивающей сервис PostgreSQL. После изменения номера порта может потребоваться создать новые базы данных или пользователей, но пока сервис не был перезапущен, подключиться к нему по новому порту не получится, а старый может быть не известен. В таком случае можно запомнить результаты выполненных действий в переменных при помощи выражения register:</p>
+
+		<pre class="code">- name: vim /etc/postgresql/9.6/main/pg_hba.conf
+  template:
+    src: etc/postgresql/9.6/main/pg_hba.conf
+    dest: /etc/postgresql/9.6/main/pg_hba.conf
+    owner: postgres
+    group: postgres
+    mode: 0640
+  register: pg_hba 
+
+- name: vim /etc/postgresql/9.6/main/postgresql.conf
+  template:
+    src: etc/postgresql/9.6/main/postgresql.conf
+    dest: /etc/postgresql/9.6/main/postgresql.conf
+    owner: postgres
+    group: postgres
+    mode: 0644
+  register: postgresql</pre>
+
+		<p>И затем проверить результаты этих действий и немедленно перезапустить сервис, если его конфигурация была изменена:</p>
+
+		<pre class="code">- name: systemctl restart postgresql
+  service:
+    name: postgresql
+    state: restarted
+  when: (pg_hba.changed or postgresql.changed)</pre>
+
+		<h2>6. Использованные материалы</h2>
+
+		<ul>
+			<li><a href="https://github.com/ansible/ansible/issues/16048">Describe how to use "postgresql_user" properly with ansible &gt;= 2.1.0.0</a></li>
+
+			<li><a href="https://docs.ansible.com/ansible/latest/user_guide/become.html#becoming-an-unprivileged-user">Becoming an Unprivileged User</a></li>
+		</ul>
+
+		<h2>7. P.S.</h2>
+
+		<p>Для более-менее полноценного использования Ansible рекомендую изучить роли. Роль представляет собой совокупность сценария, настроек по умолчанию и используемых файлов и шаблонов. В сценарии можно будет указать список ролей, которые нужно применить к узлам, указанным в сценарии. Благодаря ролям становится возможным собирать сценарии из крупных строительных блоков - ролей.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Управление конфигурациями с помощью Asnible">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

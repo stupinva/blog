@@ -1,0 +1,80 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="stretch,systemd,debian,linux,snmp" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2020-08-02 -->
+		<title>Правка service-файла snmptrapd</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Правка service-файла snmptrapd</h1>
+
+		<p>После обновления на одном из серверов Debian Wheezy до Debian Stretch перестала работать обработка трапов демоном snmptrapd. Как выяснилось, проблема была в том, что snmptrapd был запущен не с теми опциями, которые были указаны в файле с его настройками. В файле /etc/default/snmptrapd была указана переменная с опциями:</p>
+
+		<pre class="code">TRAPDOPTS='-Lf /dev/null -n -t -Oqnet'</pre>
+
+		<p>Реально же демон snmptrapd запускался с опциями -Lsd -f</p>
+
+		<p>Из-за этого в скрипт обработки трапов OID'ы попадали в символьном виде:</p>
+
+		<pre class="code">SNMPv2-SMI::enterprises.1332.3.1.1.4.5.0</pre>
+
+		<p>А скрипт был расчитан на обработку OID'ов в числовом виде:</p>
+
+		<pre class="code">.1.3.6.1.4.1.1332.3.1.1.4.5.0</pre>
+
+		<p>После обновления операционной системы на сервере с Debian Wheezy до Debian Stretch, в нём поменялась система инициализации с System V Init на Systemd.</p>
+
+		<p>В комплекте с Systemd поставляется такой service-файл /lib/systemd/system/snmptrapd.service для запуска snmptrapd:</p>
+
+		<pre class="code">[Unit]
+Description=Simple Network Management Protocol (SNMP) Trap Daemon.
+After=network.target
+ConditionPathExists=/etc/snmp/snmptrapd.conf
+
+[Service]
+Environment="MIBSDIR=/usr/share/snmp/mibs:/usr/share/snmp/mibs/iana:/usr/share/snmp/mibs/ietf:/usr/share/mibs/site:/usr/share/snmp/mibs:/usr/share/mibs/iana:/usr/share/mibs/ietf:/usr/share/mibs/netsnmp"
+Type=simple
+ExecStart=/usr/sbin/snmptrapd -Lsd -f
+ExecReload=/bin/kill -HUP $MAINPID
+
+[Install]
+WantedBy=multi-user.target</pre>
+
+		<p>Как видно, опции, с которыми должен запускаться snmptrapd, в нём прошиты жёстко, а не берутся из файла /etc/default/snmptrapd.</p>
+
+		<p>Создал вместо этого стандартного service-файла свой собственный файл /etc/systemd/system/snmptrapd.service со следующим содержимым:</p>
+
+		<pre class="code">[Unit]
+Description=Simple Network Management Protocol (SNMP) Trap Daemon.
+After=network.target
+ConditionPathExists=/etc/snmp/snmptrapd.conf
+
+[Service]
+Environment="MIBSDIR=/usr/share/snmp/mibs:/usr/share/snmp/mibs/iana:/usr/share/snmp/mibs/ietf:/usr/share/mibs/site:/usr/share/snmp/mibs:/usr/share/mibs/iana:/usr/share/mibs/ietf:/usr/share/mibs/netsnmp"
+EnvironmentFile=/etc/default/snmptrapd
+Type=simple
+ExecStart=/usr/sbin/snmptrapd $TRAPDOPTS -f
+ExecReload=/bin/kill -HUP $MAINPID
+
+[Install]
+WantedBy=multi-user.target</pre>
+
+		<p>Чтобы о новом service-файле узнал systemd, нужно выполнить следующую команду:</p>
+
+		<pre class="console"># systemctl daemon-reload</pre>
+
+		<p>А чтобы демон snmptrapd запустился с новыми опциями, нужно его перезапустить:</p>
+
+		<pre class="console"># systemctl restart snmptrapd</pre>
+
+		<p>Теперь опции для snmptrapd стали браться из файла /etc/default/snmptrapd, как и было до этого.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Правка service-файла snmptrapd">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>

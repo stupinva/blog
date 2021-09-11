@@ -1,0 +1,57 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="plain/html; charset=UTF-8" />
+		<link rel="stylesheet" href="../styles.css" type="text/css" />
+		<meta name="keywords" content="rs2wc040,freebsd,megacli,troubleshooting,8.2,raid" />
+		<meta name="author" content="Владимир Ступин" />
+		<!-- 2017-04-02 -->
+		<title>Решение проблемы с остановкой загрузки из-за RAID-контроллера Intel RS2WC040</title>
+	</head>
+	<body>
+		<p><a href="..">&larr;</a></p>
+
+		<h1>Решение проблемы с остановкой загрузки из-за RAID-контроллера Intel RS2WC040</h1>
+
+		<p>Столкнулся с проблемой - один из серверов не загружался после аварийного отключения питания. К сожалению, снимки экрана в процессе загрузки не сохранились, поэтому я сейчас не могу сказать, что натолкнуло меня на мысль о том, что причина заключается в RAID-контроллере. Решил сравнить при помощи diff настройки контроллеров на проблемном сервере и на сервере, где такой проблемы не наблюдается. Для этого вывел настройки RAID-контроллеров при помощи такой команды:</p>
+
+		<pre class="console"># megacli -AdpAllInfo -aALL</pre>
+
+		<p>Глаз зацепился только за одно различие, которое можно причислить собственно к настройкам контроллеров, а не к их свойствам:</p>
+
+		<pre class="code">&lt; BIOS Error Handling            : Pause on Errors
+---
+&gt; BIOS Error Handling            : Stop On Errors</pre>
+
+		<p>Поискал в интернете и нашёл статью <a href="https://joshua.hoblitt.com/rtfm/2013/06/how_to_disable_lsi_megaraid_sas_controllers_suspend_boot_on_error_feature/">How to disable LSI MegaRAID SAS controller’s suspend boot on error “feature”</a></p>
+
+		<p>Посмотреть текущее значение этой настройки можно следующей командой:</p>
+
+		<pre class="console"># MegaCli -AdpBIOS -Dsply -aALL</pre>
+
+		<p>На проблемном сервере эта команда выдавала следующее:</p>
+
+		<pre class="console">BIOS on Adapter 0 is Enabled.
+    BIOS will Bypass error.
+Auto select Boot on Adapter 0 is Disabled.
+
+Exit Code: 0x00</pre>
+
+		<p>На сервере без проблем эта команда выдавала следующее:</p>
+
+		<pre class="console">BIOS on Adapter 0 is Enabled.
+    BIOS will Stop on error.
+Auto select Boot on Adapter 0 is Disabled.
+
+Exit Code: 0x00</pre>
+
+		<p>Выставить значение Stop on error можно следующей командой:</p>
+
+		<pre class="console"># MegaCli -AdpBIOS -SOE -aALL</pre>
+
+		<p>При последующих перезагрузках сервера больше такой проблемы не наблюдалось.</p>
+
+		<p><a href="mailto:vladimir@stupin.su?subject=Решение проблемы с остановкой загрузки из-за RAID-контроллера Intel RS2WC040">Написать автору</a></p>
+
+		<p><a href="..">&larr;</a></p>
+	</body>
+</html>
