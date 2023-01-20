@@ -678,7 +678,7 @@ acl_smtp_data = acl_check_data</pre>
 
 		<p>И попробуем его отправить во вложении с какого-нибудь почтового ящика почтовой системы на тот же ящик. Если письмо не пришло, значит антивирусная система работает. Для полной уверенности можно ещё заглянуть в журнал почтовой системы /var/log/exim4/mainlog, где должна появиться строчка вида:</p>
 
-		<p>2014-04-12 22:06:06 1WZ0RR-0007TO-RM H=localhost (domain.tld) [127.0.0.1] F= A=dovecot_plain:box@domain.tld rejected after DATA: message contains a virus (Eicar-Test-Signature)</p>
+		<pre class="code">2014-04-12 22:06:06 1WZ0RR-0007TO-RM H=localhost (domain.tld) [127.0.0.1] F= A=dovecot_plain:box@domain.tld rejected after DATA: message contains a virus (Eicar-Test-Signature)</pre>
 
 		<h3>2.3. Проверка квот</h3>
 
