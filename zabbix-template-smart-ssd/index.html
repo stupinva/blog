@@ -85,7 +85,7 @@
 		<p>Для контроля процента использованного ресурса, объёма записанных данных и коэффициента усиления записи добавим в конфигурацию Zabbix-агента /etc/zabbix/zabbix_agentd.conf ещё три «пользовательских параметра»:</p>
 
 		<pre class="code">UserParameter=smart.ssd.used[*],/usr/bin/sudo /usr/sbin/smartctl -A $1 2&gt;&amp;1 | /usr/bin/awk 'BEGIN { p = 0; } /^202 / { p = $$10; } END { print p; }'
-UserParameter=smart.ssd.written[*],/usr/bin/sudo /usr/sbin/smartctl -A $1 2&gt;&amp;1 | /usr/bin/awk 'BEGIN { w = 0; } /^246 / { w = $$10 * 512; } END { print w; }'
+UserParameter=smart.ssd.written[*],/usr/bin/sudo /usr/sbin/smartctl -A $1 2&gt;&amp;1 | /usr/bin/awk 'BEGIN { w = 0; } /^246 / { w = $$10 * 512; } END { printf "%.0f", w; }'
 UserParameter=smart.ssd.waf[*],/usr/bin/sudo /usr/sbin/smartctl -A $1 2&gt;&amp;1 | /usr/bin/awk 'BEGIN { hw = 1; cw = 0; } /^247 / { hw = $$10; } /^248 / { cw = $$10; } END { print (hw + cw) / hw; }'</pre>
 
 		<p>После внесения изменений в конфигурацию Zabbix-агента, не забудьте его перезапустить:</p>
