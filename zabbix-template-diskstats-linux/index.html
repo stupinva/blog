@@ -99,11 +99,11 @@
 		<pre class="code">UserParameter=diskstats.discovery,/usr/bin/awk 'BEGIN { printf "{\"data\":["; } { if (NR &gt; 1) printf ","; printf "{\"{#DEVNAME}\":\"" $3 "\"}"; } END { printf "]}"; }' /proc/diskstats
 UserParameter=diskstats.read.ops[*],/usr/bin/awk '$$3 == "$1" { print $$4; }' /proc/diskstats
 UserParameter=diskstats.read.merged[*],/usr/bin/awk '$$3 == "$1" { print $$5; }' /proc/diskstats
-UserParameter=diskstats.read.bytes[*],/usr/bin/awk '$$3 == "$1" { print 512 * $$6; }' /proc/diskstats
+UserParameter=diskstats.read.bytes[*],/usr/bin/awk '$$3 == "$1" { printf "%.0f", 512 * $$6; }' /proc/diskstats
 UserParameter=diskstats.read.duration[*],/usr/bin/awk '$$3 == "$1" { print $$7; }' /proc/diskstats
 UserParameter=diskstats.write.ops[*],/usr/bin/awk '$$3 == "$1" { print $$8; }' /proc/diskstats
 UserParameter=diskstats.write.merged[*],/usr/bin/awk '$$3 == "$1" { print $$9; }' /proc/diskstats
-UserParameter=diskstats.write.bytes[*],/usr/bin/awk '$$3 == "$1" { print 512 * $$10; }' /proc/diskstats
+UserParameter=diskstats.write.bytes[*],/usr/bin/awk '$$3 == "$1" { printf "%.0f", 512 * $$10; }' /proc/diskstats
 UserParameter=diskstats.write.duration[*],/usr/bin/awk '$$3 == "$1" { print $$11; }' /proc/diskstats
 UserParameter=diskstats.queue.length[*],/usr/bin/awk '$$3 == "$1" { print $$12; }' /proc/diskstats
 UserParameter=diskstats.busy.duration[*],/usr/bin/awk '$$3 == "$1" { print $$13; }' /proc/diskstats
